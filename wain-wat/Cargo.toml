@@ -1,21 +1,9 @@
 [package]
-name = "wain"
+name = "wain-wat"
 version = "0.0.0"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2018"
-description = "WIP"
-license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
-[[bin]]
-name = "wain"
-
-[workspace]
-members = [
-    ".",
-    "wain-ast",
-    "wain-wat",
-]
