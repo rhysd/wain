@@ -1,0 +1,31 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  unit-test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustc --version
+          cargo --version
+      - name: Run tests
+        env:
+          RUST_BACKTRACE: 1
+        run: cargo test --all
+  linter:
+    name: Clippy and Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install tools
+        run: |
+          rustup component add rustfmt clippy
+          cargo fmt --version
+          cargo clippy --version
+      - run: cargo fmt -- --check
+      - run: cargo clippy -- -D warnings
