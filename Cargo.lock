@@ -3,6 +3,10 @@
 [[package]]
 name = "wain"
 version = "0.0.0"
+dependencies = [
+ "wain-ast 0.0.0",
+ "wain-wat 0.0.0",
+]
 
 [[package]]
 name = "wain-ast"
