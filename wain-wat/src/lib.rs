@@ -3,28 +3,29 @@ use std::iter;
 use std::str;
 
 #[cfg_attr(test, derive(Debug))]
-pub enum LexErrorKind {
+pub enum LexErrorKind<'a> {
     UnterminatedBlockComment,
     UnterminatedString,
-    ReservedName(String),
+    ReservedName(&'a str),
     UnexpectedCharacter(char),
 }
 
 // TODO: Support std::error::Error
 
 #[cfg_attr(test, derive(Debug))]
-pub struct LexError {
-    kind: LexErrorKind,
-    offset: usize, // TODO: Use offset and source to show line and column
+pub struct LexError<'a> {
+    kind: LexErrorKind<'a>,
+    offset: usize,
+    source: &'a str,
 }
 
-impl LexError {
-    pub fn kind(&self) -> &LexErrorKind {
+impl<'a> LexError<'a> {
+    pub fn kind(&self) -> &LexErrorKind<'a> {
         &self.kind
     }
 }
 
-impl fmt::Display for LexError {
+impl<'a> fmt::Display for LexError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use LexErrorKind::*;
         match &self.kind {
@@ -35,15 +36,21 @@ impl fmt::Display for LexError {
             }
             UnexpectedCharacter(c) => write!(f, "unexpected character '{}'", c)?,
         }
-        write!(f, " at byte offset {}", self.offset)
+
+        let start = self.offset;
+        let end = self.source[start..]
+            .find(['\n', '\r'].as_ref())
+            .unwrap_or(self.source.len());
+        write!(
+            f,
+            " at byte offset {}\n\n ... {}\n     ^",
+            self.offset,
+            &self.source[start..end]
+        )
     }
 }
 
-pub type LexResult<T> = ::std::result::Result<T, Box<LexError>>;
-
-fn fail<T>(kind: LexErrorKind, offset: usize) -> LexResult<T> {
-    Err(Box::new(LexError { kind, offset }))
-}
+pub type LexResult<'a, T> = ::std::result::Result<T, Box<LexError<'a>>>;
 
 #[cfg_attr(test, derive(Debug))]
 #[derive(PartialEq)]
@@ -72,7 +79,7 @@ pub enum Token<'a> {
     Ident(&'a str),
 }
 
-type Lexed<'a> = LexResult<Option<(Token<'a>, usize)>>;
+type Lexed<'a> = LexResult<'a, Option<(Token<'a>, usize)>>;
 
 pub struct Lexer<'a> {
     chars: iter::Peekable<str::CharIndices<'a>>, // LL(1)
@@ -101,13 +108,15 @@ impl<'a> Lexer<'a> {
         // https://webassembly.github.io/spec/core/text/lexical.html#tokens
         try_lex!(self.lex_paren());
         try_lex!(self.lex_string());
+        // TODO: Lex numbers
         try_lex!(self.lex_ident_or_keyword());
 
-        if let Some((offset, c)) = self.chars.peek() {
-            return fail(LexErrorKind::UnexpectedCharacter(*c), *offset);
+        if let Some(peeked) = self.chars.peek() {
+            let (offset, c) = peeked.clone(); // Borrow checker complains about *c and *offset in below statement
+            self.fail(LexErrorKind::UnexpectedCharacter(c), offset)
+        } else {
+            Ok(None)
         }
-
-        Ok(None)
     }
 
     fn lex_paren(&mut self) -> Lexed<'a> {
@@ -138,7 +147,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        fail(LexErrorKind::UnterminatedString, start)
+        self.fail(LexErrorKind::UnterminatedString, start)
     }
 
     fn lex_ident_or_keyword(&mut self) -> Lexed<'a> {
@@ -189,12 +198,12 @@ impl<'a> Lexer<'a> {
         match word.chars().next() {
             Some('$') if word.len() > 1 => Ok(Some((Token::Ident(word), start))), // https://webassembly.github.io/spec/core/text/values.html#text-id
             Some('a'..='z') => Ok(Some((Token::Keyword(word), start))), // https://webassembly.github.io/spec/core/text/lexical.html#text-keyword
-            Some(_) => fail(LexErrorKind::ReservedName(word.to_owned()), start), // https://webassembly.github.io/spec/core/text/lexical.html#text-reserved
+            Some(_) => self.fail(LexErrorKind::ReservedName(word), start), // https://webassembly.github.io/spec/core/text/lexical.html#text-reserved
             None => Ok(None),
         }
     }
 
-    fn eat_whitespace(&mut self) -> LexResult<bool> {
+    fn eat_whitespace(&mut self) -> LexResult<'a, bool> {
         // https://webassembly.github.io/spec/core/text/lexical.html#white-space
         Ok(self.eat_one_of_chars(&[' ', '\t', '\n', '\r']).is_some()
             || self.eat_line_comment()
@@ -216,7 +225,7 @@ impl<'a> Lexer<'a> {
         true
     }
 
-    fn eat_block_comment(&mut self) -> LexResult<bool> {
+    fn eat_block_comment(&mut self) -> LexResult<'a, bool> {
         // blockcomment https://webassembly.github.io/spec/core/text/lexical.html#comments
         let start = if let Some(offset) = self.eat_str("(;") {
             offset
@@ -233,7 +242,7 @@ impl<'a> Lexer<'a> {
                 return Ok(true);
             }
             if self.chars.next().is_none() {
-                return fail(LexErrorKind::UnterminatedBlockComment, start);
+                return self.fail(LexErrorKind::UnterminatedBlockComment, start);
             }
         }
     }
@@ -269,10 +278,18 @@ impl<'a> Lexer<'a> {
             None => self.source.len(),
         }
     }
+
+    fn fail<T>(&self, kind: LexErrorKind<'a>, offset: usize) -> LexResult<'a, T> {
+        Err(Box::new(LexError {
+            kind,
+            offset,
+            source: self.source,
+        }))
+    }
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = LexResult<(Token<'a>, usize)>;
+    type Item = LexResult<'a, (Token<'a>, usize)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.lex().transpose()
@@ -283,7 +300,7 @@ impl<'a> Iterator for Lexer<'a> {
 mod tests {
     use super::*;
 
-    fn lex_all<'a>(s: &'a str) -> LexResult<Vec<(Token<'a>, usize)>> {
+    fn lex_all<'a>(s: &'a str) -> LexResult<'a, Vec<(Token<'a>, usize)>> {
         Lexer::new(s).collect()
     }
 
@@ -394,11 +411,11 @@ mod tests {
         // Errors
         assert_matches!(
             lex_all("$").unwrap_err().kind(),
-            LexErrorKind::ReservedName(name) if name == "$"
+            LexErrorKind::ReservedName(name) if *name == "$"
         );
         assert_matches!(
             lex_all("$ ;;").unwrap_err().kind(),
-            LexErrorKind::ReservedName(name) if name == "$"
+            LexErrorKind::ReservedName(name) if *name == "$"
         );
     }
 }
