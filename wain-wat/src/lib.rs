@@ -15,6 +15,12 @@ pub struct LexError {
     offset: usize, // TODO: Use offset and source to show line and column
 }
 
+impl LexError {
+    pub fn kind(&self) -> &LexErrorKind {
+        &self.kind
+    }
+}
+
 impl fmt::Display for LexError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use LexErrorKind::*;
@@ -34,13 +40,14 @@ impl fmt::Display for LexError {
 pub type LexResult<T> = ::std::result::Result<T, Box<LexError>>;
 
 #[cfg_attr(test, derive(Debug))]
+#[derive(PartialEq)]
 pub enum Sign {
     Plus,
     Minus,
 }
 
 // https://webassembly.github.io/spec/core/text/values.html#floating-point
-#[cfg_attr(test, derive(Debug))]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum Float<'a> {
     Nan(Option<&'a str>), // Should parse the payload into u64?
     Inf,
@@ -48,7 +55,7 @@ pub enum Float<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/lexical.html#tokens
-#[cfg_attr(test, derive(Debug))]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum Token<'a> {
     LParen,
     RParen,
@@ -144,10 +151,10 @@ impl<'a> Lexer<'a> {
                 | '$'
                 | '%'
                 | '&'
-                | '′'
-                | '∗'
+                | '\''
+                | '*'
                 | '+'
-                | '−'
+                | '-'
                 | '.'
                 | '/'
                 | ':'
@@ -156,7 +163,7 @@ impl<'a> Lexer<'a> {
                 | '>'
                 | '?'
                 | '@'
-                | '∖'
+                | '\\'
                 | '^'
                 | '_'
                 | '`'
@@ -176,7 +183,7 @@ impl<'a> Lexer<'a> {
             }
         };
 
-        if start == end {
+        if start + 1 == end {
             self.fail(LexErrorKind::EmptyIdentifier)
         } else {
             let token = Token::Ident(&self.source[start..end]);
@@ -279,30 +286,106 @@ impl<'a> Iterator for Lexer<'a> {
 mod tests {
     use super::*;
 
-    fn lex_all(s: &str) -> LexResult<()> {
-        while Lexer::new(s).lex()?.is_some() {}
-        Ok(())
+    fn lex_all<'a>(s: &'a str) -> LexResult<Vec<(Token<'a>, usize)>> {
+        Lexer::new(s).collect()
+    }
+
+    macro_rules! assert_matches {
+        ($e:expr, $p:pat) => {
+            match $e {
+                $p => (),
+                e => panic!(
+                    "assertion failed: {:?} did not match to {}",
+                    e,
+                    stringify!($p)
+                ),
+            }
+        };
     }
 
     #[test]
     fn spaces() {
-        lex_all("").unwrap();
-        lex_all(" ").unwrap();
-        lex_all("\t").unwrap();
-        lex_all("\n").unwrap();
-        lex_all("\r").unwrap();
-        lex_all(" \t\r\n   \t\n\n\n\n ").unwrap();
+        assert!(lex_all("").unwrap().is_empty());
+        assert!(lex_all(" ").unwrap().is_empty());
+        assert!(lex_all("\t").unwrap().is_empty());
+        assert!(lex_all("\n").unwrap().is_empty());
+        assert!(lex_all("\r").unwrap().is_empty());
+        assert!(lex_all(" \t\r\n   \t\n\n\n\n ").unwrap().is_empty());
     }
 
     #[test]
     fn comments() {
-        lex_all(";;").unwrap();
-        lex_all(";;foo").unwrap();
-        lex_all(";;foo\n;;bar\n  ;; piyo").unwrap();
-        lex_all("(;;)").unwrap();
-        lex_all("(; hi! ;)").unwrap();
-        lex_all("(; hi!\n  how are you?\n  bye!\n ;)").unwrap();
-        lex_all("(;(;;);)").unwrap();
-        lex_all("(;\nhi!\n (;how are you?\n;) bye!\n;)").unwrap();
+        assert!(lex_all(";;").unwrap().is_empty());
+        assert!(lex_all(";;foo").unwrap().is_empty());
+        assert!(lex_all(";;foo\n;;bar\n  ;; piyo").unwrap().is_empty());
+        assert!(lex_all("(;;)").unwrap().is_empty());
+        assert!(lex_all("(; hi! ;)").unwrap().is_empty());
+        assert!(lex_all("(; hi!\n  how are you?\n  bye!\n ;)")
+            .unwrap()
+            .is_empty());
+        assert!(lex_all("(;(;;);)").unwrap().is_empty());
+        assert!(lex_all("(;\nhi!\n (;how are you?\n;) bye!\n;)")
+            .unwrap()
+            .is_empty());
+        // Errors
+        assert_matches!(
+            lex_all("(;").unwrap_err().kind(),
+            LexErrorKind::UnterminatedBlockComment
+        );
+        assert_matches!(
+            lex_all("(; hi! ").unwrap_err().kind(),
+            LexErrorKind::UnterminatedBlockComment
+        );
+        assert_matches!(
+            lex_all("(;(;;)").unwrap_err().kind(),
+            LexErrorKind::UnterminatedBlockComment
+        );
+    }
+
+    #[test]
+    fn parens() {
+        assert_eq!(lex_all("(").unwrap(), vec![(Token::LParen, 0)]);
+        assert_eq!(lex_all(")").unwrap(), vec![(Token::RParen, 0)]);
+    }
+
+    #[test]
+    fn strings() {
+        let tokens = lex_all(r#""""#).unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_matches!(&tokens[0].0, Token::String(""));
+        let tokens = lex_all(r#""hello""#).unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_matches!(&tokens[0].0, Token::String("hello"));
+        let tokens = lex_all(r#""\t\n\r\"\'\\\u{1234}\00\a9""#).unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_matches!(&tokens[0].0, Token::String(r#"\t\n\r\"\'\\\u{1234}\00\a9"#));
+        let tokens = lex_all(r#""あいうえお""#).unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_matches!(&tokens[0].0, Token::String("あいうえお"));
+        // Errors
+        assert_matches!(lex_all(r#"""#).unwrap_err().kind(), LexErrorKind::UnterminatedString{..});
+        assert_matches!(lex_all(r#""foo\""#).unwrap_err().kind(), LexErrorKind::UnterminatedString{..});
+    }
+
+    #[test]
+    fn idents() {
+        let tokens = lex_all("$x").unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_matches!(&tokens[0].0, Token::Ident("$x"));
+        let tokens = lex_all("$foo0123FOO").unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_matches!(&tokens[0].0, Token::Ident("$foo0123FOO"));
+        let tokens = lex_all("$0aB!#$%&'*+-./:<=>?@\\^_`|~").unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_matches!(&tokens[0].0, Token::Ident("$0aB!#$%&'*+-./:<=>?@\\^_`|~"));
+        // Errors
+        assert_matches!(
+            lex_all("$").unwrap_err().kind(),
+            LexErrorKind::EmptyIdentifier
+        );
+        assert_matches!(
+            lex_all("$ ;;").unwrap_err().kind(),
+            LexErrorKind::EmptyIdentifier
+        );
     }
 }
