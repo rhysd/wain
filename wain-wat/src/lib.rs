@@ -32,7 +32,7 @@ impl<'a> fmt::Display for LexError<'a> {
             UnterminatedBlockComment => write!(f, "block comment is not terminated")?,
             UnterminatedString => write!(f, "string literal is not terminated",)?,
             ReservedName(name) => {
-                write!(f, "Name '{}' is unavailable since it's reserved name", name)?
+                write!(f, "name '{}' is unavailable since it's reserved name", name)?
             }
             UnexpectedCharacter(c) => write!(f, "unexpected character '{}'", c)?,
         }
@@ -40,7 +40,7 @@ impl<'a> fmt::Display for LexError<'a> {
         let start = self.offset;
         let end = self.source[start..]
             .find(['\n', '\r'].as_ref())
-            .unwrap_or(self.source.len());
+            .unwrap_or_else(|| self.source.len());
         write!(
             f,
             " at byte offset {}\n\n ... {}\n     ^",
@@ -112,7 +112,7 @@ impl<'a> Lexer<'a> {
         try_lex!(self.lex_ident_or_keyword());
 
         if let Some(peeked) = self.chars.peek() {
-            let (offset, c) = peeked.clone(); // Borrow checker complains about *c and *offset in below statement
+            let (offset, c) = *peeked; // Borrow checker complains about *c and *offset in below statement
             self.fail(LexErrorKind::UnexpectedCharacter(c), offset)
         } else {
             Ok(None)
@@ -262,7 +262,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn eat_str(&mut self, s: &str) -> Option<usize> {
-        assert!(s.len() > 0);
+        assert!(!s.is_empty());
         let offset = self.offset();
         if self.source[offset..].starts_with(s) {
             self.chars.nth(s.len() - 1);
