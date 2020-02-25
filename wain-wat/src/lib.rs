@@ -5,9 +5,12 @@ use std::str;
 #[cfg_attr(test, derive(Debug))]
 pub enum LexErrorKind {
     UnterminatedBlockComment,
-    UnterminatedString { start: usize },
-    EmptyIdentifier,
+    UnterminatedString,
+    ReservedName(String),
+    UnexpectedCharacter(char),
 }
+
+// TODO: Support std::error::Error
 
 #[cfg_attr(test, derive(Debug))]
 pub struct LexError {
@@ -24,20 +27,23 @@ impl LexError {
 impl fmt::Display for LexError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use LexErrorKind::*;
-        match self.kind {
+        match &self.kind {
             UnterminatedBlockComment => write!(f, "block comment is not terminated")?,
-            UnterminatedString { start } => write!(
-                f,
-                "string literal started at byte offset {} is not terminated",
-                start
-            )?,
-            EmptyIdentifier => write!(f, "Identifier must not be empty")?,
+            UnterminatedString => write!(f, "string literal is not terminated",)?,
+            ReservedName(name) => {
+                write!(f, "Name '{}' is unavailable since it's reserved name", name)?
+            }
+            UnexpectedCharacter(c) => write!(f, "unexpected character '{}'", c)?,
         }
         write!(f, " at byte offset {}", self.offset)
     }
 }
 
 pub type LexResult<T> = ::std::result::Result<T, Box<LexError>>;
+
+fn fail<T>(kind: LexErrorKind, offset: usize) -> LexResult<T> {
+    Err(Box::new(LexError { kind, offset }))
+}
 
 #[cfg_attr(test, derive(Debug))]
 #[derive(PartialEq)]
@@ -59,13 +65,11 @@ pub enum Float<'a> {
 pub enum Token<'a> {
     LParen,
     RParen,
-    Keyword(&'a str),
+    Keyword(&'a str), // Too many keywords so it's not pragmatic to define `Keyword` enum in terms of maintenance
     Int(Sign, &'a str),
     Float(Sign, Float<'a>),
     String(&'a str), // Should parse the literal into Vec<u8>?
     Ident(&'a str),
-    // TODO: Reserved
-    // token is any identifier which was not recognized. For now they should cause an error
 }
 
 type Lexed<'a> = LexResult<Option<(Token<'a>, usize)>>;
@@ -97,9 +101,13 @@ impl<'a> Lexer<'a> {
         // https://webassembly.github.io/spec/core/text/lexical.html#tokens
         try_lex!(self.lex_paren());
         try_lex!(self.lex_string());
-        try_lex!(self.lex_ident());
+        try_lex!(self.lex_ident_or_keyword());
 
-        Ok(None) // TODO: Check an extra token remains
+        if let Some((offset, c)) = self.chars.peek() {
+            return fail(LexErrorKind::UnexpectedCharacter(*c), *offset);
+        }
+
+        Ok(None)
     }
 
     fn lex_paren(&mut self) -> Lexed<'a> {
@@ -130,16 +138,11 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        self.fail(LexErrorKind::UnterminatedString { start })
+        fail(LexErrorKind::UnterminatedString, start)
     }
 
-    fn lex_ident(&mut self) -> Lexed<'a> {
-        // https://webassembly.github.io/spec/core/text/values.html#text-id
-        let start = match self.eat_char('$') {
-            Some(offset) => offset,
-            None => return Ok(None),
-        };
-
+    fn lex_ident_or_keyword(&mut self) -> Lexed<'a> {
+        // https://webassembly.github.io/spec/core/text/lexical.html#tokens
         fn is_idchar(c: char) -> bool {
             // https://webassembly.github.io/spec/core/text/values.html#text-idchar
             match c {
@@ -173,21 +176,21 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        let start = self.offset();
         let end = loop {
-            match self.chars.peek() {
-                Some((_, c)) if is_idchar(*c) => {
-                    self.chars.next();
-                }
-                Some((offset, _)) => break *offset,
+            match self.chars.next() {
+                Some((_, c)) if is_idchar(c) => continue,
+                Some((offset, _)) => break offset,
                 None => break self.source.len(),
             }
         };
 
-        if start + 1 == end {
-            self.fail(LexErrorKind::EmptyIdentifier)
-        } else {
-            let token = Token::Ident(&self.source[start..end]);
-            Ok(Some((token, start)))
+        let word = &self.source[start..end];
+        match word.chars().next() {
+            Some('$') if word.len() > 1 => Ok(Some((Token::Ident(word), start))), // https://webassembly.github.io/spec/core/text/values.html#text-id
+            Some('a'..='z') => Ok(Some((Token::Keyword(word), start))), // https://webassembly.github.io/spec/core/text/lexical.html#text-keyword
+            Some(_) => fail(LexErrorKind::ReservedName(word.to_owned()), start), // https://webassembly.github.io/spec/core/text/lexical.html#text-reserved
+            None => Ok(None),
         }
     }
 
@@ -200,7 +203,7 @@ impl<'a> Lexer<'a> {
 
     fn eat_line_comment(&mut self) -> bool {
         // linecomment https://webassembly.github.io/spec/core/text/lexical.html#comments
-        if !self.eat_str(";;") {
+        if self.eat_str(";;").is_none() {
             return false;
         }
 
@@ -215,20 +218,22 @@ impl<'a> Lexer<'a> {
 
     fn eat_block_comment(&mut self) -> LexResult<bool> {
         // blockcomment https://webassembly.github.io/spec/core/text/lexical.html#comments
-        if !self.eat_str("(;") {
+        let start = if let Some(offset) = self.eat_str("(;") {
+            offset
+        } else {
             return Ok(false);
-        }
+        };
 
         // blockchar
         loop {
             if self.eat_block_comment()? {
                 continue;
             }
-            if self.eat_str(";)") {
+            if self.eat_str(";)").is_some() {
                 return Ok(true);
             }
             if self.chars.next().is_none() {
-                return self.fail(LexErrorKind::UnterminatedBlockComment);
+                return fail(LexErrorKind::UnterminatedBlockComment, start);
             }
         }
     }
@@ -247,13 +252,14 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn eat_str(&mut self, s: &str) -> bool {
+    fn eat_str(&mut self, s: &str) -> Option<usize> {
         assert!(s.len() > 0);
-        if self.input().starts_with(s) {
+        let offset = self.offset();
+        if self.source[offset..].starts_with(s) {
             self.chars.nth(s.len() - 1);
-            true
+            Some(offset)
         } else {
-            false
+            None
         }
     }
 
@@ -262,15 +268,6 @@ impl<'a> Lexer<'a> {
             Some((offset, _)) => *offset,
             None => self.source.len(),
         }
-    }
-
-    fn input(&mut self) -> &'a str {
-        &self.source[self.offset()..]
-    }
-
-    fn fail<T>(&mut self, kind: LexErrorKind) -> LexResult<T> {
-        let offset = self.offset();
-        Err(Box::new(LexError { kind, offset }))
     }
 }
 
@@ -298,6 +295,16 @@ mod tests {
                     "assertion failed: {:?} did not match to {}",
                     e,
                     stringify!($p)
+                ),
+            }
+        };
+        ($e:expr, $p:pat if $c:expr) => {
+            match $e {
+                $p if $c => (),
+                e => panic!(
+                    "assertion failed: {:?} did not match to {}",
+                    e,
+                    stringify!($p if $c),
                 ),
             }
         };
@@ -363,8 +370,14 @@ mod tests {
         assert_eq!(tokens.len(), 1);
         assert_matches!(&tokens[0].0, Token::String("あいうえお"));
         // Errors
-        assert_matches!(lex_all(r#"""#).unwrap_err().kind(), LexErrorKind::UnterminatedString{..});
-        assert_matches!(lex_all(r#""foo\""#).unwrap_err().kind(), LexErrorKind::UnterminatedString{..});
+        assert_matches!(
+            lex_all(r#"""#).unwrap_err().kind(),
+            LexErrorKind::UnterminatedString
+        );
+        assert_matches!(
+            lex_all(r#""foo\""#).unwrap_err().kind(),
+            LexErrorKind::UnterminatedString
+        );
     }
 
     #[test]
@@ -381,11 +394,11 @@ mod tests {
         // Errors
         assert_matches!(
             lex_all("$").unwrap_err().kind(),
-            LexErrorKind::EmptyIdentifier
+            LexErrorKind::ReservedName(name) if name == "$"
         );
         assert_matches!(
             lex_all("$ ;;").unwrap_err().kind(),
-            LexErrorKind::EmptyIdentifier
+            LexErrorKind::ReservedName(name) if name == "$"
         );
     }
 }
