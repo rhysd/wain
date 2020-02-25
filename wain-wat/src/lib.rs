@@ -50,7 +50,7 @@ impl<'a> fmt::Display for LexError<'a> {
     }
 }
 
-pub type LexResult<'a, T> = ::std::result::Result<T, Box<LexError<'a>>>;
+type Result<'a, T> = ::std::result::Result<T, Box<LexError<'a>>>;
 
 #[cfg_attr(test, derive(Debug))]
 #[derive(PartialEq)]
@@ -79,7 +79,8 @@ pub enum Token<'a> {
     Ident(&'a str),
 }
 
-type Lexed<'a> = LexResult<'a, Option<(Token<'a>, usize)>>;
+type Lexed<'a> = Option<(Token<'a>, usize)>;
+type LexResult<'a> = Result<'a, Lexed<'a>>;
 
 pub struct Lexer<'a> {
     chars: iter::Peekable<str::CharIndices<'a>>, // LL(1)
@@ -94,7 +95,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn lex(&mut self) -> Lexed<'a> {
+    pub fn lex(&mut self) -> LexResult<'a> {
         while self.eat_whitespace()? {}
 
         macro_rules! try_lex {
@@ -108,8 +109,7 @@ impl<'a> Lexer<'a> {
         // https://webassembly.github.io/spec/core/text/lexical.html#tokens
         try_lex!(self.lex_paren());
         try_lex!(self.lex_string());
-        // TODO: Lex numbers
-        try_lex!(self.lex_ident_or_keyword());
+        try_lex!(self.lex_idchars());
 
         if let Some(peeked) = self.chars.peek() {
             let (offset, c) = *peeked; // Borrow checker complains about *c and *offset in below statement
@@ -119,7 +119,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_paren(&mut self) -> Lexed<'a> {
+    fn lex_paren(&mut self) -> LexResult<'a> {
         if let Some(offset) = self.eat_char('(') {
             Ok(Some((Token::LParen, offset)))
         } else if let Some(offset) = self.eat_char(')') {
@@ -129,7 +129,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_string(&mut self) -> Lexed<'a> {
+    fn lex_string(&mut self) -> LexResult<'a> {
         // https://webassembly.github.io/spec/core/text/values.html#strings
         let start = match self.eat_char('"') {
             Some(offset) => offset,
@@ -150,8 +150,7 @@ impl<'a> Lexer<'a> {
         self.fail(LexErrorKind::UnterminatedString, start)
     }
 
-    fn lex_ident_or_keyword(&mut self) -> Lexed<'a> {
-        // https://webassembly.github.io/spec/core/text/lexical.html#tokens
+    fn lex_idchars(&mut self) -> LexResult<'a> {
         fn is_idchar(c: char) -> bool {
             // https://webassembly.github.io/spec/core/text/values.html#text-idchar
             match c {
@@ -194,16 +193,37 @@ impl<'a> Lexer<'a> {
             }
         };
 
-        let word = &self.source[start..end];
-        match word.chars().next() {
-            Some('$') if word.len() > 1 => Ok(Some((Token::Ident(word), start))), // https://webassembly.github.io/spec/core/text/values.html#text-id
-            Some('a'..='z') => Ok(Some((Token::Keyword(word), start))), // https://webassembly.github.io/spec/core/text/lexical.html#text-keyword
-            Some(_) => self.fail(LexErrorKind::ReservedName(word), start), // https://webassembly.github.io/spec/core/text/lexical.html#text-reserved
-            None => Ok(None),
+        // Note: Number must be lexed before keyword for 'inf' and 'nan'
+        let idchars = &self.source[start..end];
+        if let Some(lexed) = self.lex_number_from_idchars(idchars, start) {
+            return Ok(Some(lexed));
+        }
+        if let Some(lexed) = self.lex_ident_or_keyword_from_idchars(idchars, start) {
+            return Ok(Some(lexed));
+        }
+
+        if idchars.is_empty() {
+            Ok(None) // Is this correct?
+        } else {
+            // https://webassembly.github.io/spec/core/text/lexical.html#text-reserved
+            self.fail(LexErrorKind::ReservedName(idchars), start)
         }
     }
 
-    fn eat_whitespace(&mut self) -> LexResult<'a, bool> {
+    fn lex_number_from_idchars(&mut self, idchars: &'a str, start: usize) -> Lexed<'a> {
+        unimplemented!()
+    }
+
+    fn lex_ident_or_keyword_from_idchars(&mut self, idchars: &'a str, start: usize) -> Lexed<'a> {
+        // https://webassembly.github.io/spec/core/text/lexical.html#tokens
+        match idchars.chars().next() {
+            Some('$') if idchars.len() > 1 => Some((Token::Ident(idchars), start)), // https://webassembly.github.io/spec/core/text/values.html#text-id
+            Some('a'..='z') => Some((Token::Keyword(idchars), start)), // https://webassembly.github.io/spec/core/text/lexical.html#text-keyword
+            _ => None,
+        }
+    }
+
+    fn eat_whitespace(&mut self) -> Result<'a, bool> {
         // https://webassembly.github.io/spec/core/text/lexical.html#white-space
         Ok(self.eat_one_of_chars(&[' ', '\t', '\n', '\r']).is_some()
             || self.eat_line_comment()
@@ -225,7 +245,7 @@ impl<'a> Lexer<'a> {
         true
     }
 
-    fn eat_block_comment(&mut self) -> LexResult<'a, bool> {
+    fn eat_block_comment(&mut self) -> Result<'a, bool> {
         // blockcomment https://webassembly.github.io/spec/core/text/lexical.html#comments
         let start = if let Some(offset) = self.eat_str("(;") {
             offset
@@ -279,7 +299,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn fail<T>(&self, kind: LexErrorKind<'a>, offset: usize) -> LexResult<'a, T> {
+    fn fail<T>(&self, kind: LexErrorKind<'a>, offset: usize) -> Result<'a, T> {
         Err(Box::new(LexError {
             kind,
             offset,
@@ -289,7 +309,7 @@ impl<'a> Lexer<'a> {
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = LexResult<'a, (Token<'a>, usize)>;
+    type Item = Result<'a, (Token<'a>, usize)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.lex().transpose()
@@ -300,7 +320,7 @@ impl<'a> Iterator for Lexer<'a> {
 mod tests {
     use super::*;
 
-    fn lex_all<'a>(s: &'a str) -> LexResult<'a, Vec<(Token<'a>, usize)>> {
+    fn lex_all<'a>(s: &'a str) -> Result<'a, Vec<(Token<'a>, usize)>> {
         Lexer::new(s).collect()
     }
 
