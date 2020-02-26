@@ -109,10 +109,7 @@ impl<'a> Lexer<'a> {
         // https://webassembly.github.io/spec/core/text/lexical.html#tokens
         try_lex!(self.lex_paren());
         try_lex!(self.lex_string());
-        try_lex!(self.lex_ident());
-        // TODO: Lex number
-        try_lex!(self.lex_keyword());
-        try_lex!(self.lex_reserved());
+        try_lex!(self.lex_idchars());
 
         if let Some(peeked) = self.chars.peek() {
             let (offset, c) = *peeked; // Borrow checker complains about *c and *offset in below statement
@@ -153,7 +150,7 @@ impl<'a> Lexer<'a> {
         self.fail(LexErrorKind::UnterminatedString, start)
     }
 
-    fn eat_idchars(&mut self) -> usize {
+    fn lex_idchars(&mut self) -> LexResult<'a> {
         fn is_idchar(c: char) -> bool {
             // https://webassembly.github.io/spec/core/text/values.html#text-idchar
             match c {
@@ -187,64 +184,50 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        loop {
-            match self.chars.peek() {
-                Some((_, c)) if is_idchar(*c) => {
-                    self.chars.next();
-                    continue;
-                }
-                Some((offset, _)) => return *offset,
-                None => return self.source.len(),
-            }
-        }
-    }
-
-    fn lex_ident(&mut self) -> LexResult<'a> {
-        let start = if let Some(offset) = self.eat_char('$') {
-            offset
-        } else {
-            return Ok(None);
-        };
-        let end = self.eat_idchars();
-        let id = &self.source[start..end];
-        if id.len() == 1 {
-            self.fail(LexErrorKind::ReservedName(id), start)
-        } else {
-            Ok(Some((Token::Ident(id), start)))
-        }
-    }
-
-    fn lex_keyword(&mut self) -> LexResult<'a> {
-        let start = match self.chars.peek() {
-            Some((offset, 'a'..='z')) => *offset,
-            _ => return Ok(None),
-        };
-        self.chars.next();
-        let end = self.eat_idchars();
-        let keyword = &self.source[start..end];
-        Ok(Some((Token::Keyword(keyword), start)))
-    }
-
-    fn lex_reserved(&mut self) -> LexResult<'a> {
         let start = self.offset();
-        let end = self.eat_idchars();
-        if start == end {
-            Ok(None)
+        let end = loop {
+            match self.chars.next() {
+                Some((_, c)) if is_idchar(c) => continue,
+                Some((offset, _)) => break offset,
+                None => break self.source.len(),
+            }
+        };
+
+        // Note: Number must be lexed before keyword for 'inf' and 'nan'
+        let idchars = &self.source[start..end];
+        if let Some(lexed) = self.lex_number_from_idchars(idchars, start) {
+            return Ok(Some(lexed));
+        }
+        if let Some(lexed) = self.lex_ident_or_keyword_from_idchars(idchars, start) {
+            return Ok(Some(lexed));
+        }
+
+        if idchars.is_empty() {
+            Ok(None) // Is this correct?
         } else {
-            let reserved = &self.source[start..end];
-            self.fail(LexErrorKind::ReservedName(reserved), start)
+            // https://webassembly.github.io/spec/core/text/lexical.html#text-reserved
+            self.fail(LexErrorKind::ReservedName(idchars), start)
+        }
+    }
+
+    fn lex_number_from_idchars(&mut self, idchars: &'a str, start: usize) -> Lexed<'a> {
+        unimplemented!()
+    }
+
+    fn lex_ident_or_keyword_from_idchars(&mut self, idchars: &'a str, start: usize) -> Lexed<'a> {
+        // https://webassembly.github.io/spec/core/text/lexical.html#tokens
+        match idchars.chars().next() {
+            Some('$') if idchars.len() > 1 => Some((Token::Ident(idchars), start)), // https://webassembly.github.io/spec/core/text/values.html#text-id
+            Some('a'..='z') => Some((Token::Keyword(idchars), start)), // https://webassembly.github.io/spec/core/text/lexical.html#text-keyword
+            _ => None,
         }
     }
 
     fn eat_whitespace(&mut self) -> Result<'a, bool> {
         // https://webassembly.github.io/spec/core/text/lexical.html#white-space
-        fn is_ws_char(c: char) -> bool {
-            match c {
-                ' ' | '\t' | '\n' | '\r' => true,
-                _ => false,
-            }
-        }
-        Ok(self.eat_char_by(is_ws_char) || self.eat_line_comment() || self.eat_block_comment()?)
+        Ok(self.eat_one_of_chars(&[' ', '\t', '\n', '\r']).is_some()
+            || self.eat_line_comment()
+            || self.eat_block_comment()?)
     }
 
     fn eat_line_comment(&mut self) -> bool {
@@ -286,22 +269,15 @@ impl<'a> Lexer<'a> {
 
     fn eat_char(&mut self, want: char) -> Option<usize> {
         match self.chars.peek() {
-            Some((offset, c)) if *c == want => {
-                let offset = *offset;
-                self.chars.next();
-                Some(offset)
-            }
+            Some((_, c)) if *c == want => self.chars.next().map(|(o, _)| o),
             _ => None,
         }
     }
 
-    fn eat_char_by<F: Fn(char) -> bool>(&mut self, pred: F) -> bool {
+    fn eat_one_of_chars(&mut self, chars: &[char]) -> Option<(usize, char)> {
         match self.chars.peek() {
-            Some((_, c)) if pred(*c) => {
-                self.chars.next();
-                true
-            }
-            _ => false,
+            Some((_, c)) if chars.contains(c) => self.chars.next(),
+            _ => None,
         }
     }
 
