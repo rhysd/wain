@@ -855,4 +855,141 @@ mod tests {
         assert_lex_error!("(;_;) [", LexErrorKind::UnexpectedCharacter('['));
         assert_lex_error!(";;\n[", LexErrorKind::UnexpectedCharacter('['));
     }
+
+    #[test]
+    fn hello_world() {
+        let input = r#"
+(module
+ (type $i32_=>_none (func (param i32)))
+ (type $none_=>_i32 (func (result i32)))
+ (import "env" "print" (func $print (param i32)))
+ (memory $0 2)
+ (data (i32.const 1024) "Hello, world\n\00")
+ (table $0 1 1 funcref)
+ (global $global$0 (mut i32) (i32.const 66576))
+ (export "memory" (memory $0))
+ (export "_start" (func $_start))
+ (func $_start (; 1 ;) (result i32)
+  (call $print
+   (i32.const 1024)
+  )
+  (i32.const 0)
+ )
+ ;; custom section "producers", size 27
+)
+        "#;
+        let tokens = lex_all(input).unwrap();
+        let tokens: Vec<_> = tokens.into_iter().map(|(t, _)| t).collect();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::LParen,
+                Token::Keyword("module"),
+                Token::LParen,
+                Token::Keyword("type"),
+                Token::Ident("$i32_=>_none"),
+                Token::LParen,
+                Token::Keyword("func"),
+                Token::LParen,
+                Token::Keyword("param"),
+                Token::Keyword("i32"),
+                Token::RParen,
+                Token::RParen,
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("type"),
+                Token::Ident("$none_=>_i32"),
+                Token::LParen,
+                Token::Keyword("func"),
+                Token::LParen,
+                Token::Keyword("result"),
+                Token::Keyword("i32"),
+                Token::RParen,
+                Token::RParen,
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("import"),
+                Token::String("env"),
+                Token::String("print"),
+                Token::LParen,
+                Token::Keyword("func"),
+                Token::Ident("$print"),
+                Token::LParen,
+                Token::Keyword("param"),
+                Token::Keyword("i32"),
+                Token::RParen,
+                Token::RParen,
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("memory"),
+                Token::Ident("$0"),
+                Token::Int(Sign::Plus, NumBase::Dec, "2"),
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("data"),
+                Token::LParen,
+                Token::Keyword("i32.const"),
+                Token::Int(Sign::Plus, NumBase::Dec, "1024"),
+                Token::RParen,
+                Token::String("Hello, world\\n\\00"),
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("table"),
+                Token::Ident("$0"),
+                Token::Int(Sign::Plus, NumBase::Dec, "1"),
+                Token::Int(Sign::Plus, NumBase::Dec, "1"),
+                Token::Keyword("funcref"),
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("global"),
+                Token::Ident("$global$0"),
+                Token::LParen,
+                Token::Keyword("mut"),
+                Token::Keyword("i32"),
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("i32.const"),
+                Token::Int(Sign::Plus, NumBase::Dec, "66576"),
+                Token::RParen,
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("export"),
+                Token::String("memory"),
+                Token::LParen,
+                Token::Keyword("memory"),
+                Token::Ident("$0"),
+                Token::RParen,
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("export"),
+                Token::String("_start"),
+                Token::LParen,
+                Token::Keyword("func"),
+                Token::Ident("$_start"),
+                Token::RParen,
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("func"),
+                Token::Ident("$_start"),
+                Token::LParen,
+                Token::Keyword("result"),
+                Token::Keyword("i32"),
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("call"),
+                Token::Ident("$print"),
+                Token::LParen,
+                Token::Keyword("i32.const"),
+                Token::Int(Sign::Plus, NumBase::Dec, "1024"),
+                Token::RParen,
+                Token::RParen,
+                Token::LParen,
+                Token::Keyword("i32.const"),
+                Token::Int(Sign::Plus, NumBase::Dec, "0"),
+                Token::RParen,
+                Token::RParen,
+                Token::RParen,
+            ]
+        );
+    }
 }
