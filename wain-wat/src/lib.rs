@@ -428,14 +428,25 @@ mod tests {
         let tokens = lex_all("$0aB!#$%&'*+-./:<=>?@\\^_`|~").unwrap();
         assert_eq!(tokens.len(), 1);
         assert_matches!(&tokens[0].0, Token::Ident("$0aB!#$%&'*+-./:<=>?@\\^_`|~"));
-        // Errors
-        assert_matches!(
-            lex_all("$").unwrap_err().kind(),
-            LexErrorKind::ReservedName(name) if *name == "$"
-        );
-        assert_matches!(
-            lex_all("$ ;;").unwrap_err().kind(),
-            LexErrorKind::ReservedName(name) if *name == "$"
-        );
+    }
+
+    #[test]
+    fn keywords() {
+        let tokens = lex_all("module").unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_matches!(&tokens[0].0, Token::Keyword("module"));
+        let tokens = lex_all("i32.const").unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_matches!(&tokens[0].0, Token::Keyword("i32.const"));
+    }
+
+    #[test]
+    fn reserved() {
+        let e = lex_all("0$foo").unwrap_err();
+        assert_matches!(e.kind(), LexErrorKind::ReservedName("0$foo"));
+        let e = lex_all("$").unwrap_err();
+        assert_matches!(e.kind(), LexErrorKind::ReservedName("$"));
+        let e = lex_all("$ ::").unwrap_err();
+        assert_matches!(e.kind(), LexErrorKind::ReservedName("$"));
     }
 }
