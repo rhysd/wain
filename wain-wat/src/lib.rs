@@ -1,3 +1,4 @@
+use std::char;
 use std::fmt;
 use std::iter;
 use std::str;
@@ -53,10 +54,15 @@ impl<'a> fmt::Display for LexError<'a> {
 type Result<'a, T> = ::std::result::Result<T, Box<LexError<'a>>>;
 
 #[cfg_attr(test, derive(Debug))]
-#[derive(PartialEq)]
 pub enum Sign {
     Plus,
     Minus,
+}
+
+#[cfg_attr(test, derive(Debug))]
+pub enum NumBase {
+    Hex,
+    Dec,
 }
 
 // https://webassembly.github.io/spec/core/text/values.html#floating-point
@@ -64,7 +70,11 @@ pub enum Sign {
 pub enum Float<'a> {
     Nan(Option<&'a str>), // Should parse the payload into u64?
     Inf,
-    Val(&'a str),
+    Val {
+        base: NumBase,
+        frac: &'a str,
+        exp: Option<(Sign, &'a str)>,
+    },
 }
 
 // https://webassembly.github.io/spec/core/text/lexical.html#tokens
@@ -73,7 +83,7 @@ pub enum Token<'a> {
     LParen,
     RParen,
     Keyword(&'a str), // Too many keywords so it's not pragmatic to define `Keyword` enum in terms of maintenance
-    Int(Sign, &'a str),
+    Int(Sign, NumBase, &'a str),
     Float(Sign, Float<'a>),
     String(&'a str), // Should parse the literal into Vec<u8>?
     Ident(&'a str),
@@ -109,7 +119,7 @@ impl<'a> Lexer<'a> {
         // https://webassembly.github.io/spec/core/text/lexical.html#tokens
         try_lex!(self.lex_paren());
         try_lex!(self.lex_string());
-        try_lex!(self.lex_idchars());
+        try_lex!(self.lex_idchars()); // id, keyword, reserved, number
 
         if let Some(peeked) = self.chars.peek() {
             let (offset, c) = *peeked; // Borrow checker complains about *c and *offset in below statement
@@ -195,7 +205,7 @@ impl<'a> Lexer<'a> {
 
         // Note: Number must be lexed before keyword for 'inf' and 'nan'
         let idchars = &self.source[start..end];
-        if let Some(lexed) = self.lex_number_from_idchars(idchars, start) {
+        if let Some(lexed) = Self::lex_number_from_idchars(idchars, start) {
             return Ok(Some(lexed));
         }
         if let Some(lexed) = self.lex_ident_or_keyword_from_idchars(idchars, start) {
@@ -210,8 +220,119 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_number_from_idchars(&mut self, idchars: &'a str, start: usize) -> Lexed<'a> {
-        unimplemented!()
+    fn is_num<F: Fn(&char) -> bool>(s: &str, pred: F) -> bool {
+        let mut prev_underscore = false;
+        for c in s.chars() {
+            prev_underscore = match c {
+                '_' if prev_underscore => return false,
+                '_' => true,
+                _ if pred(&c) => false,
+                _ => return false,
+            }
+        }
+        !prev_underscore
+    }
+
+    fn lex_unsigned_number<F: Fn(&char) -> bool>(
+        idchars: &'a str,
+        sign: Sign,
+        base: NumBase,
+        is_digit: F,
+    ) -> Option<Token<'a>> {
+        // https://webassembly.github.io/spec/core/text/values.html#text-hexnum
+        // https://webassembly.github.io/spec/core/text/values.html#text-hexfloat
+        let mut chars = idchars.char_indices();
+        if chars.next().map(|(_, c)| !is_digit(&c)).unwrap_or(true) {
+            return None;
+        }
+
+        let mut saw_dot = false;
+        let mut prev_underscore = false;
+        let mut exp_start = false;
+        while let Some((_, c)) = chars.next() {
+            match c {
+                '.' if saw_dot || prev_underscore => return None,
+                '.' => saw_dot = true,
+                '_' if prev_underscore => return None,
+                '_' => {
+                    prev_underscore = true;
+                }
+                'p' | 'P' => {
+                    exp_start = true;
+                    break;
+                }
+                c if is_digit(&c) => {
+                    prev_underscore = false;
+                }
+                _ => return None,
+            }
+        }
+
+        // Number cannot end with '_'
+        if prev_underscore {
+            return None;
+        }
+
+        match chars.next() {
+            Some((i, c)) if exp_start => {
+                let (exp_sign, start) = match c {
+                    '+' => (Sign::Plus, i + 1),
+                    '-' => (Sign::Minus, i + 1),
+                    _ => (Sign::Plus, i),
+                };
+                let exp = &idchars[start..];
+                if Self::is_num(exp, char::is_ascii_digit) {
+                    let float = Float::Val {
+                        base,
+                        frac: &idchars[..i],
+                        exp: Some((exp_sign, exp)),
+                    };
+                    Some(Token::Float(sign, float))
+                } else {
+                    None
+                }
+            }
+            Some(_) => unreachable!(),
+            None if saw_dot => Some(Token::Float(
+                sign,
+                Float::Val {
+                    base,
+                    frac: idchars,
+                    exp: None,
+                },
+            )),
+            None => Some(Token::Int(sign, base, idchars)),
+        }
+    }
+
+    fn lex_number_from_idchars(idchars: &'a str, start: usize) -> Lexed<'a> {
+        let (sign, idchars) = match idchars.chars().next() {
+            Some('+') => (Sign::Plus, &idchars[1..]),
+            Some('-') => (Sign::Minus, &idchars[1..]),
+            _ => (Sign::Plus, idchars),
+        };
+
+        let token = match idchars {
+            "" => None,
+            "inf" => Some(Token::Float(sign, Float::Inf)),
+            "nan" => Some(Token::Float(sign, Float::Nan(None))),
+            idchars if idchars.starts_with("nan:0x") => {
+                let payload = &idchars[6..];
+                if !payload.is_empty() && Self::is_num(payload, char::is_ascii_hexdigit) {
+                    Some(Token::Float(sign, Float::Nan(Some(payload))))
+                } else {
+                    None
+                }
+            }
+            idchars if idchars.starts_with("0x") => Self::lex_unsigned_number(
+                &idchars[2..],
+                sign,
+                NumBase::Hex,
+                char::is_ascii_hexdigit,
+            ),
+            idchars => Self::lex_unsigned_number(idchars, sign, NumBase::Dec, char::is_ascii_digit),
+        };
+        token.map(|t| (t, start))
     }
 
     fn lex_ident_or_keyword_from_idchars(&mut self, idchars: &'a str, start: usize) -> Lexed<'a> {
@@ -225,9 +346,13 @@ impl<'a> Lexer<'a> {
 
     fn eat_whitespace(&mut self) -> Result<'a, bool> {
         // https://webassembly.github.io/spec/core/text/lexical.html#white-space
-        Ok(self.eat_one_of_chars(&[' ', '\t', '\n', '\r']).is_some()
-            || self.eat_line_comment()
-            || self.eat_block_comment()?)
+        fn is_ws_char(c: char) -> bool {
+            match c {
+                ' ' | '\t' | '\n' | '\r' => true,
+                _ => false,
+            }
+        }
+        Ok(self.eat_char_by(is_ws_char) || self.eat_line_comment() || self.eat_block_comment()?)
     }
 
     fn eat_line_comment(&mut self) -> bool {
@@ -269,15 +394,22 @@ impl<'a> Lexer<'a> {
 
     fn eat_char(&mut self, want: char) -> Option<usize> {
         match self.chars.peek() {
-            Some((_, c)) if *c == want => self.chars.next().map(|(o, _)| o),
+            Some((offset, c)) if *c == want => {
+                let offset = *offset;
+                self.chars.next();
+                Some(offset)
+            }
             _ => None,
         }
     }
 
-    fn eat_one_of_chars(&mut self, chars: &[char]) -> Option<(usize, char)> {
+    fn eat_char_by<F: Fn(char) -> bool>(&mut self, pred: F) -> bool {
         match self.chars.peek() {
-            Some((_, c)) if chars.contains(c) => self.chars.next(),
-            _ => None,
+            Some((_, c)) if pred(*c) => {
+                self.chars.next();
+                true
+            }
+            _ => false,
         }
     }
 
