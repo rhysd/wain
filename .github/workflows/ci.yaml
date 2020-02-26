@@ -16,7 +16,7 @@ jobs:
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
-        run: cargo test --all
+        run: cargo test --color always --all
   linter:
     name: Clippy and Rustfmt
     runs-on: ubuntu-latest
@@ -27,5 +27,5 @@ jobs:
           rustup component add rustfmt clippy
           cargo fmt --version
           cargo clippy --version
-      - run: cargo fmt -- --check
-      - run: cargo clippy -- -D warnings
+      - run: cargo fmt -- --color always --check
+      - run: cargo clippy --color always -- -D warnings
