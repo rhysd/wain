@@ -53,13 +53,14 @@ impl<'a> fmt::Display for LexError<'a> {
 
 type Result<'a, T> = ::std::result::Result<T, Box<LexError<'a>>>;
 
-#[cfg_attr(test, derive(Debug))]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum Sign {
     Plus,
     Minus,
 }
 
 #[cfg_attr(test, derive(Debug))]
+#[derive(PartialEq)]
 pub enum NumBase {
     Hex,
     Dec,
@@ -233,14 +234,22 @@ impl<'a> Lexer<'a> {
         !prev_underscore
     }
 
-    fn lex_unsigned_number<F: Fn(&char) -> bool>(
-        idchars: &'a str,
-        sign: Sign,
-        base: NumBase,
-        is_digit: F,
-    ) -> Option<Token<'a>> {
-        // https://webassembly.github.io/spec/core/text/values.html#text-hexnum
-        // https://webassembly.github.io/spec/core/text/values.html#text-hexfloat
+    fn lex_unsigned_number(idchars: &'a str, sign: Sign, base: NumBase) -> Option<Token<'a>> {
+        // https://webassembly.github.io/spec/core/text/values.html#integers
+        // https://webassembly.github.io/spec/core/text/values.html#floating-point
+
+        fn is_hex_exp(c: char) -> bool {
+            c == 'p' || c == 'P'
+        }
+        fn is_dec_exp(c: char) -> bool {
+            c == 'e' || c == 'E'
+        }
+
+        #[allow(clippy::type_complexity)]
+        let (is_digit, is_exp): (fn(&char) -> bool, fn(char) -> bool) = match base {
+            NumBase::Hex => (char::is_ascii_hexdigit, is_hex_exp),
+            NumBase::Dec => (char::is_ascii_digit, is_dec_exp),
+        };
         let mut chars = idchars.char_indices();
         if chars.next().map(|(_, c)| !is_digit(&c)).unwrap_or(true) {
             return None;
@@ -257,7 +266,7 @@ impl<'a> Lexer<'a> {
                 '_' => {
                     prev_underscore = true;
                 }
-                'p' | 'P' => {
+                c if is_exp(c) => {
                     exp_start = true;
                     break;
                 }
@@ -280,11 +289,12 @@ impl<'a> Lexer<'a> {
                     '-' => (Sign::Minus, i + 1),
                     _ => (Sign::Plus, i),
                 };
+                let frac = &idchars[..i - 1]; // - 1 for 'e', 'E', 'p', 'P'
                 let exp = &idchars[start..];
                 if Self::is_num(exp, char::is_ascii_digit) {
                     let float = Float::Val {
                         base,
-                        frac: &idchars[..i],
+                        frac,
                         exp: Some((exp_sign, exp)),
                     };
                     Some(Token::Float(sign, float))
@@ -312,8 +322,8 @@ impl<'a> Lexer<'a> {
             _ => (Sign::Plus, idchars),
         };
 
+        // https://webassembly.github.io/spec/core/text/values.html#text-float
         let token = match idchars {
-            "" => None,
             "inf" => Some(Token::Float(sign, Float::Inf)),
             "nan" => Some(Token::Float(sign, Float::Nan(None))),
             idchars if idchars.starts_with("nan:0x") => {
@@ -324,13 +334,10 @@ impl<'a> Lexer<'a> {
                     None
                 }
             }
-            idchars if idchars.starts_with("0x") => Self::lex_unsigned_number(
-                &idchars[2..],
-                sign,
-                NumBase::Hex,
-                char::is_ascii_hexdigit,
-            ),
-            idchars => Self::lex_unsigned_number(idchars, sign, NumBase::Dec, char::is_ascii_digit),
+            idchars if idchars.starts_with("0x") => {
+                Self::lex_unsigned_number(&idchars[2..], sign, NumBase::Hex)
+            }
+            idchars => Self::lex_unsigned_number(idchars, sign, NumBase::Dec),
         };
         token.map(|t| (t, start))
     }
@@ -479,6 +486,34 @@ mod tests {
         };
     }
 
+    macro_rules! assert_lex_one {
+        ($input:expr, $token:pat) => {
+            let tokens = lex_all($input).unwrap();
+            assert_eq!(tokens.len(), 1);
+            match &tokens[0].0 {
+                $token => {}
+                e => panic!(
+                    "assertion failed: {:?} did not match to token {}",
+                    e,
+                    stringify!($token)
+                ),
+            }
+        };
+    }
+
+    macro_rules! assert_lex_error {
+        ($input:expr, $errkind:pat) => {
+            match lex_all($input).unwrap_err().kind() {
+                $errkind => {}
+                e => panic!(
+                    "assertion failed: {:?} did not match to error kind {}",
+                    e,
+                    stringify!($token)
+                ),
+            }
+        };
+    }
+
     #[test]
     fn spaces() {
         assert!(lex_all("").unwrap().is_empty());
@@ -520,65 +555,278 @@ mod tests {
 
     #[test]
     fn parens() {
-        assert_eq!(lex_all("(").unwrap(), vec![(Token::LParen, 0)]);
-        assert_eq!(lex_all(")").unwrap(), vec![(Token::RParen, 0)]);
+        assert_lex_one!("(", Token::LParen);
+        assert_lex_one!(")", Token::RParen);
     }
 
     #[test]
     fn strings() {
-        let tokens = lex_all(r#""""#).unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_matches!(&tokens[0].0, Token::String(""));
-        let tokens = lex_all(r#""hello""#).unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_matches!(&tokens[0].0, Token::String("hello"));
-        let tokens = lex_all(r#""\t\n\r\"\'\\\u{1234}\00\a9""#).unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_matches!(&tokens[0].0, Token::String(r#"\t\n\r\"\'\\\u{1234}\00\a9"#));
-        let tokens = lex_all(r#""あいうえお""#).unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_matches!(&tokens[0].0, Token::String("あいうえお"));
-        // Errors
-        assert_matches!(
-            lex_all(r#"""#).unwrap_err().kind(),
-            LexErrorKind::UnterminatedString
+        assert_lex_one!(r#""""#, Token::String(""));
+        assert_lex_one!(r#""hello""#, Token::String("hello"));
+        assert_lex_one!(
+            r#""\t\n\r\"\'\\\u{1234}\00\a9""#,
+            Token::String(r#"\t\n\r\"\'\\\u{1234}\00\a9"#)
         );
-        assert_matches!(
-            lex_all(r#""foo\""#).unwrap_err().kind(),
-            LexErrorKind::UnterminatedString
-        );
+        assert_lex_one!(r#""あいうえお""#, Token::String("あいうえお"));
+        assert_lex_error!(r#"""#, LexErrorKind::UnterminatedString);
+        assert_lex_error!(r#""foo\""#, LexErrorKind::UnterminatedString);
     }
 
     #[test]
     fn idents() {
-        let tokens = lex_all("$x").unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_matches!(&tokens[0].0, Token::Ident("$x"));
-        let tokens = lex_all("$foo0123FOO").unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_matches!(&tokens[0].0, Token::Ident("$foo0123FOO"));
-        let tokens = lex_all("$0aB!#$%&'*+-./:<=>?@\\^_`|~").unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_matches!(&tokens[0].0, Token::Ident("$0aB!#$%&'*+-./:<=>?@\\^_`|~"));
+        assert_lex_one!("$x", Token::Ident("$x"));
+        assert_lex_one!("$foo0123FOO", Token::Ident("$foo0123FOO"));
+        assert_lex_one!(
+            "$0aB!#$%&'*+-./:<=>?@\\^_`|~",
+            Token::Ident("$0aB!#$%&'*+-./:<=>?@\\^_`|~")
+        );
     }
 
     #[test]
     fn keywords() {
-        let tokens = lex_all("module").unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_matches!(&tokens[0].0, Token::Keyword("module"));
-        let tokens = lex_all("i32.const").unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_matches!(&tokens[0].0, Token::Keyword("i32.const"));
+        assert_lex_one!("module", Token::Keyword("module"));
+        assert_lex_one!("i32.const", Token::Keyword("i32.const"));
     }
 
     #[test]
     fn reserved() {
-        let e = lex_all("0$foo").unwrap_err();
-        assert_matches!(e.kind(), LexErrorKind::ReservedName("0$foo"));
-        let e = lex_all("$").unwrap_err();
-        assert_matches!(e.kind(), LexErrorKind::ReservedName("$"));
-        let e = lex_all("$ ::").unwrap_err();
-        assert_matches!(e.kind(), LexErrorKind::ReservedName("$"));
+        assert_lex_error!("0$foo", LexErrorKind::ReservedName("0$foo"));
+        assert_lex_error!("$", LexErrorKind::ReservedName("$"));
+        assert_lex_error!("$ ;;", LexErrorKind::ReservedName("$"));
+    }
+
+    #[test]
+    fn integers() {
+        assert_lex_one!("1", Token::Int(Sign::Plus, NumBase::Dec, "1"));
+        assert_lex_one!("123", Token::Int(Sign::Plus, NumBase::Dec, "123"));
+        assert_lex_one!("+1", Token::Int(Sign::Plus, NumBase::Dec, "1"));
+        assert_lex_one!("+123", Token::Int(Sign::Plus, NumBase::Dec, "123"));
+        assert_lex_one!("-1", Token::Int(Sign::Minus, NumBase::Dec, "1"));
+        assert_lex_one!("-123", Token::Int(Sign::Minus, NumBase::Dec, "123"));
+        assert_lex_one!("0xd", Token::Int(Sign::Plus, NumBase::Hex, "d"));
+        assert_lex_one!("0xc0ffee", Token::Int(Sign::Plus, NumBase::Hex, "c0ffee"));
+        assert_lex_one!("+0xd", Token::Int(Sign::Plus, NumBase::Hex, "d"));
+        assert_lex_one!("+0xc0ffee", Token::Int(Sign::Plus, NumBase::Hex, "c0ffee"));
+        assert_lex_one!("-0xd", Token::Int(Sign::Minus, NumBase::Hex, "d"));
+        assert_lex_one!("-0xc0ffee", Token::Int(Sign::Minus, NumBase::Hex, "c0ffee"));
+    }
+
+    #[test]
+    fn floats() {
+        assert_lex_one!(
+            "123.",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Dec,
+                    frac: "123.",
+                    exp: None,
+                }
+            )
+        );
+        assert_lex_one!(
+            "123.456",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Dec,
+                    frac: "123.456",
+                    exp: None,
+                }
+            )
+        );
+        assert_lex_one!(
+            "+123.",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Dec,
+                    frac: "123.",
+                    exp: None,
+                }
+            )
+        );
+        assert_lex_one!(
+            "-123.",
+            Token::Float(
+                Sign::Minus,
+                Float::Val {
+                    base: NumBase::Dec,
+                    frac: "123.",
+                    exp: None,
+                }
+            )
+        );
+        assert_lex_one!(
+            "123.e10",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Dec,
+                    frac: "123.",
+                    exp: Some((Sign::Plus, "10")),
+                }
+            )
+        );
+        assert_lex_one!(
+            "123.456e10",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Dec,
+                    frac: "123.456",
+                    exp: Some((Sign::Plus, "10")),
+                }
+            )
+        );
+        assert_lex_one!(
+            "123.E10",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Dec,
+                    frac: "123.",
+                    exp: Some((Sign::Plus, "10")),
+                }
+            )
+        );
+        assert_lex_one!(
+            "123.e+10",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Dec,
+                    frac: "123.",
+                    exp: Some((Sign::Plus, "10")),
+                }
+            )
+        );
+        assert_lex_one!(
+            "123.e-10",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Dec,
+                    frac: "123.",
+                    exp: Some((Sign::Minus, "10")),
+                }
+            )
+        );
+
+        assert_lex_one!(
+            "0xc0f.",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Hex,
+                    frac: "c0f.",
+                    exp: None,
+                }
+            )
+        );
+        assert_lex_one!(
+            "0xc0f.fee",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Hex,
+                    frac: "c0f.fee",
+                    exp: None,
+                }
+            )
+        );
+        assert_lex_one!(
+            "+0xc0f.",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Hex,
+                    frac: "c0f.",
+                    exp: None,
+                }
+            )
+        );
+        assert_lex_one!(
+            "-0xc0f.",
+            Token::Float(
+                Sign::Minus,
+                Float::Val {
+                    base: NumBase::Hex,
+                    frac: "c0f.",
+                    exp: None,
+                }
+            )
+        );
+        assert_lex_one!(
+            "0xc0f.p10",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Hex,
+                    frac: "c0f.",
+                    exp: Some((Sign::Plus, "10")),
+                }
+            )
+        );
+        assert_lex_one!(
+            "0xc0f.feep10",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Hex,
+                    frac: "c0f.fee",
+                    exp: Some((Sign::Plus, "10")),
+                }
+            )
+        );
+        assert_lex_one!(
+            "0xc0f.feeP10",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Hex,
+                    frac: "c0f.fee",
+                    exp: Some((Sign::Plus, "10")),
+                }
+            )
+        );
+        assert_lex_one!(
+            "0xc0f.p+10",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Hex,
+                    frac: "c0f.",
+                    exp: Some((Sign::Plus, "10")),
+                }
+            )
+        );
+        assert_lex_one!(
+            "0xc0f.p-10",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Hex,
+                    frac: "c0f.",
+                    exp: Some((Sign::Minus, "10")),
+                }
+            )
+        );
+
+        assert_lex_one!("inf", Token::Float(Sign::Plus, Float::Inf));
+        assert_lex_one!("+inf", Token::Float(Sign::Plus, Float::Inf));
+        assert_lex_one!("-inf", Token::Float(Sign::Minus, Float::Inf));
+        assert_lex_one!("nan", Token::Float(Sign::Plus, Float::Nan(None)));
+        assert_lex_one!("+nan", Token::Float(Sign::Plus, Float::Nan(None)));
+        assert_lex_one!("-nan", Token::Float(Sign::Minus, Float::Nan(None)));
+        assert_lex_one!("nan:0x1f", Token::Float(Sign::Plus, Float::Nan(Some("1f"))));
+        assert_lex_one!(
+            "+nan:0x1f",
+            Token::Float(Sign::Plus, Float::Nan(Some("1f")))
+        );
+        assert_lex_one!(
+            "-nan:0x1f",
+            Token::Float(Sign::Minus, Float::Nan(Some("1f")))
+        );
     }
 }
