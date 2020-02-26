@@ -109,18 +109,17 @@ impl<'a> Lexer<'a> {
     pub fn lex(&mut self) -> LexResult<'a> {
         while self.eat_whitespace()? {}
 
-        macro_rules! try_lex {
-            ($e:expr) => {
-                if let Some(lexed) = $e? {
-                    return Ok(Some(lexed));
-                }
-            };
-        }
-
         // https://webassembly.github.io/spec/core/text/lexical.html#tokens
-        try_lex!(self.lex_paren());
-        try_lex!(self.lex_string());
-        try_lex!(self.lex_idchars()); // id, keyword, reserved, number
+        if let Some(lexed) = self.lex_paren() {
+            return Ok(Some(lexed));
+        }
+        if let Some(lexed) = self.lex_string()? {
+            return Ok(Some(lexed));
+        }
+        // id, keyword, reserved, number
+        if let Some(lexed) = self.lex_idchars()? {
+            return Ok(Some(lexed));
+        }
 
         if let Some(peeked) = self.chars.peek() {
             let (offset, c) = *peeked; // Borrow checker complains about *c and *offset in below statement
@@ -130,13 +129,13 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_paren(&mut self) -> LexResult<'a> {
+    fn lex_paren(&mut self) -> Lexed<'a> {
         if let Some(offset) = self.eat_char('(') {
-            Ok(Some((Token::LParen, offset)))
+            Some((Token::LParen, offset))
         } else if let Some(offset) = self.eat_char(')') {
-            Ok(Some((Token::RParen, offset)))
+            Some((Token::RParen, offset))
         } else {
-            Ok(None)
+            None
         }
     }
 
@@ -197,37 +196,43 @@ impl<'a> Lexer<'a> {
 
         let start = self.offset();
         let end = loop {
-            match self.chars.next() {
-                Some((_, c)) if is_idchar(c) => continue,
-                Some((offset, _)) => break offset,
+            match self.chars.peek() {
+                Some((_, c)) if is_idchar(*c) => {
+                    self.chars.next();
+                    continue;
+                }
+                Some((offset, _)) => break *offset,
                 None => break self.source.len(),
             }
         };
+
+        if start == end {
+            return Ok(None);
+        }
 
         // Note: Number must be lexed before keyword for 'inf' and 'nan'
         let idchars = &self.source[start..end];
         if let Some(lexed) = Self::lex_number_from_idchars(idchars, start) {
             return Ok(Some(lexed));
         }
-        if let Some(lexed) = self.lex_ident_or_keyword_from_idchars(idchars, start) {
+        if let Some(lexed) = Self::lex_ident_or_keyword_from_idchars(idchars, start) {
             return Ok(Some(lexed));
         }
 
-        if idchars.is_empty() {
-            Ok(None) // Is this correct?
-        } else {
-            // https://webassembly.github.io/spec/core/text/lexical.html#text-reserved
-            self.fail(LexErrorKind::ReservedName(idchars), start)
-        }
+        // https://webassembly.github.io/spec/core/text/lexical.html#text-reserved
+        self.fail(LexErrorKind::ReservedName(idchars), start)
     }
 
     fn is_num<F: Fn(&char) -> bool>(s: &str, pred: F) -> bool {
-        let mut prev_underscore = false;
+        if s.is_empty() {
+            return false;
+        }
+        let mut prev_underscore = true; // true because number cannot start with '_'
         for c in s.chars() {
-            prev_underscore = match c {
+            match c {
                 '_' if prev_underscore => return false,
-                '_' => true,
-                _ if pred(&c) => false,
+                '_' => prev_underscore = true,
+                _ if pred(&c) => prev_underscore = false,
                 _ => return false,
             }
         }
@@ -303,6 +308,7 @@ impl<'a> Lexer<'a> {
                 }
             }
             Some(_) => unreachable!(),
+            None if exp_start => None, // e.g. '123e', '0x1fp'
             None if saw_dot => Some(Token::Float(
                 sign,
                 Float::Val {
@@ -328,7 +334,7 @@ impl<'a> Lexer<'a> {
             "nan" => Some(Token::Float(sign, Float::Nan(None))),
             idchars if idchars.starts_with("nan:0x") => {
                 let payload = &idchars[6..];
-                if !payload.is_empty() && Self::is_num(payload, char::is_ascii_hexdigit) {
+                if Self::is_num(payload, char::is_ascii_hexdigit) {
                     Some(Token::Float(sign, Float::Nan(Some(payload))))
                 } else {
                     None
@@ -342,7 +348,7 @@ impl<'a> Lexer<'a> {
         token.map(|t| (t, start))
     }
 
-    fn lex_ident_or_keyword_from_idchars(&mut self, idchars: &'a str, start: usize) -> Lexed<'a> {
+    fn lex_ident_or_keyword_from_idchars(idchars: &'a str, start: usize) -> Lexed<'a> {
         // https://webassembly.github.io/spec/core/text/lexical.html#tokens
         match idchars.chars().next() {
             Some('$') if idchars.len() > 1 => Some((Token::Ident(idchars), start)), // https://webassembly.github.io/spec/core/text/values.html#text-id
@@ -463,29 +469,6 @@ mod tests {
         Lexer::new(s).collect()
     }
 
-    macro_rules! assert_matches {
-        ($e:expr, $p:pat) => {
-            match $e {
-                $p => (),
-                e => panic!(
-                    "assertion failed: {:?} did not match to {}",
-                    e,
-                    stringify!($p)
-                ),
-            }
-        };
-        ($e:expr, $p:pat if $c:expr) => {
-            match $e {
-                $p if $c => (),
-                e => panic!(
-                    "assertion failed: {:?} did not match to {}",
-                    e,
-                    stringify!($p if $c),
-                ),
-            }
-        };
-    }
-
     macro_rules! assert_lex_one {
         ($input:expr, $token:pat) => {
             let tokens = lex_all($input).unwrap();
@@ -539,18 +522,9 @@ mod tests {
             .unwrap()
             .is_empty());
         // Errors
-        assert_matches!(
-            lex_all("(;").unwrap_err().kind(),
-            LexErrorKind::UnterminatedBlockComment
-        );
-        assert_matches!(
-            lex_all("(; hi! ").unwrap_err().kind(),
-            LexErrorKind::UnterminatedBlockComment
-        );
-        assert_matches!(
-            lex_all("(;(;;)").unwrap_err().kind(),
-            LexErrorKind::UnterminatedBlockComment
-        );
+        assert_lex_error!("(;", LexErrorKind::UnterminatedBlockComment);
+        assert_lex_error!("(; hi! ", LexErrorKind::UnterminatedBlockComment);
+        assert_lex_error!("(;(;;)", LexErrorKind::UnterminatedBlockComment);
     }
 
     #[test]
@@ -586,6 +560,9 @@ mod tests {
     fn keywords() {
         assert_lex_one!("module", Token::Keyword("module"));
         assert_lex_one!("i32.const", Token::Keyword("i32.const"));
+        assert_lex_one!("nan:0x_1", Token::Keyword("nan:0x_1"));
+        assert_lex_one!("nan:0x1_", Token::Keyword("nan:0x1_"));
+        assert_lex_one!("nan:0x1__2", Token::Keyword("nan:0x1__2"));
     }
 
     #[test]
@@ -593,12 +570,26 @@ mod tests {
         assert_lex_error!("0$foo", LexErrorKind::ReservedName("0$foo"));
         assert_lex_error!("$", LexErrorKind::ReservedName("$"));
         assert_lex_error!("$ ;;", LexErrorKind::ReservedName("$"));
+        assert_lex_error!("123p3", LexErrorKind::ReservedName("123p3"));
+        assert_lex_error!("0x123p1f", LexErrorKind::ReservedName("0x123p1f"));
+        assert_lex_error!("123e", LexErrorKind::ReservedName("123e"));
+        assert_lex_error!("123e+", LexErrorKind::ReservedName("123e+"));
+        assert_lex_error!("0x", LexErrorKind::ReservedName("0x"));
+        assert_lex_error!("1_", LexErrorKind::ReservedName("1_"));
+        assert_lex_error!("1__2", LexErrorKind::ReservedName("1__2"));
+        assert_lex_error!("1.2_", LexErrorKind::ReservedName("1.2_"));
+        // assert_lex_error!("1._2", LexErrorKind::ReservedName("1._2")); TODO: This should be error
+        assert_lex_error!("1.2__3", LexErrorKind::ReservedName("1.2__3"));
+        assert_lex_error!("1.E2_", LexErrorKind::ReservedName("1.E2_"));
+        assert_lex_error!("1.E_2", LexErrorKind::ReservedName("1.E_2"));
+        assert_lex_error!("1.E2__3", LexErrorKind::ReservedName("1.E2__3"));
     }
 
     #[test]
     fn integers() {
         assert_lex_one!("1", Token::Int(Sign::Plus, NumBase::Dec, "1"));
         assert_lex_one!("123", Token::Int(Sign::Plus, NumBase::Dec, "123"));
+        assert_lex_one!("1_2_3", Token::Int(Sign::Plus, NumBase::Dec, "1_2_3"));
         assert_lex_one!("+1", Token::Int(Sign::Plus, NumBase::Dec, "1"));
         assert_lex_one!("+123", Token::Int(Sign::Plus, NumBase::Dec, "123"));
         assert_lex_one!("-1", Token::Int(Sign::Minus, NumBase::Dec, "1"));
@@ -676,6 +667,17 @@ mod tests {
                     base: NumBase::Dec,
                     frac: "123.456",
                     exp: Some((Sign::Plus, "10")),
+                }
+            )
+        );
+        assert_lex_one!(
+            "1_2_3.4_5_6e1_0",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Dec,
+                    frac: "1_2_3.4_5_6",
+                    exp: Some((Sign::Plus, "1_0")),
                 }
             )
         );
@@ -780,6 +782,17 @@ mod tests {
             )
         );
         assert_lex_one!(
+            "0xc_0_f.f_e_ep1_0",
+            Token::Float(
+                Sign::Plus,
+                Float::Val {
+                    base: NumBase::Hex,
+                    frac: "c_0_f.f_e_e",
+                    exp: Some((Sign::Plus, "1_0")),
+                }
+            )
+        );
+        assert_lex_one!(
             "0xc0f.feeP10",
             Token::Float(
                 Sign::Plus,
@@ -821,6 +834,10 @@ mod tests {
         assert_lex_one!("-nan", Token::Float(Sign::Minus, Float::Nan(None)));
         assert_lex_one!("nan:0x1f", Token::Float(Sign::Plus, Float::Nan(Some("1f"))));
         assert_lex_one!(
+            "nan:0x1_f",
+            Token::Float(Sign::Plus, Float::Nan(Some("1_f")))
+        );
+        assert_lex_one!(
             "+nan:0x1f",
             Token::Float(Sign::Plus, Float::Nan(Some("1f")))
         );
@@ -828,5 +845,14 @@ mod tests {
             "-nan:0x1f",
             Token::Float(Sign::Minus, Float::Nan(Some("1f")))
         );
+    }
+
+    #[test]
+    fn unexpected_characters() {
+        // '[' is a reserved character and cannot appear in wat for now
+        assert_lex_error!("[", LexErrorKind::UnexpectedCharacter('['));
+        assert_lex_error!(" [", LexErrorKind::UnexpectedCharacter('['));
+        assert_lex_error!("(;_;) [", LexErrorKind::UnexpectedCharacter('['));
+        assert_lex_error!(";;\n[", LexErrorKind::UnexpectedCharacter('['));
     }
 }
