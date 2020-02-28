@@ -15,4 +15,7 @@ version = "0.0.0"
 [[package]]
 name = "wain-wat"
 version = "0.0.0"
+dependencies = [
+ "wain-ast 0.0.0",
+]
 

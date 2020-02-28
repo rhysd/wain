@@ -4,6 +4,7 @@ use std::iter;
 use std::str;
 
 #[cfg_attr(test, derive(Debug))]
+#[derive(Clone)]
 pub enum LexErrorKind<'a> {
     UnterminatedBlockComment,
     UnterminatedString,
@@ -14,6 +15,7 @@ pub enum LexErrorKind<'a> {
 // TODO: Support std::error::Error
 
 #[cfg_attr(test, derive(Debug))]
+#[derive(Clone)]
 pub struct LexError<'a> {
     kind: LexErrorKind<'a>,
     offset: usize,
@@ -23,6 +25,14 @@ pub struct LexError<'a> {
 impl<'a> LexError<'a> {
     pub fn kind(&self) -> &LexErrorKind<'a> {
         &self.kind
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    pub fn source(&self) -> &'a str {
+        self.source
     }
 }
 
@@ -54,20 +64,40 @@ impl<'a> fmt::Display for LexError<'a> {
 type Result<'a, T> = ::std::result::Result<T, Box<LexError<'a>>>;
 
 #[cfg_attr(test, derive(Debug, PartialEq))]
+#[derive(Clone, Copy)]
 pub enum Sign {
     Plus,
     Minus,
 }
 
+impl fmt::Display for Sign {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Sign::Plus => f.write_str("+"),
+            Sign::Minus => f.write_str("-"),
+        }
+    }
+}
+
 #[cfg_attr(test, derive(Debug))]
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum NumBase {
     Hex,
     Dec,
 }
 
+impl NumBase {
+    fn prefix(&self) -> &'static str {
+        match self {
+            NumBase::Hex => "0x",
+            NumBase::Dec => "",
+        }
+    }
+}
+
 // https://webassembly.github.io/spec/core/text/values.html#floating-point
 #[cfg_attr(test, derive(Debug, PartialEq))]
+#[derive(Clone)]
 pub enum Float<'a> {
     Nan(Option<&'a str>), // Should parse the payload into u64?
     Inf,
@@ -80,6 +110,7 @@ pub enum Float<'a> {
 
 // https://webassembly.github.io/spec/core/text/lexical.html#tokens
 #[cfg_attr(test, derive(Debug, PartialEq))]
+#[derive(Clone)]
 pub enum Token<'a> {
     LParen,
     RParen,
@@ -88,6 +119,52 @@ pub enum Token<'a> {
     Float(Sign, Float<'a>),
     String(&'a str), // Should parse the literal into Vec<u8>?
     Ident(&'a str),
+}
+
+impl<'a> fmt::Display for Token<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Token::LParen => f.write_str("paren '('"),
+            Token::RParen => f.write_str("paren ')'"),
+            Token::Keyword(kw) => write!(f, "keyword '{}'", kw),
+            Token::Int(sign, base, s) => write!(f, "integer '{}{}{}'", sign, base.prefix(), s),
+            Token::Float(sign, Float::Nan(Some(payload))) => {
+                write!(f, "float number '{}nan:0x{}'", sign, payload)
+            }
+            Token::Float(sign, Float::Nan(None)) => write!(f, "float number '{}nan'", sign),
+            Token::Float(sign, Float::Inf) => write!(f, "float number '{}inf'", sign),
+            Token::Float(
+                sign,
+                Float::Val {
+                    base,
+                    frac,
+                    exp: Some((exp_sign, exp)),
+                },
+            ) => {
+                let exp_leader = if *base == NumBase::Hex { 'P' } else { 'E' };
+                write!(
+                    f,
+                    "float number '{sign}{prefix}{frac}{exp_leader}{exp_sign}{exp}",
+                    sign = sign,
+                    prefix = base.prefix(),
+                    frac = frac,
+                    exp_leader = exp_leader,
+                    exp_sign = exp_sign,
+                    exp = exp
+                )
+            }
+            Token::Float(
+                sign,
+                Float::Val {
+                    base,
+                    frac,
+                    exp: None,
+                },
+            ) => write!(f, "float number '{}{}{}", sign, base.prefix(), frac,),
+            Token::String(s) => write!(f, "string literal \"{}\"", s),
+            Token::Ident(ident) => write!(f, "identifier '{}'", ident),
+        }
+    }
 }
 
 type Lexed<'a> = Option<(Token<'a>, usize)>;
