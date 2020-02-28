@@ -3,6 +3,7 @@ use std::fmt;
 use std::mem;
 use wain_ast::*;
 
+#[cfg_attr(test, derive(Debug))]
 pub enum ParseErrorKind<'a> {
     LexError(LexError<'a>),
     UnexpectedToken {
@@ -16,6 +17,7 @@ pub enum ParseErrorKind<'a> {
     InvalidValType(&'a str),
 }
 
+#[cfg_attr(test, derive(Debug))]
 pub struct ParseError<'a> {
     kind: ParseErrorKind<'a>,
     offset: usize,
@@ -270,6 +272,7 @@ impl<'a> Parse<'a> for ModuleField<'a> {
 impl<'a> Parse<'a> for TypeDef<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         let (_, start) = match_token!(parser, "left paren for type", Token::LParen);
+        match_token!(parser, "'type' keyword", Token::Keyword("type"));
         let id = parser.maybe_ident("identifier for type")?;
         let ty = parser.parse()?;
         Ok(TypeDef { start, id, ty })
@@ -284,18 +287,22 @@ impl<'a> Parse<'a> for FuncType<'a> {
 
         let mut params = vec![];
         loop {
-            if parser.lookahead_keyword("param keyword in functype")?.0 != "param" {
-                break;
+            match parser.peek("left paren for param in functype")? {
+                (Token::LParen, _)
+                    if parser.lookahead_keyword("param keyword in functype")?.0 == "param" =>
+                {
+                    params.push(parser.parse()?);
+                }
+                _ => break,
             }
-            params.push(parser.parse()?);
         }
 
         let mut results = vec![];
         loop {
-            if parser.lookahead_keyword("result keyword in functype")?.0 != "result" {
-                break;
+            match parser.peek("left paren for result in functype")? {
+                (Token::LParen, _) => results.push(parser.parse()?),
+                _ => break,
             }
-            results.push(parser.parse()?);
         }
 
         match_token!(parser, "closing paren for functype", Token::RParen);
@@ -322,17 +329,16 @@ impl<'a> Parse<'a> for Param<'a> {
 // https://webassembly.github.io/spec/core/text/types.html#text-valtype
 impl<'a> Parse<'a> for ValType {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let expected = "identifier for value type";
-        match parser.peek(expected)? {
-            (Token::Ident("i32"), _) => Ok(ValType::I32),
-            (Token::Ident("i64"), _) => Ok(ValType::I64),
-            (Token::Ident("f32"), _) => Ok(ValType::F32),
-            (Token::Ident("f64"), _) => Ok(ValType::F64),
-            (Token::Ident(id), offset) => parser.error(ParseErrorKind::InvalidValType(*id), offset),
-            _ => {
-                let (tok, offset) = parser.next_token(expected)?;
-                parser.unexpected_token(tok, expected, offset)
+        let expected = "keyword for value type";
+        match parser.next_token(expected)? {
+            (Token::Keyword("i32"), _) => Ok(ValType::I32),
+            (Token::Keyword("i64"), _) => Ok(ValType::I64),
+            (Token::Keyword("f32"), _) => Ok(ValType::F32),
+            (Token::Keyword("f64"), _) => Ok(ValType::F64),
+            (Token::Keyword(id), offset) => {
+                parser.error(ParseErrorKind::InvalidValType(id), offset)
             }
+            (tok, offset) => parser.unexpected_token(tok, expected, offset),
         }
     }
 }
@@ -362,32 +368,64 @@ mod tests {
         let mut i = LookAhead::new(v.into_iter());
         assert_eq!(i.peek(), Some(&1));
         assert_eq!(i.lookahead(), Some(&2));
-
         assert_eq!(i.next(), Some(1));
+
         assert_eq!(i.peek(), Some(&2));
         assert_eq!(i.lookahead(), Some(&3));
-
         assert_eq!(i.next(), Some(2));
+
         assert_eq!(i.peek(), Some(&3));
         assert_eq!(i.lookahead(), Some(&4));
-
         assert_eq!(i.next(), Some(3));
+
         assert_eq!(i.peek(), Some(&4));
         assert_eq!(i.lookahead(), None);
-
         assert_eq!(i.next(), Some(4));
+
         assert_eq!(i.peek(), None);
         assert_eq!(i.lookahead(), None);
-
         assert_eq!(i.next(), None);
+
         assert_eq!(i.peek(), None);
         assert_eq!(i.lookahead(), None);
 
         let v: Vec<i32> = vec![];
+        let mut i = LookAhead::new(v.into_iter());
         assert_eq!(i.peek(), None);
         assert_eq!(i.lookahead(), None);
         assert_eq!(i.next(), None);
         assert_eq!(i.peek(), None);
         assert_eq!(i.lookahead(), None);
+    }
+
+    macro_rules! assert_parse {
+        ($input:expr, $expect:pat if $cond:expr) => {
+            let input = $input;
+            match Parser::new(input).parse_all().unwrap().module {
+                $expect if $cond => { /* OK */ }
+                e => panic!(
+                    "assertion failed: {:?} did not match to {}",
+                    e,
+                    stringify!($expect if $cond:expr)
+                ),
+            }
+        };
+        ($input:expr, $expect:pat) => {
+            let input = $input;
+            match Parser::new(input).parse_all().unwrap().module {
+                $expect => { /* OK */ }
+                e => panic!(
+                    "assertion failed: {:?} did not match to {}",
+                    e,
+                    stringify!($expect)
+                ),
+            }
+        };
+    }
+
+    #[test]
+    fn module() {
+        assert_parse!(r#"(module $foo)"#, Module { ident: "$foo", types, .. } if types.is_empty());
+        assert_parse!(r#"(module $foo (type $f1 (func (param $a i32) (result i32)))"#, Module { ident: "$foo", types, .. } if types.len() == 1);
     }
 }
