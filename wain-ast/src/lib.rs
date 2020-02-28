@@ -1,3 +1,5 @@
+// Root of the tree
+#[derive(Debug)]
 pub struct SyntaxTree<'a> {
     pub module: Module<'a>,
 }

@@ -126,9 +126,8 @@ impl<'a> Parser<'a> {
         self.tokens = LookAhead::new(Lexer::new(self.source));
     }
 
-    pub fn parse_all(&mut self) -> Result<'a, SyntaxTree<'a>> {
-        let module = self.parse()?;
-        Ok(SyntaxTree { module })
+    pub fn is_done(&self) -> bool {
+        self.tokens.peek().is_none()
     }
 
     fn parse<P: Parse<'a>>(&mut self) -> Result<'a, P> {
@@ -227,28 +226,50 @@ pub trait Parse<'a>: Sized {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self>;
 }
 
+// https://webassembly.github.io/spec/core/text/modules.html
+impl<'a> Parse<'a> for SyntaxTree<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let mut module: Module<'a> = parser.parse()?;
+
+        // The following restrictions are imposed on the composition of modules: `m1 ⊕ m2` is
+        // defined if and only if
+        //
+        // - m1.start = ϵ ∨ m2.start = ϵ
+        // - m1.funcs = m1.tables = m1.mems = m1.mems = ϵ ∨ m2.imports = ϵ
+        while !parser.is_done() {
+            let another: Module<'a> = parser.parse()?;
+            // TODO: Check above restrictions
+            for ty in another.types {
+                module.types.push(ty);
+                // TODO: Merge more fields
+            }
+        }
+
+        Ok(SyntaxTree { module })
+    }
+}
+
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
 impl<'a> Parse<'a> for Module<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         // https://webassembly.github.io/spec/core/text/modules.html#text-module
-        let (_, start) = match_token!(parser, "left paren for module", Token::LParen);
+        let (_, start) = match_token!(parser, "opening paren for module", Token::LParen);
         match_token!(parser, "'module' keyword", Token::Keyword("module"));
         let (ident, _) = match_token!(parser, "identifier for module", Token::Ident(id) => id);
 
         let mut types = vec![];
 
         loop {
-            match parser.peek("closing paren for module")? {
-                (Token::RParen, _) => {
-                    parser.eat_token();
-                    break;
-                }
-                _ => match parser.parse()? {
+            match parser.peek("opening paren for starting module field")? {
+                (Token::LParen, _) => match parser.parse()? {
                     ModuleField::Type(ty) => types.push(ty),
+                    // TODO: Add more fields
                 },
+                _ => break,
             }
         }
 
+        match_token!(parser, "closing paren for module", Token::RParen);
         Ok(Module {
             start,
             ident,
@@ -263,6 +284,7 @@ impl<'a> Parse<'a> for ModuleField<'a> {
         let (keyword, offset) = parser.lookahead_keyword("keyword for module field")?;
         match keyword {
             "type" => Ok(ModuleField::Type(parser.parse()?)),
+            // TODO: Add more fields
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
     }
@@ -271,10 +293,11 @@ impl<'a> Parse<'a> for ModuleField<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
 impl<'a> Parse<'a> for TypeDef<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(parser, "left paren for type", Token::LParen);
+        let (_, start) = match_token!(parser, "opening paren for type", Token::LParen);
         match_token!(parser, "'type' keyword", Token::Keyword("type"));
         let id = parser.maybe_ident("identifier for type")?;
         let ty = parser.parse()?;
+        match_token!(parser, "closing paren for type", Token::RParen);
         Ok(TypeDef { start, id, ty })
     }
 }
@@ -282,12 +305,12 @@ impl<'a> Parse<'a> for TypeDef<'a> {
 // https://webassembly.github.io/spec/core/text/types.html#text-functype
 impl<'a> Parse<'a> for FuncType<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(parser, "left paren for functype", Token::LParen);
+        let (_, start) = match_token!(parser, "opening paren for functype", Token::LParen);
         match_token!(parser, "'func' keyword", Token::Keyword("func"));
 
         let mut params = vec![];
         loop {
-            match parser.peek("left paren for param in functype")? {
+            match parser.peek("opening paren for param in functype")? {
                 (Token::LParen, _)
                     if parser.lookahead_keyword("param keyword in functype")?.0 == "param" =>
                 {
@@ -299,7 +322,7 @@ impl<'a> Parse<'a> for FuncType<'a> {
 
         let mut results = vec![];
         loop {
-            match parser.peek("left paren for result in functype")? {
+            match parser.peek("opening paren for result in functype")? {
                 (Token::LParen, _) => results.push(parser.parse()?),
                 _ => break,
             }
@@ -317,7 +340,7 @@ impl<'a> Parse<'a> for FuncType<'a> {
 // https://webassembly.github.io/spec/core/text/types.html#text-param
 impl<'a> Parse<'a> for Param<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(parser, "left paren for param", Token::LParen);
+        let (_, start) = match_token!(parser, "opening paren for param", Token::LParen);
         match_token!(parser, "'param' keyword", Token::Keyword("param"));
         let id = parser.maybe_ident("identifier for param")?;
         let ty = parser.parse()?;
@@ -346,7 +369,11 @@ impl<'a> Parse<'a> for ValType {
 // https://webassembly.github.io/spec/core/text/types.html#text-result
 impl<'a> Parse<'a> for FuncResult {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(parser, "left paren for function result type", Token::LParen);
+        let (_, start) = match_token!(
+            parser,
+            "opening paren for function result type",
+            Token::LParen
+        );
         match_token!(parser, "'result' keyword", Token::Keyword("result"));
         let ty = parser.parse()?;
         match_token!(
@@ -399,33 +426,142 @@ mod tests {
     }
 
     macro_rules! assert_parse {
-        ($input:expr, $expect:pat if $cond:expr) => {
+        ($input:expr, $node:ty, $expect:pat if $cond:expr) => {
             let input = $input;
-            match Parser::new(input).parse_all().unwrap().module {
+            let mut parser = Parser::new(input);
+            let node: $node = parser.parse().unwrap();
+            match node {
                 $expect if $cond => { /* OK */ }
-                e => panic!(
+                _ => panic!(
                     "assertion failed: {:?} did not match to {}",
-                    e,
-                    stringify!($expect if $cond:expr)
+                    node,
+                    stringify!($expect if $cond)
                 ),
             }
+            assert!(parser.is_done(), "{:?}", parser.tokens.collect::<Vec<_>>());
         };
-        ($input:expr, $expect:pat) => {
+        ($input:expr, $node:ty, $expect:pat) => {
+            assert_parse!($input, $node, $expect if true);
+        };
+    }
+
+    macro_rules! assert_error {
+        ($input:expr, $node:ty, $expect:pat if $cond:expr) => {{
+            use ParseErrorKind::*;
             let input = $input;
-            match Parser::new(input).parse_all().unwrap().module {
-                $expect => { /* OK */ }
-                e => panic!(
-                    "assertion failed: {:?} did not match to {}",
-                    e,
-                    stringify!($expect)
-                ),
+            match Parser::new(input).parse::<$node>().unwrap_err().kind {
+                $expect if $cond => { /* OK */ }
+                err => panic!("assertion failed: {:?} did not match to pattern {}", err, stringify!($expect if $cond)),
             }
+        }};
+        ($input:expr, $node:ty, $expect:pat) => {
+            assert_error!($input, $node, $expect if true);
         };
     }
 
     #[test]
+    fn root() {
+        assert_parse!(r#"
+            (module $foo)
+            (module $foo)
+            (module $foo)
+        "#, SyntaxTree<'_>, SyntaxTree{ module: Module { ident: "$foo", types, .. } } if types.is_empty());
+        assert_parse!(r#"
+            (module $foo (type $f1 (func)))
+            (module $foo (type $f1 (func)))
+            (module $foo (type $f1 (func)))
+        "#, SyntaxTree<'_>, SyntaxTree{ module: Module { ident: "$foo", types, .. } } if types.len() == 3);
+    }
+
+    #[test]
     fn module() {
-        assert_parse!(r#"(module $foo)"#, Module { ident: "$foo", types, .. } if types.is_empty());
-        assert_parse!(r#"(module $foo (type $f1 (func (param $a i32) (result i32)))"#, Module { ident: "$foo", types, .. } if types.len() == 1);
+        assert_parse!(r#"(module $foo)"#, Module<'_>, Module { ident: "$foo", types, .. } if types.is_empty());
+        assert_parse!(r#"(module $foo (type $f1 (func)))"#, Module<'_>, Module { ident: "$foo", types, .. } if types.len() == 1);
+        assert_parse!(r#"
+            (module $foo
+                (type $f1 (func))
+                (type $f1 (func)))
+        "#, Module<'_>, Module { ident: "$foo", types, .. } if types.len() == 2);
+
+        assert_error!(r#"module"#, Module<'_>, UnexpectedToken{ expected: "opening paren for module", ..});
+        assert_error!(r#"(module )"#, Module<'_>, UnexpectedToken{ expected: "identifier for module", ..});
+        assert_error!(r#"(module"#, Module<'_>, UnexpectedEndOfFile{..});
+        assert_error!(r#"(module $foo (type $f (func))"#, Module<'_>, UnexpectedEndOfFile{..});
+    }
+
+    #[test]
+    fn module_field() {
+        assert_parse!(
+            r#"(type $f1 (func))"#,
+            ModuleField<'_>,
+            ModuleField::Type(..)
+        );
+
+        assert_error!(r#"((type $f1 (func)))"#, ModuleField<'_>, UnexpectedToken{ expected: "keyword for module field", ..});
+        assert_error!(r#"(hello!)"#, ModuleField<'_>, UnexpectedKeyword("hello!"));
+    }
+
+    #[test]
+    fn type_def() {
+        assert_parse!(r#"(type $f1 (func))"#, TypeDef<'_>, TypeDef{ id: Some("$f1"), .. });
+        assert_parse!(r#"(type (func))"#, TypeDef<'_>, TypeDef{ id: None, .. });
+
+        assert_error!(r#"(type (func) (func))"#, TypeDef<'_>, UnexpectedToken { expected: "closing paren for type", .. });
+        assert_error!(r#"(type)"#, TypeDef<'_>, UnexpectedToken { expected: "opening paren for functype", .. });
+        assert_error!(r#"(type"#, TypeDef<'_>, UnexpectedEndOfFile { .. });
+    }
+
+    #[test]
+    fn func_type() {
+        assert_parse!(r#"(func)"#, FuncType<'_>, FuncType{ params, results, .. } if params.is_empty() && results.is_empty());
+        assert_parse!(r#"(func (param $a i32) (result i32))"#, FuncType<'_>, FuncType{ params, results, .. } if params.len() == 1 && results.len() == 1);
+        assert_parse!(r#"(func (param $a i32))"#, FuncType<'_>, FuncType{ params, results, .. } if params.len() == 1 && results.is_empty());
+        assert_parse!(r#"(func (result i32))"#, FuncType<'_>, FuncType{ params, results, .. } if params.is_empty() && results.len() == 1);
+        assert_parse!(r#"
+            (func
+                (param $a i32)
+                (param $a i32)
+                (result i32)
+                (result i32))
+        "#, FuncType<'_>, FuncType{ params, results, .. } if params.len() == 2 && results.len() == 2);
+
+        assert_error!(r#"func"#, FuncType<'_>, UnexpectedToken{ expected: "opening paren for functype", .. });
+        assert_error!(r#"(type"#, FuncType<'_>, UnexpectedToken{ expected: "'func' keyword", .. });
+        assert_error!(r#"(func "#, FuncType<'_>, UnexpectedEndOfFile{ expected: "opening paren for param in functype", .. });
+        assert_error!(r#"(func (result i32)"#, FuncType<'_>, UnexpectedEndOfFile{ expected: "opening paren for result in functype", .. });
+        assert_error!(r#"(func (result i32) foo"#, FuncType<'_>, UnexpectedToken{ expected: "closing paren for functype", .. });
+    }
+
+    #[test]
+    fn param() {
+        assert_parse!(r#"(param $a i32)"#, Param<'_>, Param { id: Some("$a"), .. });
+        assert_parse!(r#"(param i32)"#, Param<'_>, Param { id: None, .. });
+
+        assert_error!(r#"param"#, Param<'_>, UnexpectedToken{ expected: "opening paren for param", .. });
+        assert_error!(r#"(module i32)"#, Param<'_>, UnexpectedToken{ expected: "'param' keyword", .. });
+        assert_error!(r#"(param)"#, Param<'_>, UnexpectedToken{ .. });
+        assert_error!(r#"(param i32 i64)"#, Param<'_>, UnexpectedToken{ expected: "closing paren for param", .. });
+        assert_error!(r#"(param i32"#, Param<'_>, UnexpectedEndOfFile{ expected: "closing paren for param", .. });
+    }
+
+    #[test]
+    fn value_type() {
+        assert_parse!(r#"i32"#, ValType, ValType::I32);
+        assert_parse!(r#"i64"#, ValType, ValType::I64);
+        assert_parse!(r#"f32"#, ValType, ValType::F32);
+        assert_parse!(r#"f64"#, ValType, ValType::F64);
+
+        assert_error!(r#"string"#, ValType, InvalidValType("string"));
+        assert_error!(r#"$hello"#, ValType, UnexpectedToken{ expected: "keyword for value type", .. });
+    }
+
+    #[test]
+    fn func_result() {
+        assert_parse!(r#"(result i32)"#, FuncResult, FuncResult { .. });
+
+        assert_error!(r#"result"#, FuncResult, UnexpectedToken { expected: "opening paren for function result type", .. });
+        assert_error!(r#"(hello"#, FuncResult, UnexpectedToken { expected: "'result' keyword", .. });
+        assert_error!(r#"(result)"#, FuncResult, UnexpectedToken { .. });
+        assert_error!(r#"(result i32"#, FuncResult, UnexpectedEndOfFile { expected: "closing paren for function result type", .. });
     }
 }
