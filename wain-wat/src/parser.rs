@@ -164,7 +164,7 @@ impl<'a> Parser<'a> {
     ) -> Result<'a, (&Token<'a>, usize)> {
         match lexed {
             Some(Ok((tok, offset))) => Ok((tok, *offset)),
-            Some(Err(err)) => Err(err.clone())?,
+            Some(Err(err)) => Err(err.clone().into()),
             None => self.unexpected_eof(expected),
         }
     }
@@ -191,7 +191,7 @@ impl<'a> Parser<'a> {
     fn lookahead_keyword(&self, expected: &'static str) -> Result<'a, (&'a str, usize)> {
         match self.lookahead(expected)? {
             (Token::Keyword(kw), offset) => Ok((*kw, offset)),
-            (tok, offset) => return self.unexpected_token(tok.clone(), expected, offset),
+            (tok, offset) => self.unexpected_token(tok.clone(), expected, offset),
         }
     }
 

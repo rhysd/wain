@@ -87,7 +87,7 @@ pub enum NumBase {
 }
 
 impl NumBase {
-    fn prefix(&self) -> &'static str {
+    fn prefix(self) -> &'static str {
         match self {
             NumBase::Hex => "0x",
             NumBase::Dec => "",
