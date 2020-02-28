@@ -259,13 +259,10 @@ impl<'a> Parse<'a> for Module<'a> {
 
         let mut types = vec![];
 
-        loop {
-            match parser.peek("opening paren for starting module field")? {
-                (Token::LParen, _) => match parser.parse()? {
-                    ModuleField::Type(ty) => types.push(ty),
-                    // TODO: Add more fields
-                },
-                _ => break,
+        while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
+            match parser.parse()? {
+                ModuleField::Type(ty) => types.push(ty),
+                // TODO: Add more fields
             }
         }
 
@@ -321,11 +318,8 @@ impl<'a> Parse<'a> for FuncType<'a> {
         }
 
         let mut results = vec![];
-        loop {
-            match parser.peek("opening paren for result in functype")? {
-                (Token::LParen, _) => results.push(parser.parse()?),
-                _ => break,
-            }
+        while let (Token::LParen, _) = parser.peek("opening paren for result in functype")? {
+            results.push(parser.parse()?);
         }
 
         match_token!(parser, "closing paren for functype", Token::RParen);
