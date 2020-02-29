@@ -187,7 +187,7 @@ impl<'a> Parser<'a> {
     fn invalid_utf8_char<T>(&self, offset: usize) -> Result<'a, T> {
         self.error(
             ParseErrorKind::InvalidStringFormat(
-                "UTF-8 character must be in format u{hexnum} like u{e38182} in range of hexnum < 0xd800 or 0xe0000 <= hexnum < 0x110000",
+                "UTF-8 character must be in format u{hexnum} like u{308f} in range of hexnum < 0xd800 or 0xe0000 <= hexnum < 0x110000",
             ),
             offset,
         )
@@ -451,34 +451,16 @@ impl<'a> Parse<'a> for FuncResult {
     }
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-import
-impl<'a> Parse<'a> for Import<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let start = parser.opening_paren("import")?;
-        match_token!(parser, "'import' keyword", Token::Keyword("import"));
-        let mod_name = parser.parse()?;
-        let name = parser.parse()?;
-        let desc = parser.parse()?;
-        parser.closing_paren("import")?;
-        Ok(Import {
-            start,
-            mod_name,
-            name,
-            desc,
-        })
-    }
-}
-
 // https://webassembly.github.io/spec/core/text/values.html#text-name
 impl<'a> Parse<'a> for Name {
     // TODO: Move this logic to parser as encoding literal into Vec<u8> then use it in this method
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (src, offset) = match_token!(parser, "string literal", Token::String(s) => s);
+        let (src, offset) = match_token!(parser, "string literal for name", Token::String(s) => s);
 
         // A name string must form a valid UTF-8 encoding as defined by Unicode (Section 2.5)
         let mut name = String::new();
         let mut chars = src.char_indices();
-        for (i, c) in chars.next() {
+        while let Some((i, c)) = chars.next() {
             if c != '\\' {
                 name.push(c);
             } else {
@@ -531,12 +513,30 @@ impl<'a> Parse<'a> for Name {
     }
 }
 
+// https://webassembly.github.io/spec/core/text/modules.html#text-import
+impl<'a> Parse<'a> for Import<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let start = parser.opening_paren("import")?;
+        match_token!(parser, "'import' keyword", Token::Keyword("import"));
+        let mod_name = parser.parse()?;
+        let name = parser.parse()?;
+        let desc = parser.parse()?;
+        parser.closing_paren("import")?;
+        Ok(Import {
+            start,
+            mod_name,
+            name,
+            desc,
+        })
+    }
+}
+
 // https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
 impl<'a> Parse<'a> for ImportDesc<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         let start = parser.opening_paren("import item")?;
-        let id = parser.maybe_ident("identifier for import description")?;
         let (keyword, offset) = match_token!(parser, "one of 'func', 'table', 'memory', 'global'", Token::Keyword(kw) => kw);
+        let id = parser.maybe_ident("identifier for import item")?;
         let desc = match keyword {
             "func" => ImportDesc::Func {
                 start,
@@ -781,5 +781,105 @@ mod tests {
         assert_error!(r#"(hello"#, FuncResult, UnexpectedToken { expected: "'result' keyword", .. });
         assert_error!(r#"(result)"#, FuncResult, UnexpectedToken { .. });
         assert_error!(r#"(result i32"#, FuncResult, MissingParen { paren: ')', .. });
+    }
+
+    #[test]
+    fn name() {
+        assert_parse!(r#""n""#, Name, Name(n) if n == "n");
+        assert_parse!(r#""name""#, Name, Name(n) if n == "name");
+        assert_parse!(r#""a\tb\nc""#, Name, Name(n) if n == "a\tb\nc");
+        assert_parse!(r#""""#, Name, Name(n) if n.is_empty());
+        assert_parse!(r#""\t\n\r\"\'\\\u{3042}\41""#, Name, Name(n) if n == "\t\n\r\"'\\あA");
+
+        assert_error!(r#""\x""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\0""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\0x""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\u""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\u{""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\u{41""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\u{}""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\u{hello!}""#, Name, InvalidStringFormat(..));
+    }
+
+    #[test]
+    fn import() {
+        assert_parse!(
+            r#"(import "mod" "name" (func (type 0)))"#,
+            Import<'_>,
+            Import {
+                mod_name: Name(mn),
+                name: Name(n),
+                ..
+            } if mn == "mod" && n == "name"
+        );
+
+        assert_error!(r#"import"#, Import<'_>, MissingParen{ paren: '(', .. });
+        assert_error!(r#"(hello"#, Import<'_>, UnexpectedToken{ expected: "'import' keyword", .. });
+        assert_error!(r#"(import "mod" "name" (func (type 0))"#, Import<'_>, MissingParen{ paren: ')', .. });
+        assert_error!(r#"(import "mod" (func (type 0))"#, Import<'_>, UnexpectedToken{ .. });
+        assert_error!(r#"(import (func (type 0))"#, Import<'_>, UnexpectedToken{ .. });
+    }
+
+    #[test]
+    fn import_desc() {
+        assert_parse!(r#"(func (type 0))"#, ImportDesc<'_>, ImportDesc::Func{ id: None, .. });
+        assert_parse!(r#"(func $foo (type 0))"#, ImportDesc<'_>, ImportDesc::Func{ id: Some("$foo"), .. });
+
+        assert_error!(r#"func"#, ImportDesc<'_>, MissingParen{ paren: '(', .. });
+        assert_error!(r#"(func (type 0)"#, ImportDesc<'_>, UnexpectedEndOfFile{ .. });
+        assert_error!(r#"(hello $foo"#, ImportDesc<'_>, UnexpectedKeyword("hello"));
+    }
+
+    #[test]
+    fn type_use() {
+        // XXX: Parsing TypeUse<'a> directly does not work since parser tries to parse (param)* and
+        // (result)* and fails with unexpected EOF when they are missing. This is not a real-world
+        // problem because typeuse is always used within other statement.
+        assert_parse!(
+            r#"(func (type 0))"#,
+            ImportDesc<'_>,
+            ImportDesc::Func{
+                ty: TypeUse { params, results, .. },
+                ..
+            } if params.is_empty() && results.is_empty()
+        );
+        assert_parse!(
+            r#"(func (type 0) (param i32))"#,
+            ImportDesc<'_>,
+            ImportDesc::Func{
+                ty: TypeUse { params, results, .. },
+                ..
+            } if params.len() == 1 && results.is_empty()
+        );
+        assert_parse!(
+            r#"(func (type 0) (result i32))"#,
+            ImportDesc<'_>,
+            ImportDesc::Func{
+                ty: TypeUse { params, results, .. },
+                ..
+            } if params.is_empty() && results.len() == 1
+        );
+        assert_parse!(
+            r#"(func (type 0) (param i32) (result i32))"#,
+            ImportDesc<'_>,
+            ImportDesc::Func{
+                ty: TypeUse { params, results, .. },
+                ..
+            } if params.len() == 1 && results.len() == 1
+        );
+
+        assert_error!(r#"type"#, TypeUse<'_>, MissingParen{ paren: '(', .. });
+        assert_error!(r#"(type 0"#, TypeUse<'_>, MissingParen{ paren: ')', .. });
+        assert_error!(r#"(hello"#, TypeUse<'_>, UnexpectedToken{ expected: "'type' keyword for typeuse", ..});
+    }
+
+    #[test]
+    fn index() {
+        assert_parse!(r#"0"#, Index<'_>, Index::Num(0));
+        assert_parse!(r#"0x1f"#, Index<'_>, Index::Num(0x1f));
+        assert_parse!(r#"$foo"#, Index<'_>, Index::Ident("$foo"));
+
+        assert_error!(r#"hi"#, Index<'_>, UnexpectedToken{ expected: "number or identifier for index", .. });
+        assert_error!(r#""#, Index<'_>, UnexpectedEndOfFile{ expected: "number or identifier for index", .. });
     }
 }
