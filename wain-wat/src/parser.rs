@@ -282,6 +282,16 @@ impl<'a> Parser<'a> {
             self.missing_paren(')', None, what, self.source.len())
         }
     }
+
+    fn parse_u32(&mut self, expected: &'static str) -> Result<'a, u32> {
+        match self.next_token(expected)? {
+            (Token::Int(sign, base, s), offset) if sign == Sign::Minus => {
+                self.error(ParseErrorKind::NumberMustBePositive(base, s), offset)
+            }
+            (Token::Int(_, base, s), _) => Ok(u32::from_str_radix(s, base.radix()).unwrap()),
+            (tok, offset) => self.unexpected_token(tok.clone(), expected, offset),
+        }
+    }
 }
 
 macro_rules! match_token {
@@ -543,7 +553,21 @@ impl<'a> Parse<'a> for ImportDesc<'a> {
                 id,
                 ty: parser.parse()?,
             },
-            // TODO: Add table, memory, global
+            "table" => ImportDesc::Table {
+                start,
+                id,
+                ty: parser.parse()?,
+            },
+            "memory" => ImportDesc::Memory {
+                start,
+                id,
+                ty: parser.parse()?,
+            },
+            "global" => ImportDesc::Global {
+                start,
+                id,
+                ty: parser.parse()?,
+            },
             kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         };
         parser.closing_paren("import item")?;
@@ -599,6 +623,63 @@ impl<'a> Parse<'a> for Index<'a> {
             }
             (Token::Ident(id), _) => Ok(Index::Ident(id)),
             (tok, offset) => parser.unexpected_token(tok.clone(), expected, offset),
+        }
+    }
+}
+
+// https://webassembly.github.io/spec/core/text/types.html#text-tabletype
+impl<'a> Parse<'a> for TableType {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let limit = parser.parse()?;
+        match_token!(
+            parser,
+            "'funcref' keyword for table type",
+            Token::Keyword("funcref")
+        );
+        Ok(TableType { limit })
+    }
+}
+
+// https://webassembly.github.io/spec/core/text/types.html#text-limits
+impl<'a> Parse<'a> for Limits {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let min = parser.parse_u32("u32 for min table limit")?;
+        Ok(match parser.peek("u32 for max table limit")? {
+            (Token::Int(..), _) => {
+                let max = parser.parse_u32("u32 for min table limit")?;
+                Limits::Range { min, max }
+            }
+            _ => Limits::From { min },
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/text/types.html#text-memtype
+impl<'a> Parse<'a> for MemType {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        parser.parse().map(|limit| MemType { limit })
+    }
+}
+
+// https://webassembly.github.io/spec/core/text/types.html#text-globaltype
+impl<'a> Parse<'a> for GlobalType {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        match parser.peek("'(' for mut or value type of global type")? {
+            (Token::LParen, _) => {
+                parser.eat_token(); // eat '('
+                match_token!(
+                    parser,
+                    "'mut' keyword for global type",
+                    Token::Keyword("mut")
+                );
+                let ty = parser.parse()?;
+                parser.closing_paren("mutable global type")?;
+                Ok(GlobalType { mutable: true, ty })
+            }
+            _ => Ok(GlobalType {
+                mutable: false,
+                ty: parser.parse()?,
+            }),
         }
     }
 }
@@ -714,6 +795,11 @@ mod tests {
             ModuleField<'_>,
             ModuleField::Type(..)
         );
+        assert_parse!(
+            r#"(import "m" "n" (func (type 0)))"#,
+            ModuleField<'_>,
+            ModuleField::Import(..)
+        );
 
         assert_error!(r#"((type $f1 (func)))"#, ModuleField<'_>, UnexpectedToken{ expected: "keyword for module field", ..});
         assert_error!(r#"(hello!)"#, ModuleField<'_>, UnexpectedKeyword("hello!"));
@@ -824,6 +910,12 @@ mod tests {
     fn import_desc() {
         assert_parse!(r#"(func (type 0))"#, ImportDesc<'_>, ImportDesc::Func{ id: None, .. });
         assert_parse!(r#"(func $foo (type 0))"#, ImportDesc<'_>, ImportDesc::Func{ id: Some("$foo"), .. });
+        assert_parse!(r#"(table 0 funcref)"#, ImportDesc<'_>, ImportDesc::Table{ id: None, .. });
+        assert_parse!(r#"(table $foo 0 funcref)"#, ImportDesc<'_>, ImportDesc::Table{ id: Some("$foo"), .. });
+        assert_parse!(r#"(memory 0)"#, ImportDesc<'_>, ImportDesc::Memory{ id: None, .. });
+        assert_parse!(r#"(memory $foo 0)"#, ImportDesc<'_>, ImportDesc::Memory{ id: Some("$foo"), .. });
+        assert_parse!(r#"(global i32)"#, ImportDesc<'_>, ImportDesc::Global{ id: None, .. });
+        assert_parse!(r#"(global $foo i32)"#, ImportDesc<'_>, ImportDesc::Global{ id: Some("$foo"), .. });
 
         assert_error!(r#"func"#, ImportDesc<'_>, MissingParen{ paren: '(', .. });
         assert_error!(r#"(func (type 0)"#, ImportDesc<'_>, UnexpectedEndOfFile{ .. });
@@ -881,5 +973,73 @@ mod tests {
 
         assert_error!(r#"hi"#, Index<'_>, UnexpectedToken{ expected: "number or identifier for index", .. });
         assert_error!(r#""#, Index<'_>, UnexpectedEndOfFile{ expected: "number or identifier for index", .. });
+    }
+
+    #[test]
+    fn table_type_and_limits() {
+        assert_parse!(
+            r#"0 funcref"#,
+            TableType,
+            TableType {
+                limit: Limits::From { min: 0 }
+            }
+        );
+        assert_parse!(
+            r#"0 1 funcref"#,
+            TableType,
+            TableType {
+                limit: Limits::Range { min: 0, max: 1 }
+            }
+        );
+
+        assert_error!(r#"0 1 hi"#, TableType, UnexpectedToken{ expected: "'funcref' keyword for table type", .. });
+        assert_error!(r#"hi"#, TableType, UnexpectedToken{ expected: "u32 for min table limit", .. });
+    }
+
+    #[test]
+    fn memtype() {
+        assert_parse!(
+            r#"0 10"#,
+            MemType,
+            MemType {
+                limit: Limits::Range { min: 0, max: 10 }
+            }
+        );
+    }
+
+    #[test]
+    fn global_type() {
+        assert_parse!(
+            r#"i32"#,
+            GlobalType,
+            GlobalType {
+                mutable: false,
+                ty: ValType::I32
+            }
+        );
+        assert_parse!(
+            r#"(mut i32)"#,
+            GlobalType,
+            GlobalType {
+                mutable: true,
+                ty: ValType::I32
+            }
+        );
+
+        assert_error!(
+            r#""#,
+            GlobalType,
+            UnexpectedEndOfFile { expected: "'(' for mut or value type of global type", .. }
+        );
+        assert_error!(
+            r#"(hello"#,
+            GlobalType,
+            UnexpectedToken { expected: "'mut' keyword for global type", .. }
+        );
+        assert_error!(
+            r#"(mut i32"#,
+            GlobalType,
+            MissingParen { paren: ')', .. }
+        );
     }
 }

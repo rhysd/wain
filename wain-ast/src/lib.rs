@@ -85,6 +85,21 @@ pub enum ImportDesc<'a> {
         id: Option<&'a str>,
         ty: TypeUse<'a>,
     },
+    Table {
+        start: usize,
+        id: Option<&'a str>,
+        ty: TableType,
+    },
+    Memory {
+        start: usize,
+        id: Option<&'a str>,
+        ty: MemType,
+    },
+    Global {
+        start: usize,
+        id: Option<&'a str>,
+        ty: GlobalType,
+    },
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#type-uses
@@ -101,4 +116,31 @@ pub struct TypeUse<'a> {
 pub enum Index<'a> {
     Num(u32),
     Ident(&'a str),
+}
+
+// https://webassembly.github.io/spec/core/text/types.html#text-tabletype
+// Note: elemtype is currently fixed to 'funcref'
+#[derive(Debug)]
+pub struct TableType {
+    pub limit: Limits,
+}
+
+// https://webassembly.github.io/spec/core/text/types.html#text-limits
+#[derive(Debug)]
+pub enum Limits {
+    Range { min: u32, max: u32 },
+    From { min: u32 },
+}
+
+// https://webassembly.github.io/spec/core/text/types.html#text-memtype
+#[derive(Debug)]
+pub struct MemType {
+    pub limit: Limits,
+}
+
+// https://webassembly.github.io/spec/core/text/types.html#text-globaltype
+#[derive(Debug)]
+pub struct GlobalType {
+    pub mutable: bool,
+    pub ty: ValType,
 }
