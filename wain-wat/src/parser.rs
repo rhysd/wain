@@ -18,6 +18,11 @@ pub enum ParseErrorKind<'a> {
     InvalidValType(&'a str),
     InvalidStringFormat(&'static str),
     NumberMustBePositive(NumBase, &'a str),
+    MissingParen {
+        paren: char,
+        got: Option<Token<'a>>,
+        what: &'a str,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -48,6 +53,16 @@ impl<'a> fmt::Display for ParseError<'a> {
             NumberMustBePositive(base, s) => {
                 write!(f, "number must be positive but got -{}{}", base.prefix(), s)?
             }
+            MissingParen {
+                paren,
+                got: Some(tok),
+                what,
+            } => write!(f, "expected paren '{}' for {} but got {}", paren, what, tok)?,
+            MissingParen {
+                paren,
+                got: None,
+                what,
+            } => write!(f, "expected paren '{}' for {} but reached EOF", paren, what)?,
         };
 
         let start = self.offset;
@@ -235,6 +250,38 @@ impl<'a> Parser<'a> {
             _ => None,
         })
     }
+
+    fn missing_paren(
+        &mut self,
+        paren: char,
+        got: Option<Token<'a>>,
+        what: &'static str,
+        offset: usize,
+    ) -> Result<'a, usize> {
+        self.error(ParseErrorKind::MissingParen { paren, got, what }, offset)
+    }
+
+    fn opening_paren(&mut self, what: &'static str) -> Result<'a, usize> {
+        if let Some(lexed) = self.tokens.next() {
+            match lexed? {
+                (Token::LParen, offset) => Ok(offset),
+                (tok, offset) => self.missing_paren('(', Some(tok), what, offset),
+            }
+        } else {
+            self.missing_paren('(', None, what, self.source.len())
+        }
+    }
+
+    fn closing_paren(&mut self, what: &'static str) -> Result<'a, usize> {
+        if let Some(lexed) = self.tokens.next() {
+            match lexed? {
+                (Token::RParen, offset) => Ok(offset),
+                (tok, offset) => self.missing_paren(')', Some(tok), what, offset),
+            }
+        } else {
+            self.missing_paren(')', None, what, self.source.len())
+        }
+    }
 }
 
 macro_rules! match_token {
@@ -282,7 +329,7 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
 impl<'a> Parse<'a> for Module<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         // https://webassembly.github.io/spec/core/text/modules.html#text-module
-        let (_, start) = match_token!(parser, "opening paren for module", Token::LParen);
+        let start = parser.opening_paren("module")?;
         match_token!(parser, "'module' keyword", Token::Keyword("module"));
         let (ident, _) = match_token!(parser, "identifier for module", Token::Ident(id) => id);
 
@@ -297,7 +344,7 @@ impl<'a> Parse<'a> for Module<'a> {
             }
         }
 
-        match_token!(parser, "closing paren for module", Token::RParen);
+        parser.closing_paren("module")?;
         Ok(Module {
             start,
             ident,
@@ -323,11 +370,11 @@ impl<'a> Parse<'a> for ModuleField<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
 impl<'a> Parse<'a> for TypeDef<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(parser, "opening paren for type", Token::LParen);
+        let start = parser.opening_paren("type")?;
         match_token!(parser, "'type' keyword", Token::Keyword("type"));
         let id = parser.maybe_ident("identifier for type")?;
         let ty = parser.parse()?;
-        match_token!(parser, "closing paren for type", Token::RParen);
+        parser.closing_paren("type")?;
         Ok(TypeDef { start, id, ty })
     }
 }
@@ -335,7 +382,7 @@ impl<'a> Parse<'a> for TypeDef<'a> {
 // https://webassembly.github.io/spec/core/text/types.html#text-functype
 impl<'a> Parse<'a> for FuncType<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(parser, "opening paren for functype", Token::LParen);
+        let start = parser.opening_paren("function type")?;
         match_token!(parser, "'func' keyword", Token::Keyword("func"));
 
         let mut params = vec![];
@@ -355,7 +402,7 @@ impl<'a> Parse<'a> for FuncType<'a> {
             results.push(parser.parse()?);
         }
 
-        match_token!(parser, "closing paren for functype", Token::RParen);
+        parser.closing_paren("function type")?;
         Ok(FuncType {
             start,
             params,
@@ -367,11 +414,11 @@ impl<'a> Parse<'a> for FuncType<'a> {
 // https://webassembly.github.io/spec/core/text/types.html#text-param
 impl<'a> Parse<'a> for Param<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(parser, "opening paren for param", Token::LParen);
+        let start = parser.opening_paren("parameter")?;
         match_token!(parser, "'param' keyword", Token::Keyword("param"));
         let id = parser.maybe_ident("identifier for param")?;
         let ty = parser.parse()?;
-        match_token!(parser, "closing paren for param", Token::RParen);
+        parser.closing_paren("parameter")?;
         Ok(Param { start, id, ty })
     }
 }
@@ -396,18 +443,10 @@ impl<'a> Parse<'a> for ValType {
 // https://webassembly.github.io/spec/core/text/types.html#text-result
 impl<'a> Parse<'a> for FuncResult {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(
-            parser,
-            "opening paren for function result type",
-            Token::LParen
-        );
+        let start = parser.opening_paren("function result")?;
         match_token!(parser, "'result' keyword", Token::Keyword("result"));
         let ty = parser.parse()?;
-        match_token!(
-            parser,
-            "closing paren for function result type",
-            Token::RParen
-        );
+        parser.closing_paren("function result")?;
         Ok(FuncResult { start, ty })
     }
 }
@@ -415,20 +454,12 @@ impl<'a> Parse<'a> for FuncResult {
 // https://webassembly.github.io/spec/core/text/modules.html#text-import
 impl<'a> Parse<'a> for Import<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(
-            parser,
-            "opening paren for import description",
-            Token::LParen
-        );
+        let start = parser.opening_paren("import")?;
         match_token!(parser, "'import' keyword", Token::Keyword("import"));
         let mod_name = parser.parse()?;
         let name = parser.parse()?;
         let desc = parser.parse()?;
-        match_token!(
-            parser,
-            "closing paren for import description",
-            Token::RParen
-        );
+        parser.closing_paren("import")?;
         Ok(Import {
             start,
             mod_name,
@@ -503,11 +534,7 @@ impl<'a> Parse<'a> for Name {
 // https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
 impl<'a> Parse<'a> for ImportDesc<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(
-            parser,
-            "opening paren for import description",
-            Token::LParen
-        );
+        let start = parser.opening_paren("import item")?;
         let id = parser.maybe_ident("identifier for import description")?;
         let (keyword, offset) = match_token!(parser, "one of 'func', 'table', 'memory', 'global'", Token::Keyword(kw) => kw);
         let desc = match keyword {
@@ -519,11 +546,7 @@ impl<'a> Parse<'a> for ImportDesc<'a> {
             // TODO: Add table, memory, global
             kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         };
-        match_token!(
-            parser,
-            "closing paren for import description",
-            Token::RParen
-        );
+        parser.closing_paren("import item")?;
         Ok(desc)
     }
 }
@@ -531,12 +554,10 @@ impl<'a> Parse<'a> for ImportDesc<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#type-uses
 impl<'a> Parse<'a> for TypeUse<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (_, start) = match_token!(parser, "opening paren for typeuse", Token::LParen);
+        let start = parser.opening_paren("type use")?;
         match_token!(parser, "'type' keyword for typeuse", Token::Keyword("type"));
-
         let idx = parser.parse()?;
-
-        match_token!(parser, "closing paren for typeuse", Token::RParen);
+        parser.closing_paren("type use")?;
 
         let mut params = vec![];
         loop {
@@ -680,7 +701,7 @@ mod tests {
                 (type $f1 (func)))
         "#, Module<'_>, Module { ident: "$foo", types, .. } if types.len() == 2);
 
-        assert_error!(r#"module"#, Module<'_>, UnexpectedToken{ expected: "opening paren for module", ..});
+        assert_error!(r#"module"#, Module<'_>, MissingParen{ paren: '(', ..});
         assert_error!(r#"(module )"#, Module<'_>, UnexpectedToken{ expected: "identifier for module", ..});
         assert_error!(r#"(module"#, Module<'_>, UnexpectedEndOfFile{..});
         assert_error!(r#"(module $foo (type $f (func))"#, Module<'_>, UnexpectedEndOfFile{..});
@@ -703,8 +724,8 @@ mod tests {
         assert_parse!(r#"(type $f1 (func))"#, TypeDef<'_>, TypeDef{ id: Some("$f1"), .. });
         assert_parse!(r#"(type (func))"#, TypeDef<'_>, TypeDef{ id: None, .. });
 
-        assert_error!(r#"(type (func) (func))"#, TypeDef<'_>, UnexpectedToken { expected: "closing paren for type", .. });
-        assert_error!(r#"(type)"#, TypeDef<'_>, UnexpectedToken { expected: "opening paren for functype", .. });
+        assert_error!(r#"(type (func) (func))"#, TypeDef<'_>, MissingParen { paren: ')', .. });
+        assert_error!(r#"(type)"#, TypeDef<'_>, MissingParen { paren: '(', .. });
         assert_error!(r#"(type"#, TypeDef<'_>, UnexpectedEndOfFile { .. });
     }
 
@@ -722,11 +743,11 @@ mod tests {
                 (result i32))
         "#, FuncType<'_>, FuncType{ params, results, .. } if params.len() == 2 && results.len() == 2);
 
-        assert_error!(r#"func"#, FuncType<'_>, UnexpectedToken{ expected: "opening paren for functype", .. });
+        assert_error!(r#"func"#, FuncType<'_>, MissingParen{ paren: '(', .. });
         assert_error!(r#"(type"#, FuncType<'_>, UnexpectedToken{ expected: "'func' keyword", .. });
         assert_error!(r#"(func "#, FuncType<'_>, UnexpectedEndOfFile{ expected: "opening paren for param in functype", .. });
         assert_error!(r#"(func (result i32)"#, FuncType<'_>, UnexpectedEndOfFile{ expected: "opening paren for result in functype", .. });
-        assert_error!(r#"(func (result i32) foo"#, FuncType<'_>, UnexpectedToken{ expected: "closing paren for functype", .. });
+        assert_error!(r#"(func (result i32) foo"#, FuncType<'_>, MissingParen{ paren: ')', .. });
     }
 
     #[test]
@@ -734,11 +755,11 @@ mod tests {
         assert_parse!(r#"(param $a i32)"#, Param<'_>, Param { id: Some("$a"), .. });
         assert_parse!(r#"(param i32)"#, Param<'_>, Param { id: None, .. });
 
-        assert_error!(r#"param"#, Param<'_>, UnexpectedToken{ expected: "opening paren for param", .. });
+        assert_error!(r#"param"#, Param<'_>, MissingParen{ paren: '(', .. });
         assert_error!(r#"(module i32)"#, Param<'_>, UnexpectedToken{ expected: "'param' keyword", .. });
         assert_error!(r#"(param)"#, Param<'_>, UnexpectedToken{ .. });
-        assert_error!(r#"(param i32 i64)"#, Param<'_>, UnexpectedToken{ expected: "closing paren for param", .. });
-        assert_error!(r#"(param i32"#, Param<'_>, UnexpectedEndOfFile{ expected: "closing paren for param", .. });
+        assert_error!(r#"(param i32 i64)"#, Param<'_>, MissingParen { paren: ')', .. });
+        assert_error!(r#"(param i32"#, Param<'_>, MissingParen{ paren: ')', .. });
     }
 
     #[test]
@@ -756,9 +777,9 @@ mod tests {
     fn func_result() {
         assert_parse!(r#"(result i32)"#, FuncResult, FuncResult { .. });
 
-        assert_error!(r#"result"#, FuncResult, UnexpectedToken { expected: "opening paren for function result type", .. });
+        assert_error!(r#"result"#, FuncResult, MissingParen { paren: '(', .. });
         assert_error!(r#"(hello"#, FuncResult, UnexpectedToken { expected: "'result' keyword", .. });
         assert_error!(r#"(result)"#, FuncResult, UnexpectedToken { .. });
-        assert_error!(r#"(result i32"#, FuncResult, UnexpectedEndOfFile { expected: "closing paren for function result type", .. });
+        assert_error!(r#"(result i32"#, FuncResult, MissingParen { paren: ')', .. });
     }
 }

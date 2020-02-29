@@ -63,7 +63,7 @@ impl<'a> fmt::Display for LexError<'a> {
 
 type Result<'a, T> = ::std::result::Result<T, Box<LexError<'a>>>;
 
-#[cfg_attr(test, derive(Debug, PartialEq))]
+#[cfg_attr(test, derive(Debug))]
 #[derive(Clone, Copy, PartialEq)]
 pub enum Sign {
     Plus,
