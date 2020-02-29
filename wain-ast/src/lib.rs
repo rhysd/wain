@@ -13,13 +13,15 @@ pub struct Module<'a> {
     pub start: usize,
     pub ident: &'a str,
     pub types: Vec<TypeDef<'a>>,
-    // TODO: imports, funcs, table, memory, globals, exports, start, elems, data
+    pub imports: Vec<Import<'a>>,
+    // TODO: funcs, table, memory, globals, exports, start, elems, data
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
 #[derive(Debug)]
 pub enum ModuleField<'a> {
     Type(TypeDef<'a>),
+    Import(Import<'a>),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -60,4 +62,43 @@ pub enum ValType {
     I64,
     F32,
     F64,
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-import
+#[derive(Debug)]
+pub struct Import<'a> {
+    pub start: usize,
+    pub mod_name: Name,
+    pub name: Name,
+    pub desc: ImportDesc<'a>,
+}
+
+// https://webassembly.github.io/spec/core/text/values.html#text-name
+#[derive(Debug)]
+pub struct Name(pub String);
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
+#[derive(Debug)]
+pub enum ImportDesc<'a> {
+    Func {
+        start: usize,
+        id: Option<&'a str>,
+        ty: TypeUse<'a>,
+    },
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#type-uses
+#[derive(Debug)]
+pub struct TypeUse<'a> {
+    pub start: usize,
+    pub idx: Index<'a>,
+    pub params: Vec<Param<'a>>,
+    pub results: Vec<FuncResult>,
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#indices
+#[derive(Debug)]
+pub enum Index<'a> {
+    Num(u32),
+    Ident(&'a str),
 }

@@ -1,4 +1,5 @@
-use crate::lexer::{LexError, Lexer, Token};
+use crate::lexer::{LexError, Lexer, NumBase, Sign, Token};
+use std::char;
 use std::fmt;
 use std::mem;
 use wain_ast::*;
@@ -15,6 +16,8 @@ pub enum ParseErrorKind<'a> {
     },
     UnexpectedKeyword(&'a str),
     InvalidValType(&'a str),
+    InvalidStringFormat(&'static str),
+    NumberMustBePositive(NumBase, &'a str),
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -39,6 +42,12 @@ impl<'a> fmt::Display for ParseError<'a> {
                 "value type must be one of 'i32', 'i64', 'f32', 'f64' but got '{}'",
                 ty
             )?,
+            InvalidStringFormat(reason) => {
+                write!(f, "could not decode string literal: {}", reason)?
+            }
+            NumberMustBePositive(base, s) => {
+                write!(f, "number must be positive but got -{}{}", base.prefix(), s)?
+            }
         };
 
         let start = self.offset;
@@ -105,6 +114,8 @@ impl<I: Iterator> Iterator for LookAhead<I> {
     }
 }
 
+// TODO: Add index-to-id tables for types, funcs, tables, mems, globals, locals and labels
+// https://webassembly.github.io/spec/core/text/modules.html#indices
 pub struct Parser<'a> {
     source: &'a str,
     tokens: LookAhead<Lexer<'a>>,
@@ -155,6 +166,24 @@ impl<'a> Parser<'a> {
         self.error(
             ParseErrorKind::UnexpectedEndOfFile { expected },
             self.source().len(),
+        )
+    }
+
+    fn invalid_utf8_char<T>(&self, offset: usize) -> Result<'a, T> {
+        self.error(
+            ParseErrorKind::InvalidStringFormat(
+                "UTF-8 character must be in format u{hexnum} like u{e38182} in range of hexnum < 0xd800 or 0xe0000 <= hexnum < 0x110000",
+            ),
+            offset,
+        )
+    }
+
+    fn invalid_char_escape<T>(&self, offset: usize) -> Result<'a, T> {
+        self.error(
+            ParseErrorKind::InvalidStringFormat(
+                r#"escape must be one of \t, \n, \r, \", \', \\, \u{hexnum}, \MN"#,
+            ),
+            offset,
         )
     }
 
@@ -258,10 +287,12 @@ impl<'a> Parse<'a> for Module<'a> {
         let (ident, _) = match_token!(parser, "identifier for module", Token::Ident(id) => id);
 
         let mut types = vec![];
+        let mut imports = vec![];
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
             match parser.parse()? {
                 ModuleField::Type(ty) => types.push(ty),
+                ModuleField::Import(import) => imports.push(import),
                 // TODO: Add more fields
             }
         }
@@ -271,6 +302,7 @@ impl<'a> Parse<'a> for Module<'a> {
             start,
             ident,
             types,
+            imports,
         })
     }
 }
@@ -281,6 +313,7 @@ impl<'a> Parse<'a> for ModuleField<'a> {
         let (keyword, offset) = parser.lookahead_keyword("keyword for module field")?;
         match keyword {
             "type" => Ok(ModuleField::Type(parser.parse()?)),
+            "import" => Ok(ModuleField::Import(parser.parse()?)),
             // TODO: Add more fields
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
@@ -376,6 +409,176 @@ impl<'a> Parse<'a> for FuncResult {
             Token::RParen
         );
         Ok(FuncResult { start, ty })
+    }
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-import
+impl<'a> Parse<'a> for Import<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let (_, start) = match_token!(
+            parser,
+            "opening paren for import description",
+            Token::LParen
+        );
+        match_token!(parser, "'import' keyword", Token::Keyword("import"));
+        let mod_name = parser.parse()?;
+        let name = parser.parse()?;
+        let desc = parser.parse()?;
+        match_token!(
+            parser,
+            "closing paren for import description",
+            Token::RParen
+        );
+        Ok(Import {
+            start,
+            mod_name,
+            name,
+            desc,
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/text/values.html#text-name
+impl<'a> Parse<'a> for Name {
+    // TODO: Move this logic to parser as encoding literal into Vec<u8> then use it in this method
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let (src, offset) = match_token!(parser, "string literal", Token::String(s) => s);
+
+        // A name string must form a valid UTF-8 encoding as defined by Unicode (Section 2.5)
+        let mut name = String::new();
+        let mut chars = src.char_indices();
+        for (i, c) in chars.next() {
+            if c != '\\' {
+                name.push(c);
+            } else {
+                // Note: Lexer guarantees that at least one char follows after '\'
+                match chars.next().unwrap().1 {
+                    't' => name.push('\t'),
+                    'n' => name.push('\n'),
+                    'r' => name.push('\r'),
+                    '"' => name.push('"'),
+                    '\'' => name.push('\''),
+                    '\\' => name.push('\\'),
+                    'u' => {
+                        match chars.next() {
+                            Some((i, '{')) => {
+                                let start = i + 1; // next to '{'
+                                let end = loop {
+                                    match chars.next() {
+                                        Some((i, '}')) => break i,
+                                        Some(_) => continue,
+                                        None => return parser.invalid_utf8_char(offset + i),
+                                    }
+                                };
+                                if let Some(c) = u32::from_str_radix(&src[start..end], 16)
+                                    .ok()
+                                    .and_then(char::from_u32)
+                                {
+                                    name.push(c);
+                                } else {
+                                    return parser.invalid_utf8_char(offset + i);
+                                }
+                            }
+                            _ => return parser.invalid_utf8_char(offset + i),
+                        }
+                    }
+                    c => {
+                        let hi = c.to_digit(16);
+                        let lo = chars.next().and_then(|(_, c)| c.to_digit(16));
+                        match (hi, lo) {
+                            (Some(hi), Some(lo)) => match char::from_u32(hi * 16 + lo) {
+                                Some(c) => name.push(c),
+                                None => return parser.invalid_char_escape(offset + i),
+                            },
+                            _ => return parser.invalid_char_escape(offset + i),
+                        }
+                    }
+                }
+            }
+        }
+        Ok(Name(name))
+    }
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
+impl<'a> Parse<'a> for ImportDesc<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let (_, start) = match_token!(
+            parser,
+            "opening paren for import description",
+            Token::LParen
+        );
+        let id = parser.maybe_ident("identifier for import description")?;
+        let (keyword, offset) = match_token!(parser, "one of 'func', 'table', 'memory', 'global'", Token::Keyword(kw) => kw);
+        let desc = match keyword {
+            "func" => ImportDesc::Func {
+                start,
+                id,
+                ty: parser.parse()?,
+            },
+            // TODO: Add table, memory, global
+            kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
+        };
+        match_token!(
+            parser,
+            "closing paren for import description",
+            Token::RParen
+        );
+        Ok(desc)
+    }
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#type-uses
+impl<'a> Parse<'a> for TypeUse<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let (_, start) = match_token!(parser, "opening paren for typeuse", Token::LParen);
+        match_token!(parser, "'type' keyword for typeuse", Token::Keyword("type"));
+
+        let idx = parser.parse()?;
+
+        match_token!(parser, "closing paren for typeuse", Token::RParen);
+
+        let mut params = vec![];
+        loop {
+            match parser.peek("opening paren for param in typeuse")? {
+                (Token::LParen, _)
+                    if parser.lookahead_keyword("param keyword in typeuse")?.0 == "param" =>
+                {
+                    params.push(parser.parse()?);
+                }
+                _ => break,
+            }
+        }
+
+        let mut results = vec![];
+        while let (Token::LParen, _) = parser.peek("opening paren for result in typeuse")? {
+            results.push(parser.parse()?);
+        }
+
+        Ok(TypeUse {
+            start,
+            idx,
+            params,
+            results,
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#indices
+impl<'a> Parse<'a> for Index<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let expected = "number or identifier for index";
+        match parser.next_token(expected)? {
+            (Token::Int(sign, base, s), offset) if sign == Sign::Minus => {
+                parser.error(ParseErrorKind::NumberMustBePositive(base, s), offset)
+            }
+            (Token::Int(_, base, s), _) => {
+                let u = u32::from_str_radix(s, base.radix()).unwrap();
+                Ok(Index::Num(u))
+            }
+            (Token::Ident(id), _) => Ok(Index::Ident(id)),
+            (tok, offset) => parser.unexpected_token(tok.clone(), expected, offset),
+        }
     }
 }
 

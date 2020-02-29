@@ -64,7 +64,7 @@ impl<'a> fmt::Display for LexError<'a> {
 type Result<'a, T> = ::std::result::Result<T, Box<LexError<'a>>>;
 
 #[cfg_attr(test, derive(Debug, PartialEq))]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Sign {
     Plus,
     Minus,
@@ -87,10 +87,17 @@ pub enum NumBase {
 }
 
 impl NumBase {
-    fn prefix(self) -> &'static str {
+    pub fn prefix(self) -> &'static str {
         match self {
             NumBase::Hex => "0x",
             NumBase::Dec => "",
+        }
+    }
+
+    pub fn radix(self) -> u32 {
+        match self {
+            NumBase::Hex => 16,
+            NumBase::Dec => 10,
         }
     }
 }
