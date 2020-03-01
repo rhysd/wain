@@ -164,3 +164,24 @@ pub enum ExportKind {
     Memory,
     Global,
 }
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-func
+#[derive(Debug)]
+pub struct Func<'a> {
+    pub start: usize,
+    pub ty: TypeUse<'a>,
+    pub locals: Vec<Local<'a>>,
+    pub body: Vec<Instruction>,
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-local
+#[derive(Debug)]
+pub struct Local<'a> {
+    pub start: usize,
+    pub id: Option<&'a str>,
+    pub ty: ValType,
+}
+
+// TODO
+#[derive(Debug)]
+pub struct Instruction;

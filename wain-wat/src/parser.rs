@@ -251,13 +251,13 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn missing_paren(
+    fn missing_paren<T>(
         &mut self,
         paren: char,
         got: Option<Token<'a>>,
         what: &'static str,
         offset: usize,
-    ) -> Result<'a, usize> {
+    ) -> Result<'a, T> {
         self.error(ParseErrorKind::MissingParen { paren, got, what }, offset)
     }
 
@@ -291,6 +291,29 @@ impl<'a> Parser<'a> {
             (Token::Int(_, base, s), _) => Ok(u32::from_str_radix(s, base.radix()).unwrap()),
             (tok, offset) => self.unexpected_token(tok.clone(), expected, offset),
         }
+    }
+
+    fn parse_multiple<P: Parse<'a>>(&mut self, expected: &'static str) -> Result<'a, Vec<P>> {
+        let mut parsed = vec![];
+        loop {
+            match self.tokens.peek() {
+                Some(Ok((Token::LParen, _))) => parsed.push(self.parse()?),
+                Some(Ok(_)) => break,
+                Some(Err(err)) => return Err(err.clone().into()),
+                None => return self.missing_paren('(', None, expected, self.source.len()),
+            }
+        }
+        Ok(parsed)
+    }
+
+    fn fresh_id(&mut self) -> &'a str {
+        // For some syntax sugars, text format requires fresh IDs. They are unique IDs not conflicting
+        // with existing IDs.
+        // https://webassembly.github.io/spec/core/text/values.html#text-id-fresh
+        //
+        // This method returns 'new' unowned string so there should be a trick. For example, having
+        // &'a Vec<String> in Parser and generate a new ID in the vector and return it's slice.
+        unimplemented!()
     }
 }
 
@@ -411,11 +434,7 @@ impl<'a> Parse<'a> for FuncType<'a> {
             }
         }
 
-        let mut results = vec![];
-        while let (Token::LParen, _) = parser.peek("opening paren for result in functype")? {
-            results.push(parser.parse()?);
-        }
-
+        let results = parser.parse_multiple("result in function type")?;
         parser.closing_paren("function type")?;
         Ok(FuncType {
             start,
@@ -723,6 +742,131 @@ impl<'a> Parse<'a> for Export<'a> {
     }
 }
 
+// Helper enum to resolve import/export abbreviation in `func` syntax
+// https://webassembly.github.io/spec/core/text/modules.html#text-func-abbrev
+enum FuncAbbrev<'a> {
+    Import(Import<'a>),
+    Export(Export<'a>, Func<'a>),
+    NoAbbrev(Func<'a>),
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-func
+impl<'a> Parse<'a> for FuncAbbrev<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let start = parser.opening_paren("func")?;
+        match_token!(
+            parser,
+            "'func' keyword for function",
+            Token::Keyword("func")
+        );
+
+        let id = parser.maybe_ident("identifier for function")?;
+        let (keyword, offset) =
+            parser.lookahead_keyword("one of 'import', 'export', 'type' for function")?;
+        let abbrev = match keyword {
+            "import" => {
+                // `(func $id (import "m" "n") {typeuse})` is a syntax sugar of
+                // `(import "m" "n" (func $id {typeuse}))`
+                parser.opening_paren("import in func")?;
+                parser.eat_token(); // Eat 'import' keyword
+                let mod_name = parser.parse()?;
+                let name = parser.parse()?;
+                parser.closing_paren("import in func")?;
+                let ty = parser.parse()?;
+                let desc = ImportDesc::Func { start, id, ty };
+                FuncAbbrev::Import(Import {
+                    start,
+                    mod_name,
+                    name,
+                    desc,
+                })
+            }
+            "export" => {
+                let export_start = parser.opening_paren("export in func")?;
+                parser.eat_token(); // Eat 'export' keyword
+                let name = parser.parse()?;
+                parser.closing_paren("export in func")?;
+                let ty = parser.parse()?;
+                let locals = parser.parse()?;
+                let body = parser.parse_multiple("body of function")?;
+                let id = id.unwrap_or_else(|| parser.fresh_id());
+                FuncAbbrev::Export(
+                    Export {
+                        start: export_start,
+                        name,
+                        kind: ExportKind::Func,
+                        idx: Index::Ident(id),
+                    },
+                    Func {
+                        start,
+                        ty,
+                        locals,
+                        body,
+                    },
+                )
+            }
+            "type" => {
+                let ty = parser.parse()?;
+                let locals = parser.parse()?;
+                let body = parser.parse_multiple("body of function")?;
+                FuncAbbrev::NoAbbrev(Func {
+                    start,
+                    ty,
+                    locals,
+                    body,
+                })
+            }
+            kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
+        };
+
+        parser.closing_paren("func")?;
+        Ok(abbrev)
+    }
+}
+
+// Implement Parse for Vec due to abbreviation
+// https://webassembly.github.io/spec/core/text/modules.html#text-func-abbrev
+//
+// https://webassembly.github.io/spec/core/text/modules.html#text-local
+impl<'a> Parse<'a> for Vec<Local<'a>> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let mut locals = vec![];
+        while parser.lookahead_keyword("'local' keyword for locals")?.0 == "local" {
+            let start = parser.opening_paren("local")?;
+            parser.eat_token(); // Eat 'local' keyword
+
+            if let Some(id) = parser.maybe_ident("identifier for local")? {
+                let ty = parser.parse()?;
+                parser.closing_paren("local")?;
+                locals.push(Local {
+                    start,
+                    id: Some(id),
+                    ty,
+                });
+                continue;
+            }
+
+            // Only when ID is omitted, multiple types can be combined into one local statement
+            // `(local ty*)` means `(local ty)*`
+            while let (Token::LParen, _) = parser.peek("')' or typeuse for local")? {
+                locals.push(Local {
+                    start,
+                    id: None,
+                    ty: parser.parse()?,
+                });
+            }
+            parser.closing_paren("local")?;
+        }
+        Ok(locals)
+    }
+}
+
+impl<'a> Parse<'a> for Instruction {
+    fn parse(_parser: &mut Parser<'a>) -> Result<'a, Self> {
+        Ok(Instruction) // TODO
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -876,7 +1020,7 @@ mod tests {
         assert_error!(r#"func"#, FuncType<'_>, MissingParen{ paren: '(', .. });
         assert_error!(r#"(type"#, FuncType<'_>, UnexpectedToken{ expected: "'func' keyword", .. });
         assert_error!(r#"(func "#, FuncType<'_>, UnexpectedEndOfFile{ expected: "opening paren for param in functype", .. });
-        assert_error!(r#"(func (result i32)"#, FuncType<'_>, UnexpectedEndOfFile{ expected: "opening paren for result in functype", .. });
+        assert_error!(r#"(func (result i32)"#, FuncType<'_>, MissingParen{ paren: '(', got: None, .. });
         assert_error!(r#"(func (result i32) foo"#, FuncType<'_>, MissingParen{ paren: ')', .. });
     }
 
