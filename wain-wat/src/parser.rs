@@ -345,11 +345,13 @@ impl<'a> Parse<'a> for Module<'a> {
 
         let mut types = vec![];
         let mut imports = vec![];
+        let mut exports = vec![];
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
             match parser.parse()? {
                 ModuleField::Type(ty) => types.push(ty),
                 ModuleField::Import(import) => imports.push(import),
+                ModuleField::Export(export) => exports.push(export),
                 // TODO: Add more fields
             }
         }
@@ -360,6 +362,7 @@ impl<'a> Parse<'a> for Module<'a> {
             ident,
             types,
             imports,
+            exports,
         })
     }
 }
@@ -371,6 +374,7 @@ impl<'a> Parse<'a> for ModuleField<'a> {
         match keyword {
             "type" => Ok(ModuleField::Type(parser.parse()?)),
             "import" => Ok(ModuleField::Import(parser.parse()?)),
+            "export" => Ok(ModuleField::Export(parser.parse()?)),
             // TODO: Add more fields
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
@@ -684,6 +688,41 @@ impl<'a> Parse<'a> for GlobalType {
     }
 }
 
+// https://webassembly.github.io/spec/core/text/modules.html#text-export
+impl<'a> Parse<'a> for Export<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let start = parser.opening_paren("export")?;
+        match_token!(
+            parser,
+            "'export' keyword for export",
+            Token::Keyword("export")
+        );
+        let name = parser.parse()?;
+
+        parser.opening_paren("export item")?;
+        let (keyword, offset) =
+            match_token!(parser, "keyword for export item", Token::Keyword(kw) => kw);
+        let kind = match keyword {
+            "func" => ExportKind::Func,
+            "table" => ExportKind::Table,
+            "memory" => ExportKind::Memory,
+            "global" => ExportKind::Global,
+            _ => return parser.error(ParseErrorKind::UnexpectedKeyword(keyword), offset),
+        };
+        let idx = parser.parse()?;
+        parser.closing_paren("export item")?;
+
+        parser.closing_paren("export")?;
+
+        Ok(Export {
+            start,
+            name,
+            kind,
+            idx,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -799,6 +838,11 @@ mod tests {
             r#"(import "m" "n" (func (type 0)))"#,
             ModuleField<'_>,
             ModuleField::Import(..)
+        );
+        assert_parse!(
+            r#"(export "n" (func $foo))"#,
+            ModuleField<'_>,
+            ModuleField::Export(..)
         );
 
         assert_error!(r#"((type $f1 (func)))"#, ModuleField<'_>, UnexpectedToken{ expected: "keyword for module field", ..});
@@ -1040,6 +1084,40 @@ mod tests {
             r#"(mut i32"#,
             GlobalType,
             MissingParen { paren: ')', .. }
+        );
+    }
+
+    #[test]
+    fn export() {
+        assert_parse!(
+            r#"(export "hi" (func 0))"#,
+            Export<'_>,
+            Export{ name: Name(n), kind: ExportKind::Func, idx: Index::Num(0), .. } if n == "hi"
+        );
+        assert_parse!(
+            r#"(export "hi" (table $foo))"#,
+            Export<'_>,
+            Export{ name: Name(n), kind: ExportKind::Table, idx: Index::Ident("$foo"), .. } if n == "hi"
+        );
+        assert_parse!(
+            r#"(export "hi" (memory 0))"#,
+            Export<'_>,
+            Export{ name: Name(n), kind: ExportKind::Memory, idx: Index::Num(0), .. } if n == "hi"
+        );
+        assert_parse!(
+            r#"(export "hi" (global 0))"#,
+            Export<'_>,
+            Export{ name: Name(n), kind: ExportKind::Global, idx: Index::Num(0), .. } if n == "hi"
+        );
+
+        assert_error!(r#"export"#, Export<'_>, MissingParen{ paren: '(', .. });
+        assert_error!(r#"(export "hi" (func 0"#, Export<'_>, MissingParen{ paren: ')', .. });
+        assert_error!(r#"(export "hi" (func 0)"#, Export<'_>, MissingParen{ paren: ')', .. });
+        assert_error!(r#"(hello"#, Export<'_>, UnexpectedToken{ expected: "'export' keyword for export", .. });
+        assert_error!(
+            r#"(export "hi" (hello 0))"#,
+            Export<'_>,
+            UnexpectedKeyword("hello")
         );
     }
 }

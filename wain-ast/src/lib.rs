@@ -14,6 +14,7 @@ pub struct Module<'a> {
     pub ident: &'a str,
     pub types: Vec<TypeDef<'a>>,
     pub imports: Vec<Import<'a>>,
+    pub exports: Vec<Export<'a>>,
     // TODO: funcs, table, memory, globals, exports, start, elems, data
 }
 
@@ -22,6 +23,7 @@ pub struct Module<'a> {
 pub enum ModuleField<'a> {
     Type(TypeDef<'a>),
     Import(Import<'a>),
+    Export(Export<'a>),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -143,4 +145,22 @@ pub struct MemType {
 pub struct GlobalType {
     pub mutable: bool,
     pub ty: ValType,
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-export
+#[derive(Debug)]
+pub struct Export<'a> {
+    pub start: usize,
+    pub name: Name,
+    pub kind: ExportKind,
+    pub idx: Index<'a>,
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-exportdesc
+#[derive(Debug)]
+pub enum ExportKind {
+    Func,
+    Table,
+    Memory,
+    Global,
 }
