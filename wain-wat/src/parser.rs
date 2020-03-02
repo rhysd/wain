@@ -798,7 +798,7 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
                 parser.closing_paren("export in func")?;
                 let ty = parser.parse()?;
                 let locals = parser.parse()?;
-                let body = parser.parse_multiple("body of function")?;
+                let body = parser.parse()?;
                 let id = id.unwrap_or_else(|| parser.fresh_id());
                 FuncAbbrev::Export(
                     Export {
@@ -818,7 +818,7 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
             "type" => {
                 let ty = parser.parse()?;
                 let locals = parser.parse()?;
-                let body = parser.parse_multiple("body of function")?;
+                let body = parser.parse()?;
                 FuncAbbrev::NoAbbrev(Func {
                     start,
                     ty,
@@ -879,9 +879,89 @@ impl<'a> Parse<'a> for Vec<Local<'a>> {
     }
 }
 
-impl<'a> Parse<'a> for Instruction {
-    fn parse(_parser: &mut Parser<'a>) -> Result<'a, Self> {
-        Ok(Instruction) // TODO
+// Instructions has special abbreviation. It can be folded and nested. This struct parses sequence
+// of instructions with the abbreviation.
+//
+//   1: ({plaininstr} {foldedinstr}*) == {foldedinstr}* {plaininstr}
+//   2: (block {label} {resulttype} {instr}*) == block {label} {resulttype} {instr}* end
+//   3: (loop {label} {resulttype} {instr}*) == 'loop' {label} {resulttype} {instr}* end
+//   4: (if {label} {resulttype} {foldedinstr}* (then {instr}*) (else {instr}*)?) ==
+//          {foldedinstr}* if {label} {resulttype} {instr}* else {instr}* end
+//
+// e.g.
+//   (local.get $x) (i32.const 2) i32.add (i32.const 3) i32.mul ==
+//       (i32.mul (i32.add (local.get $x) (i32.const 2)) (i32.const 3))
+//
+// https://webassembly.github.io/spec/core/text/instructions.html#folded-instructions
+struct InsnAbbrev<'a, 'p> {
+    insns: Vec<Instruction>,
+    parser: &'p mut Parser<'a>,
+}
+
+// Note: This is not a method of Insn Abbrev not to modify `insns` field of InsnAbbrev.
+fn parse_plain_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instruction> {
+    match parser.next_token("instruction keyword")? {
+        (Token::Keyword(kw), start) => {
+            let kind = match kw {
+                "unreachable" => InsnKind::Unreachable,
+                "nop" => InsnKind::Nop,
+                "return" => InsnKind::Return,
+                _ => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), start),
+            };
+            Ok(Instruction { start, kind })
+        }
+        (tok, offset) => parser.unexpected_token(tok, "keyword for instruction", offset),
+    }
+}
+
+impl<'a, 'p> InsnAbbrev<'a, 'p> {
+    fn parse_folded(&mut self) -> Result<'a, ()> {
+        let start = self.parser.opening_paren("folded instruction")?;
+        let mut insn = parse_plain_insn(&mut self.parser, false)?;
+        insn.start = start;
+
+        while let (Token::LParen, _) = self
+            .parser
+            .peek("')' for ending folded instruction or '(' for nested instruction")?
+        {
+            self.parse_folded()?;
+        }
+
+        self.parser.closing_paren("folded instruction")?;
+        self.insns.push(insn);
+        Ok(())
+    }
+
+    fn parse(&mut self) -> Result<'a, ()> {
+        // Parser {insn}*
+        loop {
+            // This assumes that instr* is always ending with ')' or 'end' but I did not assure.
+            // If some other folded statement like (foo) is following instr*, this assumption does
+            // not work. In the case, we need to peek current and next tokens without consuming the
+            // tokens.
+            match self
+                .parser
+                .peek("instruction keyword or '(' for folded instruction")?
+            {
+                (Token::LParen, _) => self.parse_folded()?,
+                (Token::RParen, _) | (Token::Keyword("end"), _) => return Ok(()),
+                _ => {
+                    let insn = parse_plain_insn(&mut self.parser, true)?;
+                    self.insns.push(insn);
+                }
+            };
+        }
+    }
+}
+
+impl<'a> Parse<'a> for Vec<Instruction> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let mut parser = InsnAbbrev {
+            insns: vec![],
+            parser,
+        };
+        parser.parse()?;
+        Ok(parser.insns)
     }
 }
 
@@ -1409,6 +1489,76 @@ mod tests {
             r#"(func (local i32))"#,
             FuncAbbrev<'_>,
             UnexpectedKeyword("local")
+        );
+    }
+
+    #[test]
+    fn insn_abbrev() {
+        macro_rules! assert_insn {
+            ($input:expr, $expect:pat if $cond:expr) => {
+                let input = concat!($input, ')');
+                let mut parser = Parser::new(input);
+                let insns: Vec<Instruction> = parser.parse().unwrap();
+                let kinds = insns.into_iter().map(|i| i.kind).collect::<Vec<_>>();
+                match kinds.as_slice() {
+                    $expect if $cond => { /* OK */ }
+                    i => panic!(
+                        "assertion failed: {:?} did not match to {}",
+                        i,
+                        stringify!($expect if $cond)
+                    ),
+                }
+                match parser.tokens.next() {
+                    Some(Ok((Token::RParen, _))) => (),
+                    tok => assert!(false, "Tokens still remain: {:?} and then {:?}", tok, parser.tokens.collect::<Vec<_>>()),
+                }
+            };
+            ($input:expr, $expect:pat) => {
+                assert_insn!($input, $expect if true);
+            };
+        }
+
+        use InsnKind::*;
+        assert_insn!(r#"nop"#, [Nop]);
+        assert_insn!(r#"(nop)"#, [Nop]);
+        assert_insn!(r#"(unreachable (nop))"#, [Nop, Unreachable]);
+        assert_insn!(
+            r#"(return (nop) (unreachable))"#,
+            [Nop, Unreachable, Return]
+        );
+        assert_insn!(
+            r#"(return (unreachable (nop)))"#,
+            [Nop, Unreachable, Return]
+        );
+        assert_insn!(
+            r#"(nop (return (nop) (unreachable)))"#,
+            [Nop, Unreachable, Return, Nop]
+        );
+        assert_insn!(r#"nop unreachable return"#, [Nop, Unreachable, Return]);
+        assert_insn!(r#"nop (nop) (nop)"#, [Nop, Nop, Nop]);
+        assert_insn!(r#"(nop) nop (nop)"#, [Nop, Nop, Nop]);
+        assert_insn!(r#"(nop) (nop) nop"#, [Nop, Nop, Nop]);
+        assert_insn!(r#"nop (nop (nop))"#, [Nop, Nop, Nop]);
+        assert_insn!(r#"(nop (nop)) nop"#, [Nop, Nop, Nop]);
+
+        assert_error!(
+            r#"(nop nop)"#,
+            Vec<Instruction>,
+            MissingParen {
+                paren: ')',
+                what: "folded instruction",
+                ..
+            }
+        );
+        assert_error!(
+            r#"not-exist"#,
+            Vec<Instruction>,
+            UnexpectedKeyword("not-exist")
+        );
+        assert_error!(
+            r#"(not-exist)"#,
+            Vec<Instruction>,
+            UnexpectedKeyword("not-exist")
         );
     }
 }

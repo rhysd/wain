@@ -15,7 +15,7 @@ pub struct Module<'a> {
     pub types: Vec<TypeDef<'a>>,
     pub imports: Vec<Import<'a>>,
     pub exports: Vec<Export<'a>>,
-    // TODO: funcs, table, memory, globals, exports, start, elems, data
+    // TODO: funcs, table, memory, globals, start, elems, data
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
@@ -182,6 +182,16 @@ pub struct Local<'a> {
     pub ty: ValType,
 }
 
-// TODO
+// https://webassembly.github.io/spec/core/text/instructions.html#instructions
 #[derive(Debug)]
-pub struct Instruction;
+pub struct Instruction {
+    pub start: usize,
+    pub kind: InsnKind,
+}
+
+#[derive(Debug)]
+pub enum InsnKind {
+    Unreachable,
+    Nop,
+    Return,
+}
