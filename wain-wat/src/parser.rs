@@ -23,6 +23,10 @@ pub enum ParseErrorKind<'a> {
         got: Option<Token<'a>>,
         what: &'a str,
     },
+    InvalidOperand {
+        insn: &'static str,
+        msg: &'static str,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -63,6 +67,9 @@ impl<'a> fmt::Display for ParseError<'a> {
                 got: None,
                 what,
             } => write!(f, "expected paren '{}' for {} but reached EOF", paren, what)?,
+            InvalidOperand { insn, msg } => {
+                write!(f, "invalid operand for '{}' instruction: {}", insn, msg)?
+            }
         };
 
         let start = self.offset;
@@ -318,7 +325,7 @@ impl<'a> Parser<'a> {
 }
 
 macro_rules! match_token {
-    ($parser:ident, $expected:expr, $pattern:pat => $ret:expr) => {
+    ($parser:expr, $expected:expr, $pattern:pat => $ret:expr) => {
         match $parser.next_token($expected)? {
             ($pattern, offset) => ($ret, offset),
             (tok, offset) => {
@@ -326,7 +333,7 @@ macro_rules! match_token {
             }
         }
     };
-    ($parser:ident, $expected:expr, $pattern:pat) => {
+    ($parser:expr, $expected:expr, $pattern:pat) => {
         match_token!($parser, $expected, $pattern => ())
     };
 }
@@ -914,18 +921,153 @@ impl<'a> Parse<'a> for Vec<Local<'a>> {
 //
 // https://webassembly.github.io/spec/core/text/instructions.html#folded-instructions
 struct InsnAbbrev<'a, 'p> {
-    insns: Vec<Instruction>,
+    insns: Vec<Instruction<'a>>,
     parser: &'p mut Parser<'a>,
 }
 
-// Note: This is not a method of Insn Abbrev not to modify `insns` field of InsnAbbrev.
-fn parse_plain_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instruction> {
+// Note: These are free functions not to modify `insns` field of InsnAbbrev.
+
+fn parse_maybe_result_type<'a>(parser: &mut Parser<'a>) -> Result<'a, Option<ValType>> {
+    // Note: This requires that next token exists
+    match parser.peek("'(' for result type")? {
+        (Token::LParen, _)
+            if parser.lookahead_keyword("'result' keyword in block")?.0 == "result" =>
+        {
+            parser.eat_token(); // Eat '('
+            parser.eat_token(); // Eat 'result'
+            let ty = parser.parse()?;
+            parser.closing_paren("result in block")?;
+            Ok(Some(ty))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn parse_plain_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instruction<'a>> {
     match parser.next_token("instruction keyword")? {
         (Token::Keyword(kw), start) => {
             let kind = match kw {
+                "block" | "loop" => {
+                    let label = parser.maybe_ident("label for block or loop")?;
+                    let ty = parse_maybe_result_type(parser)?;
+                    let body = parser.parse()?;
+                    let id = if end {
+                        match_token!(
+                            parser,
+                            "'end' keyword for block or loop",
+                            Token::Keyword("end")
+                        );
+                        parser.maybe_ident("ID for block or loop")?
+                    } else {
+                        None
+                    };
+                    if kw == "block" {
+                        InsnKind::Block {
+                            label,
+                            ty,
+                            body,
+                            id,
+                        }
+                    } else {
+                        InsnKind::Loop {
+                            label,
+                            ty,
+                            body,
+                            id,
+                        }
+                    }
+                }
+                "if" => {
+                    // Note: 'else' can be omitted when else clause is empty
+                    // https://webassembly.github.io/spec/core/text/instructions.html#abbreviations
+                    let is_folded = !end;
+                    let label = parser.maybe_ident("label for block or loop")?;
+                    let ty = parse_maybe_result_type(parser)?;
+                    if is_folded {
+                        parser.opening_paren("'then' clause in folded 'if'")?;
+                        match_token!(
+                            parser,
+                            "'then' keyword for folded 'if'",
+                            Token::Keyword("then")
+                        );
+                    }
+                    let then_body = parser.parse()?;
+                    if is_folded {
+                        parser.closing_paren("then clause in folded 'if'")?;
+                    }
+                    let (else_body, else_id) =
+                        match parser.peek("'else', 'end', '(' or ')' in 'if'")? {
+                            (Token::Keyword("end"), _) if end && !is_folded => (vec![], None),
+                            (Token::RParen, _) if !end => (vec![], None),
+                            (Token::LParen, _) if is_folded => {
+                                parser.eat_token(); // Eat '('
+                                match_token!(
+                                    parser,
+                                    "'else' keyword in else clause of folded 'if'",
+                                    Token::Keyword("else")
+                                );
+                                let body = parser.parse()?;
+                                parser.closing_paren("else clause in folded 'if'")?;
+                                (body, None)
+                            }
+                            (Token::Keyword("else"), _) if !is_folded => {
+                                parser.eat_token(); // Eat 'else'
+                                let id = parser.maybe_ident("ID for 'else' in 'if'")?;
+                                let body = parser.parse()?;
+                                (body, id)
+                            }
+                            (tok, offset) => {
+                                return parser.unexpected_token(
+                                    tok.clone(),
+                                    "'else' or 'end' in 'if'",
+                                    offset,
+                                );
+                            }
+                        };
+                    let end_id = if end {
+                        match_token!(parser, "'end' keyword for 'if'", Token::Keyword("end"));
+                        parser.maybe_ident("ID for end of 'if'")?
+                    } else {
+                        None
+                    };
+                    InsnKind::If {
+                        label,
+                        ty,
+                        then_body,
+                        else_id,
+                        else_body,
+                        end_id,
+                    }
+                }
                 "unreachable" => InsnKind::Unreachable,
                 "nop" => InsnKind::Nop,
+                "br" => InsnKind::Br(parser.parse()?),
+                "br_if" => InsnKind::BrIf(parser.parse()?),
+                "br_table" => {
+                    let mut labels = vec![];
+                    while let (Token::Int(..), _) | (Token::Ident(_), _) =
+                        parser.peek("labels for 'br_table'")?
+                    {
+                        labels.push(parser.parse()?);
+                    }
+                    if let Some(default_label) = labels.pop() {
+                        InsnKind::BrTable {
+                            labels,
+                            default_label,
+                        }
+                    } else {
+                        return parser.error(
+                            ParseErrorKind::InvalidOperand {
+                                insn: "br_table",
+                                msg: "at least one label is necessary",
+                            },
+                            start,
+                        );
+                    }
+                }
                 "return" => InsnKind::Return,
+                "call" => InsnKind::Call(parser.parse()?),
+                "call_indirect" => InsnKind::CallIndirect(parser.parse()?),
                 _ => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), start),
             };
             Ok(Instruction { start, kind })
@@ -935,16 +1077,25 @@ fn parse_plain_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instru
 }
 
 impl<'a, 'p> InsnAbbrev<'a, 'p> {
+    fn new(parser: &'p mut Parser<'a>) -> InsnAbbrev<'a, 'p> {
+        InsnAbbrev {
+            insns: vec![],
+            parser,
+        }
+    }
+
     fn parse_folded(&mut self) -> Result<'a, ()> {
         let start = self.parser.opening_paren("folded instruction")?;
-        let mut insn = parse_plain_insn(&mut self.parser, false)?;
+        let mut insn = parse_plain_insn(self.parser, false)?;
         insn.start = start;
 
-        while let (Token::LParen, _) = self
-            .parser
-            .peek("')' for ending folded instruction or '(' for nested instruction")?
-        {
-            self.parse_folded()?;
+        if !insn.kind.is_block() {
+            while let (Token::LParen, _) = self
+                .parser
+                .peek("')' for ending folded instruction or '(' for nested instruction")?
+            {
+                self.parse_folded()?;
+            }
         }
 
         self.parser.closing_paren("folded instruction")?;
@@ -955,18 +1106,19 @@ impl<'a, 'p> InsnAbbrev<'a, 'p> {
     fn parse(&mut self) -> Result<'a, ()> {
         // Parser {insn}*
         loop {
-            // This assumes that instr* is always ending with ')' or 'end' but I did not assure.
-            // If some other folded statement like (foo) is following instr*, this assumption does
-            // not work. In the case, we need to peek current and next tokens without consuming the
-            // tokens.
+            // This assumes that instr* is always ending with ')', 'end' or 'else' but I did not assure.
+            // If some other folded statement like (foo) is following instr*, this assumption does not
+            // work. In the case, we need to peek current and next tokens without consuming the tokens.
             match self
                 .parser
                 .peek("instruction keyword or '(' for folded instruction")?
             {
                 (Token::LParen, _) => self.parse_folded()?,
-                (Token::RParen, _) | (Token::Keyword("end"), _) => return Ok(()),
+                (Token::RParen, _) | (Token::Keyword("end"), _) | (Token::Keyword("else"), _) => {
+                    return Ok(())
+                }
                 _ => {
-                    let insn = parse_plain_insn(&mut self.parser, true)?;
+                    let insn = parse_plain_insn(self.parser, true)?;
                     self.insns.push(insn);
                 }
             };
@@ -974,12 +1126,9 @@ impl<'a, 'p> InsnAbbrev<'a, 'p> {
     }
 }
 
-impl<'a> Parse<'a> for Vec<Instruction> {
+impl<'a> Parse<'a> for Vec<Instruction<'a>> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let mut parser = InsnAbbrev {
-            insns: vec![],
-            parser,
-        };
+        let mut parser = InsnAbbrev::new(parser);
         parser.parse()?;
         Ok(parser.insns)
     }
@@ -1056,6 +1205,15 @@ mod tests {
         }};
         ($input:expr, $node:ty, $expect:pat) => {
             assert_error!($input, $node, $expect if true);
+        };
+    }
+
+    macro_rules! is_match {
+        ($e:expr, $p:pat) => {
+            match $e {
+                $p => true,
+                _ => false,
+            }
         };
     }
 
@@ -1512,32 +1670,32 @@ mod tests {
         );
     }
 
+    macro_rules! assert_insn {
+        ($input:expr, $expect:pat if $cond:expr) => {
+            let input = concat!($input, ')');
+            let mut parser = Parser::new(input);
+            let insns: Vec<Instruction> = parser.parse().unwrap();
+            let kinds = insns.into_iter().map(|i| i.kind).collect::<Vec<_>>();
+            match kinds.as_slice() {
+                $expect if $cond => { /* OK */ }
+                i => panic!(
+                    "assertion failed: {:?} did not match to {}",
+                    i,
+                    stringify!($expect if $cond)
+                ),
+            }
+            match parser.tokens.next() {
+                Some(Ok((Token::RParen, _))) => (),
+                tok => assert!(false, "Tokens still remain: {:?} and then {:?}", tok, parser.tokens.collect::<Vec<_>>()),
+            }
+        };
+        ($input:expr, $expect:pat) => {
+            assert_insn!($input, $expect if true);
+        };
+    }
+
     #[test]
     fn insn_abbrev() {
-        macro_rules! assert_insn {
-            ($input:expr, $expect:pat if $cond:expr) => {
-                let input = concat!($input, ')');
-                let mut parser = Parser::new(input);
-                let insns: Vec<Instruction> = parser.parse().unwrap();
-                let kinds = insns.into_iter().map(|i| i.kind).collect::<Vec<_>>();
-                match kinds.as_slice() {
-                    $expect if $cond => { /* OK */ }
-                    i => panic!(
-                        "assertion failed: {:?} did not match to {}",
-                        i,
-                        stringify!($expect if $cond)
-                    ),
-                }
-                match parser.tokens.next() {
-                    Some(Ok((Token::RParen, _))) => (),
-                    tok => assert!(false, "Tokens still remain: {:?} and then {:?}", tok, parser.tokens.collect::<Vec<_>>()),
-                }
-            };
-            ($input:expr, $expect:pat) => {
-                assert_insn!($input, $expect if true);
-            };
-        }
-
         use InsnKind::*;
         assert_insn!(r#"nop"#, [Nop]);
         assert_insn!(r#"(nop)"#, [Nop]);
@@ -1560,6 +1718,33 @@ mod tests {
         assert_insn!(r#"(nop) (nop) nop"#, [Nop, Nop, Nop]);
         assert_insn!(r#"nop (nop (nop))"#, [Nop, Nop, Nop]);
         assert_insn!(r#"(nop (nop)) nop"#, [Nop, Nop, Nop]);
+        assert_insn!(r#"block block block end end end"#, [Block { body, .. }]
+            if match &body[0].kind {
+                Block { body, ..} => match &body[0].kind {
+                    Block { body, .. } => body.is_empty(),
+                    n => panic!("nest 2: {:?}", n),
+                }
+                n => panic!("nest 1: {:?}", n),
+            }
+        );
+        assert_insn!(r#"(block (block (block )))"#, [Block { body, .. }]
+            if match &body[0].kind {
+                Block { body, ..} => match &body[0].kind {
+                    Block { body, .. } => body.is_empty(),
+                    n => panic!("nest 2: {:?}", n),
+                }
+                n => panic!("nest 1: {:?}", n),
+            }
+        );
+        assert_insn!(r#"block (block block end) end"#, [Block { body, .. }]
+            if match &body[0].kind {
+                Block { body, ..} => match &body[0].kind {
+                    Block { body, .. } => body.is_empty(),
+                    n => panic!("nest 2: {:?}", n),
+                }
+                n => panic!("nest 1: {:?}", n),
+            }
+        );
 
         assert_error!(
             r#"(nop nop)"#,
@@ -1579,6 +1764,268 @@ mod tests {
             r#"(not-exist)"#,
             Vec<Instruction>,
             UnexpectedKeyword("not-exist")
+        );
+    }
+
+    #[test]
+    fn control_instructions() {
+        use InsnKind::*;
+        assert_insn!(
+            r#"block end"#,
+            [
+                Block{ label: None, ty: None, body, id: None }
+            ] if body.is_empty()
+        );
+        assert_insn!(
+            r#"block $blk end $id"#,
+            [
+                Block{ label: Some("$blk"), ty: None, body, id: Some("$id") }
+            ] if body.is_empty()
+        );
+        assert_insn!(
+            r#"block $blk (result i32) end"#,
+            [
+                Block{ label: Some("$blk"), ty: Some(ValType::I32), body, id: None }
+            ] if body.is_empty()
+        );
+        assert_insn!(
+            r#"block (result i32) end"#,
+            [
+                Block{ label: None, ty: Some(ValType::I32), body, id: None }
+            ] if body.is_empty()
+        );
+        assert_insn!(
+            r#"block nop end"#,
+            [
+                Block{ label: None, ty: None, body, id: None }
+            ] if is_match!(body[0].kind, Nop)
+        );
+        assert_insn!(
+            r#"block $blk nop end"#,
+            [
+                Block{ label: Some("$blk"), ty: None, body, id: None }
+            ] if is_match!(body[0].kind, Nop)
+        );
+        assert_insn!(
+            r#"block (result i32) nop end"#,
+            [
+                Block{ label: None, ty: Some(ValType::I32), body, id: None }
+            ] if is_match!(body[0].kind, Nop)
+        );
+        assert_insn!(
+            r#"(block)"#,
+            [
+                Block{ label: None, ty: None, body, id: None }
+            ] if body.is_empty()
+        );
+        assert_insn!(
+            r#"(block $blk)"#,
+            [
+                Block{ label: Some("$blk"), ty: None, body, id: None }
+            ] if body.is_empty()
+        );
+        assert_insn!(
+            r#"(block (result i32))"#,
+            [
+                Block{ label: None, ty: Some(ValType::I32), body, id: None }
+            ] if body.is_empty()
+        );
+        assert_insn!(
+            r#"(block nop)"#,
+            [
+                Block{ label: None, ty: None, body, id: None }
+            ] if is_match!(body[0].kind, Nop)
+        );
+        // Note: 'loop' instruction is parsed with the same logic as 'block' instruction. Only one test case is sufficient
+        assert_insn!(
+            r#"loop end"#,
+            [
+                Loop{ label: None, ty: None, body, id: None }
+            ] if body.is_empty()
+        );
+        assert_insn!(
+            r#"if end"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"if else end"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"if $l (result i32) else $a end $b"#,
+            [
+                If{ label: Some("$l"), ty: Some(ValType::I32), then_body, else_id: Some("$a"), else_body, end_id: Some("$b") }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"if $l (result i32) else $a end $b"#,
+            [
+                If{ label: Some("$l"), ty: Some(ValType::I32), then_body, else_id: Some("$a"), else_body, end_id: Some("$b") }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"if $l (result i32) end $b"#,
+            [
+                If{ label: Some("$l"), ty: Some(ValType::I32), then_body, else_id: None, else_body, end_id: Some("$b") }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"if $l end"#,
+            [
+                If{ label: Some("$l"), ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"if (result i32) end"#,
+            [
+                If{ label: None, ty: Some(ValType::I32), then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"if nop end"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if is_match!(then_body[0].kind, Nop) && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"if $l nop end"#,
+            [
+                If{ label: Some("$l"), ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if is_match!(then_body[0].kind, Nop) && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"if $l (result i32) nop end"#,
+            [
+                If{ label: Some("$l"), ty: Some(ValType::I32), then_body, else_id: None, else_body, end_id: None }
+            ] if is_match!(then_body[0].kind, Nop) && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"if nop else unreachable end"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if is_match!(then_body[0].kind, Nop) && is_match!(else_body[0].kind, Unreachable)
+        );
+        assert_insn!(
+            r#"(if (then))"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"(if $l (then))"#,
+            [
+                If{ label: Some("$l"), ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"(if $l (result i32) (then))"#,
+            [
+                If{ label: Some("$l"), ty: Some(ValType::I32), then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"(if (then) (else))"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"(if $l (then) (else))"#,
+            [
+                If{ label: Some("$l"), ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"(if $l (result i32) (then) (else))"#,
+            [
+                If{ label: Some("$l"), ty: Some(ValType::I32), then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"(if (then nop))"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if is_match!(then_body[0].kind, Nop) && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"(if (then nop) (else nop))"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if is_match!(then_body[0].kind, Nop) && is_match!(else_body[0].kind, Nop)
+        );
+        assert_insn!(
+            r#"(if (then (nop)) (else (nop)))"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if is_match!(then_body[0].kind, Nop) && is_match!(else_body[0].kind, Nop)
+        );
+        assert_insn!(
+            r#"(if (then nop nop) (else nop nop))"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.len() == 2 && else_body.len() == 2
+        );
+        assert_insn!(
+            r#"(if (then (nop (nop))) (else (nop (nop))))"#,
+            [
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.len() == 2 && else_body.len() == 2
+        );
+        assert_insn!(r#"unreachable"#, [Unreachable]);
+        assert_insn!(r#"br 0"#, [Br(Index::Num(0))]);
+        assert_insn!(r#"br $blk"#, [Br(Index::Ident("$blk"))]);
+        assert_insn!(r#"br_if 0"#, [BrIf(Index::Num(0))]);
+        assert_insn!(r#"br_if $blk"#, [BrIf(Index::Ident("$blk"))]);
+        assert_insn!(
+            r#"br_table 0"#,
+            [BrTable {
+                labels,
+                default_label: Index::Num(0)
+            }] if labels.is_empty()
+        );
+        assert_insn!(
+            r#"br_table 1 2 3 0"#,
+            [
+                BrTable {
+                    labels,
+                    default_label: Index::Num(0)
+                }
+            ] if labels
+                    .into_iter()
+                    .map(|i| match i {
+                        Index::Num(n) => *n,
+                        Index::Ident(i) => panic!("unexpected index: {}", i),
+                    })
+                    .collect::<Vec<_>>() == vec![1, 2, 3]
+        );
+        assert_insn!(
+            r#"br_table $a $b $c $x"#,
+            [
+                BrTable {
+                    labels,
+                    default_label: Index::Ident("$x")
+                }
+            ] if labels
+                    .into_iter()
+                    .map(|i| match i {
+                        Index::Num(n) => panic!("unexpected index: {}", n),
+                        Index::Ident(i) => *i,
+                    })
+                    .collect::<Vec<_>>() == vec!["$a", "$b", "$c"]
+        );
+        assert_insn!(r#"call 0"#, [Call(Index::Num(0))]);
+        assert_insn!(r#"call $f"#, [Call(Index::Ident("$f"))]);
+        assert_insn!(r#"call_indirect (type 0)"#, [CallIndirect(TypeUse{ idx: Index::Num(0), .. })]);
+
+        assert_error!(r#"br_table)"#, Vec<Instruction<'_>>, InvalidOperand{ .. });
+        assert_error!(
+            r#"(if (then nop) else nop)"#,
+            Vec<Instruction<'_>>,
+            UnexpectedToken{ got: Token::Keyword("else"), .. }
         );
     }
 }

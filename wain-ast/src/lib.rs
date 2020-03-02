@@ -164,7 +164,7 @@ pub struct Func<'a> {
     pub start: usize,
     pub ty: TypeUse<'a>,
     pub locals: Vec<Local<'a>>,
-    pub body: Vec<Instruction>,
+    pub body: Vec<Instruction<'a>>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-local
@@ -177,14 +177,70 @@ pub struct Local<'a> {
 
 // https://webassembly.github.io/spec/core/text/instructions.html#instructions
 #[derive(Debug)]
-pub struct Instruction {
+pub struct Instruction<'a> {
     pub start: usize,
-    pub kind: InsnKind,
+    pub kind: InsnKind<'a>,
 }
 
 #[derive(Debug)]
-pub enum InsnKind {
+pub enum InsnKind<'a> {
+    // Control instructions
+    Block {
+        label: Option<&'a str>,
+        ty: Option<ValType>,
+        body: Vec<Instruction<'a>>,
+        id: Option<&'a str>,
+    },
+    Loop {
+        label: Option<&'a str>,
+        ty: Option<ValType>,
+        body: Vec<Instruction<'a>>,
+        id: Option<&'a str>,
+    },
+    If {
+        label: Option<&'a str>,
+        ty: Option<ValType>,
+        then_body: Vec<Instruction<'a>>,
+        else_id: Option<&'a str>,
+        else_body: Vec<Instruction<'a>>,
+        end_id: Option<&'a str>,
+    },
     Unreachable,
     Nop,
+    Br(Index<'a>),
+    BrIf(Index<'a>),
+    BrTable {
+        labels: Vec<Index<'a>>,
+        default_label: Index<'a>,
+    },
     Return,
+    Call(Index<'a>),
+    CallIndirect(TypeUse<'a>),
+}
+
+impl<'a> InsnKind<'a> {
+    pub fn is_block(&self) -> bool {
+        use InsnKind::*;
+        match self {
+            Block { .. } | Loop { .. } | If { .. } => true,
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insn_is_block() {
+        let insn = InsnKind::Block {
+            label: None,
+            ty: None,
+            body: vec![],
+            id: None,
+        };
+        assert!(insn.is_block());
+        assert!(!InsnKind::Nop.is_block());
+    }
 }
