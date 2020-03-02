@@ -358,6 +358,17 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
     }
 }
 
+// Helper enum to parse module fields
+//
+// https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
+#[cfg_attr(test, derive(Debug))]
+enum ModuleField<'a> {
+    Type(TypeDef<'a>),
+    Import(Import<'a>),
+    Export(Export<'a>),
+    Func(FuncAbbrev<'a>),
+}
+
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
 impl<'a> Parse<'a> for Module<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
@@ -369,12 +380,19 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut types = vec![];
         let mut imports = vec![];
         let mut exports = vec![];
+        let mut funcs = vec![];
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
             match parser.parse()? {
                 ModuleField::Type(ty) => types.push(ty),
                 ModuleField::Import(import) => imports.push(import),
                 ModuleField::Export(export) => exports.push(export),
+                ModuleField::Func(FuncAbbrev::Import(import)) => imports.push(import),
+                ModuleField::Func(FuncAbbrev::Export(export, func)) => {
+                    exports.push(export);
+                    funcs.push(func);
+                }
+                ModuleField::Func(FuncAbbrev::NoAbbrev(func)) => funcs.push(func),
                 // TODO: Add more fields
             }
         }
@@ -386,6 +404,7 @@ impl<'a> Parse<'a> for Module<'a> {
             types,
             imports,
             exports,
+            funcs,
         })
     }
 }
@@ -398,6 +417,7 @@ impl<'a> Parse<'a> for ModuleField<'a> {
             "type" => Ok(ModuleField::Type(parser.parse()?)),
             "import" => Ok(ModuleField::Import(parser.parse()?)),
             "export" => Ok(ModuleField::Export(parser.parse()?)),
+            "func" => Ok(ModuleField::Func(parser.parse()?)),
             // TODO: Add more fields
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }

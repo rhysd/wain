@@ -15,15 +15,8 @@ pub struct Module<'a> {
     pub types: Vec<TypeDef<'a>>,
     pub imports: Vec<Import<'a>>,
     pub exports: Vec<Export<'a>>,
+    pub funcs: Vec<Func<'a>>,
     // TODO: funcs, table, memory, globals, start, elems, data
-}
-
-// https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
-#[derive(Debug)]
-pub enum ModuleField<'a> {
-    Type(TypeDef<'a>),
-    Import(Import<'a>),
-    Export(Export<'a>),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
