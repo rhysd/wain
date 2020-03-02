@@ -58,7 +58,7 @@ pub struct FuncResult {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-valtype
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ValType {
     I32,
     I64,

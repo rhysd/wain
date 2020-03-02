@@ -619,8 +619,15 @@ impl<'a> Parse<'a> for TypeUse<'a> {
         }
 
         let mut results = vec![];
-        while let (Token::LParen, _) = parser.peek("opening paren for result in typeuse")? {
-            results.push(parser.parse()?);
+        loop {
+            match parser.peek("opening paren for result in typeuse")? {
+                (Token::LParen, _)
+                    if parser.lookahead_keyword("'result' keyword in typeuse")?.0 == "result" =>
+                {
+                    results.push(parser.parse()?);
+                }
+                _ => break,
+            }
         }
 
         Ok(TypeUse {
@@ -744,6 +751,7 @@ impl<'a> Parse<'a> for Export<'a> {
 
 // Helper enum to resolve import/export abbreviation in `func` syntax
 // https://webassembly.github.io/spec/core/text/modules.html#text-func-abbrev
+#[cfg_attr(test, derive(Debug))]
 enum FuncAbbrev<'a> {
     Import(Import<'a>),
     Export(Export<'a>, Func<'a>),
@@ -782,6 +790,8 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
                 })
             }
             "export" => {
+                // `(func $id (export "n") {typeuse})` is a syntax sugar of
+                // `(export "n" (func $id)) (func $id {typeuse})`
                 let export_start = parser.opening_paren("export in func")?;
                 parser.eat_token(); // Eat 'export' keyword
                 let name = parser.parse()?;
@@ -831,8 +841,12 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
 impl<'a> Parse<'a> for Vec<Local<'a>> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         let mut locals = vec![];
-        while parser.lookahead_keyword("'local' keyword for locals")?.0 == "local" {
-            let start = parser.opening_paren("local")?;
+        while let (Token::LParen, start) = parser.peek("'(' for local")? {
+            if parser.lookahead_keyword("'local' keyword for locals")?.0 != "local" {
+                break;
+            }
+
+            parser.eat_token(); // Eat '(' keyword
             parser.eat_token(); // Eat 'local' keyword
 
             if let Some(id) = parser.maybe_ident("identifier for local")? {
@@ -847,14 +861,18 @@ impl<'a> Parse<'a> for Vec<Local<'a>> {
             }
 
             // Only when ID is omitted, multiple types can be combined into one local statement
-            // `(local ty*)` means `(local ty)*`
-            while let (Token::LParen, _) = parser.peek("')' or typeuse for local")? {
-                locals.push(Local {
-                    start,
-                    id: None,
-                    ty: parser.parse()?,
-                });
+            // `(local ty*)` means `(local ty)*`. Here parse `i64 f32` of `(local i32 i64 f32)`
+            loop {
+                match parser.peek("')' or typeuse for local")? {
+                    (Token::RParen, _) => break,
+                    _ => locals.push(Local {
+                        start,
+                        id: None,
+                        ty: parser.parse()?,
+                    }),
+                }
             }
+
             parser.closing_paren("local")?;
         }
         Ok(locals)
@@ -1262,6 +1280,135 @@ mod tests {
             r#"(export "hi" (hello 0))"#,
             Export<'_>,
             UnexpectedKeyword("hello")
+        );
+    }
+
+    #[test]
+    fn func_field() {
+        assert_parse!(
+            r#"(func $f (import "m" "n") (type 0))"#,
+            FuncAbbrev<'_>,
+            FuncAbbrev::Import(Import {
+                mod_name: Name(m),
+                name: Name(n),
+                desc: ImportDesc::Func { id: Some("$f"), .. },
+                ..
+            }) if m == "m" && n == "n"
+        );
+        assert_parse!(
+            r#"(func $f (export "n") (type 0))"#,
+            FuncAbbrev<'_>,
+            FuncAbbrev::Export(
+                Export {
+                    name: Name(n),
+                    kind: ExportKind::Func,
+                    idx: Index::Ident("$f"),
+                    ..
+                },
+                Func {
+                    ty: TypeUse {
+                        idx: Index::Num(0),
+                        ..
+                    },
+                    locals,
+                    body,
+                    ..
+                },
+            ) if n == "n" && locals.is_empty() && body.is_empty()
+        );
+        assert_parse!(
+            r#"(func $f (type 0))"#,
+            FuncAbbrev<'_>,
+            FuncAbbrev::NoAbbrev(Func {
+                ty: TypeUse {
+                    idx: Index::Num(0),
+                    ..
+                },
+                locals,
+                body,
+                ..
+            }) if locals.is_empty() && body.is_empty()
+        );
+        assert_parse!(
+            r#"(func $f (type 0) (local))"#,
+            FuncAbbrev<'_>,
+            FuncAbbrev::NoAbbrev(Func {
+                ty: TypeUse {
+                    idx: Index::Num(0),
+                    ..
+                },
+                locals,
+                ..
+            }) if locals.is_empty()
+        );
+        assert_parse!(
+            r#"(func $f (type 0) (local i32))"#,
+            FuncAbbrev<'_>,
+            FuncAbbrev::NoAbbrev(Func {
+                ty: TypeUse {
+                    idx: Index::Num(0),
+                    ..
+                },
+                locals,
+                ..
+            }) if locals[0].ty == ValType::I32 && locals[0].id == None
+        );
+        assert_parse!(
+            r#"(func $f (type 0) (local $l i32))"#,
+            FuncAbbrev<'_>,
+            FuncAbbrev::NoAbbrev(Func {
+                ty: TypeUse {
+                    idx: Index::Num(0),
+                    ..
+                },
+                locals,
+                ..
+            }) if locals[0].ty == ValType::I32 && locals[0].id == Some("$l")
+        );
+        assert_parse!(
+            r#"(func $f (type 0) (local i32 f64))"#,
+            FuncAbbrev<'_>,
+            FuncAbbrev::NoAbbrev(Func {
+                ty: TypeUse {
+                    idx: Index::Num(0),
+                    ..
+                },
+                locals,
+                ..
+            }) if locals.iter().map(|l| l.ty).collect::<Vec<_>>() == vec![ValType::I32, ValType::F64] &&
+                locals.iter().map(|l| l.id).collect::<Vec<_>>() == vec![None, None]
+        );
+        assert_parse!(
+            r#"(func $f (type 0) (local i32) (local f64))"#,
+            FuncAbbrev<'_>,
+            FuncAbbrev::NoAbbrev(Func {
+                ty: TypeUse {
+                    idx: Index::Num(0),
+                    ..
+                },
+                locals,
+                ..
+            }) if locals.iter().map(|l| l.ty).collect::<Vec<_>>() == vec![ValType::I32, ValType::F64] &&
+                locals.iter().map(|l| l.id).collect::<Vec<_>>() == vec![None, None]
+        );
+        assert_parse!(
+            r#"(func $f (type 0) (local $l1 i32) (local $l2 f64))"#,
+            FuncAbbrev<'_>,
+            FuncAbbrev::NoAbbrev(Func {
+                ty: TypeUse {
+                    idx: Index::Num(0),
+                    ..
+                },
+                locals,
+                ..
+            }) if locals.iter().map(|l| l.ty).collect::<Vec<_>>() == vec![ValType::I32, ValType::F64] &&
+                locals.iter().map(|l| l.id).collect::<Vec<_>>() == vec![Some("$l1"), Some("$l2")]
+        );
+
+        assert_error!(
+            r#"(func (local i32))"#,
+            FuncAbbrev<'_>,
+            UnexpectedKeyword("local")
         );
     }
 }
