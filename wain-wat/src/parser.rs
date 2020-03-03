@@ -1,5 +1,7 @@
-use crate::lexer::{LexError, Lexer, NumBase, Sign, Token};
+use crate::lexer::{Float, LexError, Lexer, NumBase, Sign, Token};
 use std::char;
+use std::f32;
+use std::f64;
 use std::fmt;
 use std::mem;
 use wain_ast::*;
@@ -17,7 +19,6 @@ pub enum ParseErrorKind<'a> {
     UnexpectedKeyword(&'a str),
     InvalidValType(&'a str),
     InvalidStringFormat(&'static str),
-    NumberMustBePositive(NumBase, &'a str),
     MissingParen {
         paren: char,
         got: Option<Token<'a>>,
@@ -26,6 +27,13 @@ pub enum ParseErrorKind<'a> {
     InvalidOperand {
         insn: &'static str,
         msg: &'static str,
+    },
+    NumberMustBePositive(NumBase, &'a str),
+    CannotParseNum {
+        digits: &'a str,
+        reason: &'static str,
+        base: NumBase,
+        sign: Sign,
     },
 }
 
@@ -69,6 +77,20 @@ impl<'a> fmt::Display for ParseError<'a> {
             } => write!(f, "expected paren '{}' for {} but reached EOF", paren, what)?,
             InvalidOperand { insn, msg } => {
                 write!(f, "invalid operand for '{}' instruction: {}", insn, msg)?
+            }
+            CannotParseNum {
+                digits,
+                reason,
+                base,
+                sign,
+            } => {
+                let base = if *base == NumBase::Hex { "0x" } else { "" };
+                let sign = if *sign == Sign::Minus { "-" } else { "" };
+                write!(
+                    f,
+                    "cannot parse integer {}{}{}: {}",
+                    sign, base, digits, reason
+                )?
             }
         };
 
@@ -200,11 +222,21 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn invalid_char_escape<T>(&self, offset: usize) -> Result<'a, T> {
+    fn cannot_parse_num<T>(
+        &self,
+        reason: &'static str,
+        digits: &'a str,
+        base: NumBase,
+        sign: Sign,
+        offset: usize,
+    ) -> Result<'a, T> {
         self.error(
-            ParseErrorKind::InvalidStringFormat(
-                r#"escape must be one of \t, \n, \r, \", \', \\, \u{hexnum}, \MN"#,
-            ),
+            ParseErrorKind::CannotParseNum {
+                digits,
+                reason,
+                base,
+                sign,
+            },
             offset,
         )
     }
@@ -295,7 +327,7 @@ impl<'a> Parser<'a> {
             (Token::Int(sign, base, s), offset) if sign == Sign::Minus => {
                 self.error(ParseErrorKind::NumberMustBePositive(base, s), offset)
             }
-            (Token::Int(_, base, s), _) => Ok(u32::from_str_radix(s, base.radix()).unwrap()),
+            (Token::Int(_, base, s), offset) => parse_u32_str(self, s, base, Sign::Plus, offset),
             (tok, offset) => self.unexpected_token(tok.clone(), expected, offset),
         }
     }
@@ -323,6 +355,119 @@ impl<'a> Parser<'a> {
         unimplemented!()
     }
 }
+
+// TODO: Use trait rather than macros to avoid duplication of implementations
+macro_rules! parse_integer_function {
+    ($name:ident, $int:ty) => {
+        fn $name<'a>(
+            parser: &mut Parser<'a>,
+            input: &'a str,
+            base: NumBase,
+            sign: Sign,
+            offset: usize,
+        ) -> Result<'a, $int> {
+            let radix = base.radix();
+            let mut ret: $int = 0;
+            for c in input.chars() {
+                if c == '_' {
+                    // Skip delimiter
+                    continue;
+                }
+                if let Some(d) = c.to_digit(radix) {
+                    if let Some(added) = ret
+                        .checked_mul(radix as $int)
+                        .and_then(|i| i.checked_add(d as $int))
+                    {
+                        ret = added;
+                    } else {
+                        return parser.cannot_parse_num(
+                            concat!("too big or small integer for ", stringify!($int)),
+                            input,
+                            base,
+                            sign,
+                            offset,
+                        );
+                    }
+                } else {
+                    return parser.cannot_parse_num(
+                        "invalid digit for integer",
+                        input,
+                        base,
+                        sign,
+                        offset,
+                    );
+                }
+            }
+            Ok(ret)
+        }
+    };
+}
+
+parse_integer_function!(parse_u32_str, u32);
+parse_integer_function!(parse_u64_str, u64);
+
+macro_rules! parse_float_number_function {
+    ($name:ident, $float:ty) => {
+        fn $name<'a>(
+            parser: &mut Parser<'a>,
+            input: &'a str,
+            base: NumBase,
+            sign: Sign,
+            offset: usize,
+        ) -> Result<'a, $float> {
+            let radix_u = base.radix();
+            let radix = radix_u as $float;
+            let mut chars = input.chars();
+
+            let mut ret: $float = 0.0;
+            while let Some(c) = chars.next() {
+                if c == '_' {
+                    // delimiter
+                    continue;
+                } else if c == '.' {
+                    break;
+                }
+                if let Some(d) = c.to_digit(radix_u) {
+                    ret = ret * radix + (d as $float);
+                } else {
+                    return parser.cannot_parse_num(
+                        "invalid digit for float number",
+                        input,
+                        base,
+                        sign,
+                        offset,
+                    );
+                }
+            }
+
+            // After '.' if exists
+            let mut step = radix;
+            for c in chars {
+                if c == '_' {
+                    // delimiter
+                    continue;
+                }
+                if let Some(d) = c.to_digit(radix_u) {
+                    ret += (d as $float) / step;
+                    step *= radix;
+                } else {
+                    return parser.cannot_parse_num(
+                        "invalid digit for float number",
+                        input,
+                        base,
+                        sign,
+                        offset,
+                    );
+                }
+            }
+
+            Ok(ret)
+        }
+    };
+}
+
+parse_float_number_function!(parse_f32_str, f32);
+parse_float_number_function!(parse_f64_str, f64);
 
 macro_rules! match_token {
     ($parser:expr, $expected:expr, $pattern:pat => $ret:expr) => {
@@ -515,6 +660,15 @@ impl<'a> Parse<'a> for FuncResult {
 impl<'a> Parse<'a> for Name {
     // TODO: Move this logic to parser as encoding literal into Vec<u8> then use it in this method
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        fn invalid_char_escape<'a>(parser: &mut Parser<'a>, offset: usize) -> Result<'a, Name> {
+            parser.error(
+                ParseErrorKind::InvalidStringFormat(
+                    r#"escape must be one of \t, \n, \r, \", \', \\, \u{hexnum}, \MN"#,
+                ),
+                offset,
+            )
+        }
+
         let (src, offset) = match_token!(parser, "string literal for name", Token::String(s) => s);
 
         // A name string must form a valid UTF-8 encoding as defined by Unicode (Section 2.5)
@@ -561,9 +715,9 @@ impl<'a> Parse<'a> for Name {
                         match (hi, lo) {
                             (Some(hi), Some(lo)) => match char::from_u32(hi * 16 + lo) {
                                 Some(c) => name.push(c),
-                                None => return parser.invalid_char_escape(offset + i),
+                                None => return invalid_char_escape(parser, offset + i),
                             },
-                            _ => return parser.invalid_char_escape(offset + i),
+                            _ => return invalid_char_escape(parser, offset + i),
                         }
                     }
                 }
@@ -674,9 +828,8 @@ impl<'a> Parse<'a> for Index<'a> {
             (Token::Int(sign, base, s), offset) if sign == Sign::Minus => {
                 parser.error(ParseErrorKind::NumberMustBePositive(base, s), offset)
             }
-            (Token::Int(_, base, s), _) => {
-                let u = u32::from_str_radix(s, base.radix()).unwrap();
-                Ok(Index::Num(u))
+            (Token::Int(_, base, s), offset) => {
+                parse_u32_str(parser, s, base, Sign::Plus, offset).map(Index::Num)
             }
             (Token::Ident(id), _) => Ok(Index::Ident(id)),
             (tok, offset) => parser.unexpected_token(tok.clone(), expected, offset),
@@ -906,6 +1059,37 @@ impl<'a> Parse<'a> for Vec<Local<'a>> {
     }
 }
 
+impl<'a> Parse<'a> for Mem {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        fn parse_u32<'a>(s: &'a str, parser: &mut Parser<'a>, offset: usize) -> Result<'a, u32> {
+            let (base, s) = if s.starts_with("0x") {
+                (NumBase::Hex, &s[2..])
+            } else {
+                (NumBase::Dec, s)
+            };
+            parse_u32_str(parser, s, base, Sign::Plus, offset)
+        }
+
+        let offset = match parser.peek("offset for memory instruction")? {
+            (Token::Keyword(kw), offset) if kw.starts_with("offset=") => {
+                Some(parse_u32(&kw[7..], parser, offset)?)
+            }
+            _ => None,
+        };
+
+        let align = match parser.peek("align for memory instruction")? {
+            (Token::Keyword(kw), offset) if kw.starts_with("align=") => {
+                Some(parse_u32(&kw[6..], parser, offset)?)
+            }
+            _ => None,
+        };
+
+        // TODO: Check align is 2^N
+
+        Ok(Mem { offset, align })
+    }
+}
+
 // Instructions has special abbreviation. It can be folded and nested. This struct parses sequence
 // of instructions with the abbreviation.
 //
@@ -943,10 +1127,12 @@ fn parse_maybe_result_type<'a>(parser: &mut Parser<'a>) -> Result<'a, Option<Val
     }
 }
 
-fn parse_plain_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instruction<'a>> {
+fn parse_one_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instruction<'a>> {
     match parser.next_token("instruction keyword")? {
         (Token::Keyword(kw), start) => {
             let kind = match kw {
+                // Control instructions
+                // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
                 "block" | "loop" => {
                     let label = parser.maybe_ident("label for block or loop")?;
                     let ty = parse_maybe_result_type(parser)?;
@@ -1068,6 +1254,217 @@ fn parse_plain_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instru
                 "return" => InsnKind::Return,
                 "call" => InsnKind::Call(parser.parse()?),
                 "call_indirect" => InsnKind::CallIndirect(parser.parse()?),
+                // Parametric instructions
+                // https://webassembly.github.io/spec/core/text/instructions.html#parametric-instructions
+                "drop" => InsnKind::Drop,
+                "select" => InsnKind::Select,
+                // Variable instructions
+                // https://webassembly.github.io/spec/core/text/instructions.html#variable-instructions
+                "local.get" => InsnKind::LocalGet(parser.parse()?),
+                "local.set" => InsnKind::LocalSet(parser.parse()?),
+                "local.tee" => InsnKind::LocalTee(parser.parse()?),
+                "global.get" => InsnKind::GlobalGet(parser.parse()?),
+                "global.set" => InsnKind::GlobalSet(parser.parse()?),
+                // Memory instructions
+                // https://webassembly.github.io/spec/core/text/instructions.html#memory-instructions
+                "i32.load" => InsnKind::I32Load(parser.parse()?),
+                "i64.load" => InsnKind::I64Load(parser.parse()?),
+                "f32.load" => InsnKind::F32Load(parser.parse()?),
+                "f64.load" => InsnKind::F64Load(parser.parse()?),
+                "i32.load8_s" => InsnKind::I32Load8S(parser.parse()?),
+                "i32.load8_u" => InsnKind::I32Load8U(parser.parse()?),
+                "i32.load16_s" => InsnKind::I32Load16S(parser.parse()?),
+                "i32.load16_u" => InsnKind::I32Load16U(parser.parse()?),
+                "i64.load8_s" => InsnKind::I64Load8S(parser.parse()?),
+                "i64.load8_u" => InsnKind::I64Load8U(parser.parse()?),
+                "i64.load16_s" => InsnKind::I64Load16S(parser.parse()?),
+                "i64.load16_u" => InsnKind::I64Load16U(parser.parse()?),
+                "i64.load32_s" => InsnKind::I64Load32S(parser.parse()?),
+                "i64.load32_u" => InsnKind::I64Load32U(parser.parse()?),
+                "i32.store" => InsnKind::I32Store(parser.parse()?),
+                "i64.store" => InsnKind::I64Store(parser.parse()?),
+                "f32.store" => InsnKind::F32Store(parser.parse()?),
+                "f64.store" => InsnKind::F64Store(parser.parse()?),
+                "i32.store8" => InsnKind::I32Store8(parser.parse()?),
+                "i32.store16" => InsnKind::I32Store16(parser.parse()?),
+                "i64.store8" => InsnKind::I64Store8(parser.parse()?),
+                "i64.store16" => InsnKind::I64Store16(parser.parse()?),
+                "i64.store32" => InsnKind::I64Store32(parser.parse()?),
+                "memory.size" => InsnKind::MemorySize,
+                "memory.grow" => InsnKind::MemoryGrow,
+                // Numeric instructions
+                // https://webassembly.github.io/spec/core/text/instructions.html#numeric-instructions
+                // Constants
+                "i32.const" => {
+                    let ((sign, base, digits), offset) = match_token!(parser, "integer for i32.const operand", Token::Int(s, b, d) => (s, b, d));
+                    let u = parse_u32_str(parser, digits, base, sign, offset)?;
+                    if u == 0x8000_0000 && sign == Sign::Minus {
+                        // In this case `u as i32` causes overflow
+                        InsnKind::I32Const(i32::min_value())
+                    } else if u < 0x8000_0000 {
+                        InsnKind::I32Const(sign.apply(u as i32))
+                    } else {
+                        return parser.cannot_parse_num(
+                            "too large or small integer for i32",
+                            digits,
+                            base,
+                            sign,
+                            offset,
+                        );
+                    }
+                }
+                "i64.const" => {
+                    let ((sign, base, digits), offset) = match_token!(parser, "integer for i64.const operand", Token::Int(s, b, d) => (s, b, d));
+                    let u = parse_u64_str(parser, digits, base, sign, offset)?;
+                    if u == 0x8000_0000_0000_0000 && sign == Sign::Minus {
+                        InsnKind::I64Const(i64::min_value())
+                    } else if u < 0x8000_0000_0000_0000 {
+                        InsnKind::I64Const(sign.apply(u as i64))
+                    } else {
+                        return parser.cannot_parse_num(
+                            "too large or small integer for i64",
+                            digits,
+                            base,
+                            sign,
+                            offset,
+                        );
+                    }
+                }
+                "f32.const" => {
+                    let ((sign, float), offset) = match_token!(parser, "float number for f32.const", Token::Float(s, f) => (s, f));
+                    let val = match float {
+                        Float::Inf => match sign {
+                            Sign::Plus => f32::INFINITY,
+                            Sign::Minus => f32::NEG_INFINITY,
+                        },
+                        Float::Nan(None) => sign.apply(f32::NAN),
+                        Float::Nan(Some(payload)) => {
+                            // Encode  f32 NaN value via u32 assuming IEEE-754 format for NaN boxing.
+                            // Palyload must be
+                            //   - within 23bits (fraction of f32 is 23bits)
+                            //   - >= 2^(23-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
+                            // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
+                            let payload_u =
+                                parse_u32_str(parser, payload, NumBase::Hex, Sign::Plus, offset)?;
+                            if payload_u < 0x40_0000 || 0x80_0000 <= payload_u {
+                                return parser.cannot_parse_num(
+                                    "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23",
+                                    payload,
+                                    NumBase::Hex,
+                                    Sign::Plus,
+                                    offset,
+                                );
+                            }
+                            // NaN boxing. 2^22 <= payload_u < 2^23 and floating point number is in IEEE754 format.
+                            // This will encode the payload into fraction of NaN.
+                            //   0x{sign}11111111{payload}
+                            let sign = match sign {
+                                Sign::Plus => 0,
+                                Sign::Minus => 1u32 << 31, // most significant bit is 1 for negative number
+                            };
+                            let exp = 0b1111_1111u32 << (31 - 8);
+                            f32::from_bits(sign | exp | payload_u)
+                        }
+                        Float::Val { base, frac, exp } => {
+                            // Note: Better algorithm should be considered
+                            // https://github.com/rust-lang/rust/blob/3982d3514efbb65b3efac6bb006b3fa496d16663/src/libcore/num/dec2flt/algorithm.rs
+                            let mut frac =
+                                sign.apply(parse_f32_str(parser, frac, base, sign, offset)?);
+                            // In IEEE754, exp part is actually 8bits
+                            if let Some((exp_sign, exp)) = exp {
+                                let exp =
+                                    parse_u32_str(parser, exp, NumBase::Dec, exp_sign, offset)?;
+                                let step = match base {
+                                    NumBase::Hex => 2.0,
+                                    NumBase::Dec => 10.0,
+                                };
+                                // powi is not available because an error gets larger
+                                match exp_sign {
+                                    Sign::Plus => {
+                                        for _ in 0..exp {
+                                            frac *= step;
+                                        }
+                                    }
+                                    Sign::Minus => {
+                                        for _ in 0..exp {
+                                            frac /= step;
+                                        }
+                                    }
+                                }
+                                frac
+                            } else {
+                                frac
+                            }
+                        }
+                    };
+                    InsnKind::F32Const(val)
+                }
+                "f64.const" => {
+                    let ((sign, float), offset) = match_token!(parser, "float number for f64.const", Token::Float(s, f) => (s, f));
+                    let val = match float {
+                        Float::Inf => match sign {
+                            Sign::Plus => f64::INFINITY,
+                            Sign::Minus => f64::NEG_INFINITY,
+                        },
+                        Float::Nan(None) => sign.apply(f64::NAN),
+                        Float::Nan(Some(payload)) => {
+                            // Encode f64 NaN value via u64 assuming IEEE-754 format for NaN boxing.
+                            // Palyload must be
+                            //   - within 52bits (since fraction of f64 is 52bits)
+                            //   - >= 2^(52-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
+                            // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
+                            let payload_u =
+                                parse_u64_str(parser, payload, NumBase::Hex, Sign::Plus, offset)?;
+                            if payload_u < 0x8_0000_0000_0000 || 0x10_0000_0000_0000 <= payload_u {
+                                return parser.cannot_parse_num(
+                                    "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52",
+                                    payload,
+                                    NumBase::Hex,
+                                    Sign::Plus,
+                                    offset,
+                                );
+                            }
+                            // NaN boxing. 2^51 <= payload_u < 2^52 and floating point number is in IEEE754 format.
+                            // This will encode the payload into fraction of NaN.
+                            //   0x{sign}11111111111{payload}
+                            let sign = match sign {
+                                Sign::Plus => 0,
+                                Sign::Minus => 1u64 << 63, // most significant bit is 1 for negative number
+                            };
+                            let exp = 0b111_1111_1111u64 << (63 - 11);
+                            f64::from_bits(sign | exp | payload_u)
+                        }
+                        Float::Val { base, frac, exp } => {
+                            let mut frac =
+                                sign.apply(parse_f64_str(parser, frac, base, sign, offset)?);
+                            // In IEEE754, exp part is actually 11bits
+                            if let Some((exp_sign, exp)) = exp {
+                                let exp = parse_u32_str(parser, exp, base, exp_sign, offset)?;
+                                let step = match base {
+                                    NumBase::Hex => 2.0,
+                                    NumBase::Dec => 10.0,
+                                };
+                                // powi is not available because an error gets larger
+                                match exp_sign {
+                                    Sign::Plus => {
+                                        for _ in 0..exp {
+                                            frac *= step;
+                                        }
+                                    }
+                                    Sign::Minus => {
+                                        for _ in 0..exp {
+                                            frac /= step;
+                                        }
+                                    }
+                                }
+                                frac
+                            } else {
+                                frac
+                            }
+                        }
+                    };
+                    InsnKind::F64Const(val)
+                }
                 _ => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), start),
             };
             Ok(Instruction { start, kind })
@@ -1076,6 +1473,8 @@ fn parse_plain_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instru
     }
 }
 
+// TODO: Rename to MaybeFoldedInsn
+// https://webassembly.github.io/spec/core/text/instructions.html#folded-instructions
 impl<'a, 'p> InsnAbbrev<'a, 'p> {
     fn new(parser: &'p mut Parser<'a>) -> InsnAbbrev<'a, 'p> {
         InsnAbbrev {
@@ -1086,7 +1485,7 @@ impl<'a, 'p> InsnAbbrev<'a, 'p> {
 
     fn parse_folded(&mut self) -> Result<'a, ()> {
         let start = self.parser.opening_paren("folded instruction")?;
-        let mut insn = parse_plain_insn(self.parser, false)?;
+        let mut insn = parse_one_insn(self.parser, false)?;
         insn.start = start;
 
         if !insn.kind.is_block() {
@@ -1118,7 +1517,7 @@ impl<'a, 'p> InsnAbbrev<'a, 'p> {
                     return Ok(())
                 }
                 _ => {
-                    let insn = parse_plain_insn(self.parser, true)?;
+                    let insn = parse_one_insn(self.parser, true)?;
                     self.insns.push(insn);
                 }
             };
@@ -2026,6 +2425,179 @@ mod tests {
             r#"(if (then nop) else nop)"#,
             Vec<Instruction<'_>>,
             UnexpectedToken{ got: Token::Keyword("else"), .. }
+        );
+    }
+
+    #[test]
+    fn const_instructions() {
+        use InsnKind::*;
+        assert_insn!(r#"i32.const 0"#, [I32Const(0)]);
+        assert_insn!(r#"i32.const 42"#, [I32Const(42)]);
+        assert_insn!(r#"i32.const 4_2"#, [I32Const(42)]);
+        assert_insn!(r#"i32.const 0x1f"#, [I32Const(0x1f)]);
+        assert_insn!(r#"i32.const -0"#, [I32Const(-0)]);
+        assert_insn!(r#"i32.const -42"#, [I32Const(-42)]);
+        assert_insn!(r#"i32.const -0x1f"#, [I32Const(-0x1f)]);
+        assert_insn!(r#"i32.const 2147483647"#, [I32Const(2147483647)]); // INT32_MAX
+        assert_insn!(r#"i32.const 0x7fffffff"#, [I32Const(0x7fffffff)]); // INT32_MAX
+        assert_insn!(r#"i32.const -2147483648"#, [I32Const(-2147483648)]); // INT32_MIN
+        assert_insn!(r#"i32.const -0x80000000"#, [I32Const(-0x80000000)]); // INT32_MAX
+
+        assert_error!(
+            r#"i32.const 0.123"#,
+            Vec<Instruction<'_>>,
+            UnexpectedToken{ expected: "integer for i32.const operand", .. }
+        );
+        assert_error!(
+            r#"i32.const 0x80000000"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "too large or small integer for i32", .. }
+        );
+        assert_error!(
+            r#"i32.const 0x99999999"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "too large or small integer for i32", .. }
+        );
+        assert_error!(
+            r#"i32.const -0x80000001"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "too large or small integer for i32", .. }
+        );
+        assert_error!(
+            r#"i32.const -0x99999999"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "too large or small integer for i32", .. }
+        );
+
+        assert_insn!(r#"i64.const 0"#, [I64Const(0)]);
+        assert_insn!(r#"i64.const 42"#, [I64Const(42)]);
+        assert_insn!(r#"i64.const 4_2"#, [I64Const(42)]);
+        assert_insn!(r#"i64.const 0x1f"#, [I64Const(0x1f)]);
+        assert_insn!(r#"i64.const 0x1_f"#, [I64Const(0x1f)]);
+        assert_insn!(r#"i64.const -42"#, [I64Const(-42)]);
+        assert_insn!(r#"i64.const -0x1f"#, [I64Const(-0x1f)]);
+        assert_insn!(
+            r#"i64.const 9223372036854775807"#, // INT64_MAX
+            [I64Const(9223372036854775807)]
+        );
+        assert_insn!(
+            r#"i64.const -9223372036854775808"#, // INT64_MIN
+            [I64Const(-9223372036854775808)]
+        );
+        assert_insn!(
+            r#"i64.const 0x7fffffffffffffff"#, // INT64_MAX
+            [I64Const(0x7fffffffffffffff)]
+        );
+        assert_insn!(
+            r#"i64.const -0x8000000000000000"#, // INT64_MIN
+            [I64Const(-0x8000000000000000)]
+        );
+
+        assert_error!(
+            r#"i64.const 0.123"#,
+            Vec<Instruction<'_>>,
+            UnexpectedToken{ expected: "integer for i64.const operand", .. }
+        );
+        assert_error!(
+            r#"i64.const 0x8000000000000000"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "too large or small integer for i64", .. }
+        );
+        assert_error!(
+            r#"i64.const 0x9999999999999999"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "too large or small integer for i64", .. }
+        );
+        assert_error!(
+            r#"i64.const -0x8000000000000001"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "too large or small integer for i64", .. }
+        );
+        assert_error!(
+            r#"i64.const -0x9999999999999999"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "too large or small integer for i64", .. }
+        );
+
+        assert_insn!(r#"f32.const 42."#, [F32Const(f)] if *f == 42.0);
+        assert_insn!(r#"f32.const 42.0"#, [F32Const(f)] if *f == 42.0);
+        assert_insn!(r#"f32.const 4_2."#, [F32Const(f)] if *f == 42.0);
+        assert_insn!(r#"f32.const 0x1f."#, [F32Const(f)] if *f == 31.0);
+        assert_insn!(r#"f32.const -42."#, [F32Const(f)] if *f == -42.0);
+        assert_insn!(r#"f32.const -4_2."#, [F32Const(f)] if *f == -42.0);
+        assert_insn!(r#"f32.const -0x1f."#, [F32Const(f)] if *f == -31.0);
+        assert_insn!(r#"f32.const 1.2_3"#, [F32Const(f)] if *f == 1.23);
+        assert_insn!(r#"f32.const 1.2_3E3"#, [F32Const(f)] if *f == 1.23e3);
+        assert_insn!(r#"f32.const 120.4E-3"#, [F32Const(f)] if *f == 120.4e-3);
+        assert_insn!(r#"f32.const 0xe."#, [F32Const(f)] if *f == 0xe as f32);
+        assert_insn!(r#"f32.const 0xe_f."#, [F32Const(f)] if *f == 0xef as f32);
+        assert_insn!(r#"f32.const 0x1_f.2_e"#, [F32Const(f)] if *f == 0x1f as f32 + 2.0 / 16.0 + 14.0 / (16.0 * 16.0));
+        assert_insn!(r#"f32.const 0xe.f"#, [F32Const(f)] if *f == 14.0 + 15.0 / 16.0);
+        assert_insn!(r#"f32.const 0xe.fP3"#, [F32Const(f)] if *f == (14.0 + 15.0 / 16.0) * 2.0 * 2.0 * 2.0);
+        assert_insn!(r#"f32.const 0xe.fP-1"#, [F32Const(f)] if *f == (14.0 + 15.0 / 16.0) / 2.0);
+        assert_insn!(r#"f32.const 3.4E38"#, [F32Const(f)] if *f == 3.4E38); // ≈ (2 - 2^(-23)) * 2^127
+        assert_insn!(r#"f32.const 2.E-149"#, [F32Const(f)] if *f == 2.0e-149);
+        assert_insn!(r#"f32.const 1.4E-45"#, [F32Const(f)] if *f == 1.4E-45); // ≈ 2^(-149)
+        assert_insn!(r#"f32.const inf"#, [F32Const(f)] if *f == f32::INFINITY);
+        assert_insn!(r#"f32.const nan"#, [F32Const(f)] if f.is_nan());
+        assert_insn!(r#"f32.const nan:0x401234"#, [F32Const(f)] if f.is_nan());
+        assert_insn!(r#"f32.const -inf"#, [F32Const(f)] if *f == f32::NEG_INFINITY);
+        assert_insn!(r#"f32.const -nan"#, [F32Const(f)] if f.is_nan());
+        assert_insn!(r#"f32.const -nan:0x401234"#, [F32Const(f)] if f.is_nan());
+
+        assert_error!(
+            r#"f32.const 12"#,
+            Vec<Instruction<'_>>,
+            UnexpectedToken{ expected: "float number for f32.const", .. }
+        );
+        assert_error!(
+            r#"f32.const nan:0x1234"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23", .. }
+        );
+        assert_error!(
+            r#"f32.const nan:0x100_0000"#, // Larger than 0x80_0000
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23", .. }
+        );
+
+        assert_insn!(r#"f64.const 42."#, [F64Const(f)] if *f == 42.0);
+        assert_insn!(r#"f64.const 42.0"#, [F64Const(f)] if *f == 42.0);
+        assert_insn!(r#"f64.const 4_2."#, [F64Const(f)] if *f == 42.0);
+        assert_insn!(r#"f64.const 0x1f."#, [F64Const(f)] if *f == 31.0);
+        assert_insn!(r#"f64.const -42."#, [F64Const(f)] if *f == -42.0);
+        assert_insn!(r#"f64.const -4_2."#, [F64Const(f)] if *f == -42.0);
+        assert_insn!(r#"f64.const -0x1f."#, [F64Const(f)] if *f == -31.0);
+        assert_insn!(r#"f64.const 1.2_3"#, [F64Const(f)] if *f == 1.23);
+        assert_insn!(r#"f64.const 1.2_3E3"#, [F64Const(f)] if *f == 1.23e3);
+        assert_insn!(r#"f64.const 100.4E-2"#, [F64Const(f)] if *f == 100.4e-2);
+        assert_insn!(r#"f64.const 0xe."#, [F64Const(f)] if *f == 0xe as f64);
+        assert_insn!(r#"f64.const 0xe_f."#, [F64Const(f)] if *f == 0xef as f64);
+        assert_insn!(r#"f64.const 0x1_f.2_e"#, [F64Const(f)] if *f == 0x1f as f64 + 2.0 / 16.0 + 14.0 / (16.0 * 16.0));
+        assert_insn!(r#"f64.const 0xe.f"#, [F64Const(f)] if *f == 14.0 + 15.0 / 16.0);
+        assert_insn!(r#"f64.const 0xe.fP3"#, [F64Const(f)] if *f == (14.0 + 15.0 / 16.0) * 2.0 * 2.0 * 2.0);
+        assert_insn!(r#"f64.const 0xe.fP-1"#, [F64Const(f)] if *f == (14.0 + 15.0 / 16.0) / 2.0);
+        assert_insn!(r#"f64.const inf"#, [F64Const(f)] if *f == f64::INFINITY);
+        assert_insn!(r#"f64.const nan"#, [F64Const(f)] if f.is_nan());
+        assert_insn!(r#"f64.const nan:0x8_0000_0000_1245"#, [F64Const(f)] if f.is_nan());
+        assert_insn!(r#"f64.const -inf"#, [F64Const(f)] if *f == f64::NEG_INFINITY);
+        assert_insn!(r#"f64.const -nan"#, [F64Const(f)] if f.is_nan());
+        assert_insn!(r#"f64.const -nan:0x8_0000_0000_1245"#, [F64Const(f)] if f.is_nan());
+
+        assert_error!(
+            r#"f64.const 12"#,
+            Vec<Instruction<'_>>,
+            UnexpectedToken{ expected: "float number for f64.const", .. }
+        );
+        assert_error!(
+            r#"f64.const nan:0x1234"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52", .. }
+        );
+        assert_error!(
+            r#"f64.const nan:0x20_0000_0000_0000"#, // Larger than 0x10_0000_0000_0000
+            Vec<Instruction<'_>>,
+            CannotParseNum{ reason: "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52", .. }
         );
     }
 }

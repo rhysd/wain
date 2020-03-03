@@ -1,6 +1,7 @@
 use std::char;
 use std::fmt;
 use std::iter;
+use std::ops;
 use std::str;
 
 #[cfg_attr(test, derive(Debug))]
@@ -70,6 +71,15 @@ pub enum Sign {
     Minus,
 }
 
+impl Sign {
+    pub fn apply<N: ops::Neg<Output = N>>(self, n: N) -> N::Output {
+        match self {
+            Sign::Plus => n,
+            Sign::Minus => -n,
+        }
+    }
+}
+
 impl fmt::Display for Sign {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -106,7 +116,7 @@ impl NumBase {
 #[cfg_attr(test, derive(Debug, PartialEq))]
 #[derive(Clone)]
 pub enum Float<'a> {
-    Nan(Option<&'a str>), // Should parse the payload into u64?
+    Nan(Option<&'a str>),
     Inf,
     Val {
         base: NumBase,
@@ -1075,5 +1085,17 @@ mod tests {
                 Token::RParen,
             ]
         );
+    }
+
+    #[test]
+    fn apply_sign() {
+        assert_eq!(Sign::Plus.apply(42), 42);
+        assert_eq!(Sign::Plus.apply(-42), -42);
+        assert_eq!(Sign::Plus.apply(1.0), 1.0);
+        assert_eq!(Sign::Plus.apply(-1.0), -1.0);
+        assert_eq!(Sign::Minus.apply(42), -42);
+        assert_eq!(Sign::Minus.apply(-42), 42);
+        assert_eq!(Sign::Minus.apply(1.0), -1.0);
+        assert_eq!(Sign::Minus.apply(-1.0), 1.0);
     }
 }
