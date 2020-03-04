@@ -1473,6 +1473,129 @@ fn parse_one_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instruct
                     };
                     InsnKind::F64Const(val)
                 }
+                "i32.clz" => InsnKind::I32Clz,
+                "i32.ctz" => InsnKind::I32Ctz,
+                "i32.popcnt" => InsnKind::I32Popcnt,
+                "i32.add" => InsnKind::I32Add,
+                "i32.sub" => InsnKind::I32Sub,
+                "i32.mul" => InsnKind::I32Mul,
+                "i32.div_s" => InsnKind::I32DivS,
+                "i32.div_u" => InsnKind::I32DivU,
+                "i32.rem_s" => InsnKind::I32RemS,
+                "i32.rem_u" => InsnKind::I32RemU,
+                "i32.and" => InsnKind::I32And,
+                "i32.or" => InsnKind::I32Or,
+                "i32.xor" => InsnKind::I32Xor,
+                "i32.shl" => InsnKind::I32Shl,
+                "i32.shr_s" => InsnKind::I32ShrS,
+                "i32.shr_u" => InsnKind::I32ShrU,
+                "i32.rotl" => InsnKind::I32Rotl,
+                "i32.rotr" => InsnKind::I32Rotr,
+                "i64.clz" => InsnKind::I64Clz,
+                "i64.ctz" => InsnKind::I64Ctz,
+                "i64.popcnt" => InsnKind::I64Popcnt,
+                "i64.add" => InsnKind::I64Add,
+                "i64.sub" => InsnKind::I64Sub,
+                "i64.mul" => InsnKind::I64Mul,
+                "i64.div_s" => InsnKind::I64DivS,
+                "i64.div_u" => InsnKind::I64DivU,
+                "i64.rem_s" => InsnKind::I64RemS,
+                "i64.rem_u" => InsnKind::I64RemU,
+                "i64.and" => InsnKind::I64And,
+                "i64.or" => InsnKind::I64Or,
+                "i64.xor" => InsnKind::I64Xor,
+                "i64.shl" => InsnKind::I64Shl,
+                "i64.shr_s" => InsnKind::I64ShrS,
+                "i64.shr_u" => InsnKind::I64ShrU,
+                "i64.rotl" => InsnKind::I64Rotl,
+                "i64.rotr" => InsnKind::I64Rotr,
+                "f32.abs" => InsnKind::F32Abs,
+                "f32.neg" => InsnKind::F32Neg,
+                "f32.ceil" => InsnKind::F32Ceil,
+                "f32.floor" => InsnKind::F32Floor,
+                "f32.trunc" => InsnKind::F32Trunc,
+                "f32.nearest" => InsnKind::F32Nearest,
+                "f32.sqrt" => InsnKind::F32Sqrt,
+                "f32.add" => InsnKind::F32Add,
+                "f32.sub" => InsnKind::F32Sub,
+                "f32.mul" => InsnKind::F32Mul,
+                "f32.div" => InsnKind::F32Div,
+                "f32.min" => InsnKind::F32Min,
+                "f32.max" => InsnKind::F32Max,
+                "f32.copysign" => InsnKind::F32Copysign,
+                "f64.abs" => InsnKind::F64Abs,
+                "f64.neg" => InsnKind::F64Neg,
+                "f64.ceil" => InsnKind::F64Ceil,
+                "f64.floor" => InsnKind::F64Floor,
+                "f64.trunc" => InsnKind::F64Trunc,
+                "f64.nearest" => InsnKind::F64Nearest,
+                "f64.sqrt" => InsnKind::F64Sqrt,
+                "f64.add" => InsnKind::F64Add,
+                "f64.sub" => InsnKind::F64Sub,
+                "f64.mul" => InsnKind::F64Mul,
+                "f64.div" => InsnKind::F64Div,
+                "f64.min" => InsnKind::F64Min,
+                "f64.max" => InsnKind::F64Max,
+                "f64.copysign" => InsnKind::F64Copysign,
+                "i32.eqz" => InsnKind::I32Eqz,
+                "i32.eq" => InsnKind::I32Eq,
+                "i32.ne" => InsnKind::I32Ne,
+                "i32.lt_s" => InsnKind::I32LtS,
+                "i32.lt_u" => InsnKind::I32LtU,
+                "i32.gt_s" => InsnKind::I32GtS,
+                "i32.gt_u" => InsnKind::I32GtU,
+                "i32.le_s" => InsnKind::I32LeS,
+                "i32.le_u" => InsnKind::I32LeU,
+                "i32.ge_s" => InsnKind::I32GeS,
+                "i32.ge_u" => InsnKind::I32GeU,
+                "i64.eqz" => InsnKind::I64Eqz,
+                "i64.eq" => InsnKind::I64Eq,
+                "i64.ne" => InsnKind::I64Ne,
+                "i64.lt_s" => InsnKind::I64LtS,
+                "i64.lt_u" => InsnKind::I64LtU,
+                "i64.gt_s" => InsnKind::I64GtS,
+                "i64.gt_u" => InsnKind::I64GtU,
+                "i64.le_s" => InsnKind::I64LeS,
+                "i64.le_u" => InsnKind::I64LeU,
+                "i64.ge_s" => InsnKind::I64GeS,
+                "i64.ge_u" => InsnKind::I64GeU,
+                "f32.eq" => InsnKind::F32Eq,
+                "f32.ne" => InsnKind::F32Ne,
+                "f32.lt" => InsnKind::F32Lt,
+                "f32.gt" => InsnKind::F32Gt,
+                "f32.le" => InsnKind::F32Le,
+                "f32.ge" => InsnKind::F32Ge,
+                "f64.eq" => InsnKind::F64Eq,
+                "f64.ne" => InsnKind::F64Ne,
+                "f64.lt" => InsnKind::F64Lt,
+                "f64.gt" => InsnKind::F64Gt,
+                "f64.le" => InsnKind::F64Le,
+                "f64.ge" => InsnKind::F64Ge,
+                "i32.wrap_i64" => InsnKind::I32WrapI64,
+                "i32.trunc_f32_s" => InsnKind::I32TruncF32S,
+                "i32.trunc_f32_u" => InsnKind::I32TruncF32U,
+                "i32.trunc_f64_s" => InsnKind::I32TruncF64S,
+                "i32.trunc_f64_u" => InsnKind::I32TruncF64U,
+                "i64.extend_i32_s" => InsnKind::I64ExtendI32S,
+                "i64.extend_i32_u" => InsnKind::I64ExtendI32U,
+                "i64.trunc_f32_s" => InsnKind::I64TruncF32S,
+                "i64.trunc_f32_u" => InsnKind::I64TruncF32U,
+                "i64.trunc_f64_s" => InsnKind::I64TruncF64S,
+                "i64.trunc_f64_u" => InsnKind::I64TruncF64U,
+                "f32.convert_i32_s" => InsnKind::F32ConvertI32S,
+                "f32.convert_i32_u" => InsnKind::F32ConvertI32U,
+                "f32.convert_i64_s" => InsnKind::F32ConvertI64S,
+                "f32.convert_i64_u" => InsnKind::F32ConvertI64U,
+                "f32.demote_f64" => InsnKind::F32DemoteF64,
+                "f64.convert_i32_s" => InsnKind::F64ConvertI32S,
+                "f64.convert_i32_u" => InsnKind::F64ConvertI32U,
+                "f64.convert_i64_s" => InsnKind::F64ConvertI64S,
+                "f64.convert_i64_u" => InsnKind::F64ConvertI64U,
+                "f64.promote_f32" => InsnKind::F64PromoteF32,
+                "i32.reinterpret_f32" => InsnKind::I32ReinterpretF32,
+                "i64.reinterpret_f64" => InsnKind::I64ReinterpretF64,
+                "f32.reinterpret_i32" => InsnKind::F32ReinterpretI32,
+                "f64.reinterpret_i64" => InsnKind::F64ReinterpretI64,
                 _ => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), start),
             };
             Ok(Instruction { start, kind })
@@ -2706,5 +2829,133 @@ mod tests {
             Vec<Instruction<'_>>,
             CannotParseNum{ reason: "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52", .. }
         );
+    }
+
+    #[test]
+    fn numeric_instructions() {
+        use InsnKind::*;
+        assert_insn!(r#"i32.clz"#, [I32Clz]);
+        assert_insn!(r#"i32.ctz"#, [I32Ctz]);
+        assert_insn!(r#"i32.popcnt"#, [I32Popcnt]);
+        assert_insn!(r#"i32.add"#, [I32Add]);
+        assert_insn!(r#"i32.sub"#, [I32Sub]);
+        assert_insn!(r#"i32.mul"#, [I32Mul]);
+        assert_insn!(r#"i32.div_s"#, [I32DivS]);
+        assert_insn!(r#"i32.div_u"#, [I32DivU]);
+        assert_insn!(r#"i32.rem_s"#, [I32RemS]);
+        assert_insn!(r#"i32.rem_u"#, [I32RemU]);
+        assert_insn!(r#"i32.and"#, [I32And]);
+        assert_insn!(r#"i32.or"#, [I32Or]);
+        assert_insn!(r#"i32.xor"#, [I32Xor]);
+        assert_insn!(r#"i32.shl"#, [I32Shl]);
+        assert_insn!(r#"i32.shr_s"#, [I32ShrS]);
+        assert_insn!(r#"i32.shr_u"#, [I32ShrU]);
+        assert_insn!(r#"i32.rotl"#, [I32Rotl]);
+        assert_insn!(r#"i32.rotr"#, [I32Rotr]);
+        assert_insn!(r#"i64.clz"#, [I64Clz]);
+        assert_insn!(r#"i64.ctz"#, [I64Ctz]);
+        assert_insn!(r#"i64.popcnt"#, [I64Popcnt]);
+        assert_insn!(r#"i64.add"#, [I64Add]);
+        assert_insn!(r#"i64.sub"#, [I64Sub]);
+        assert_insn!(r#"i64.mul"#, [I64Mul]);
+        assert_insn!(r#"i64.div_s"#, [I64DivS]);
+        assert_insn!(r#"i64.div_u"#, [I64DivU]);
+        assert_insn!(r#"i64.rem_s"#, [I64RemS]);
+        assert_insn!(r#"i64.rem_u"#, [I64RemU]);
+        assert_insn!(r#"i64.and"#, [I64And]);
+        assert_insn!(r#"i64.or"#, [I64Or]);
+        assert_insn!(r#"i64.xor"#, [I64Xor]);
+        assert_insn!(r#"i64.shl"#, [I64Shl]);
+        assert_insn!(r#"i64.shr_s"#, [I64ShrS]);
+        assert_insn!(r#"i64.shr_u"#, [I64ShrU]);
+        assert_insn!(r#"i64.rotl"#, [I64Rotl]);
+        assert_insn!(r#"i64.rotr"#, [I64Rotr]);
+        assert_insn!(r#"f32.abs"#, [F32Abs]);
+        assert_insn!(r#"f32.neg"#, [F32Neg]);
+        assert_insn!(r#"f32.ceil"#, [F32Ceil]);
+        assert_insn!(r#"f32.floor"#, [F32Floor]);
+        assert_insn!(r#"f32.trunc"#, [F32Trunc]);
+        assert_insn!(r#"f32.nearest"#, [F32Nearest]);
+        assert_insn!(r#"f32.sqrt"#, [F32Sqrt]);
+        assert_insn!(r#"f32.add"#, [F32Add]);
+        assert_insn!(r#"f32.sub"#, [F32Sub]);
+        assert_insn!(r#"f32.mul"#, [F32Mul]);
+        assert_insn!(r#"f32.div"#, [F32Div]);
+        assert_insn!(r#"f32.min"#, [F32Min]);
+        assert_insn!(r#"f32.max"#, [F32Max]);
+        assert_insn!(r#"f32.copysign"#, [F32Copysign]);
+        assert_insn!(r#"f64.abs"#, [F64Abs]);
+        assert_insn!(r#"f64.neg"#, [F64Neg]);
+        assert_insn!(r#"f64.ceil"#, [F64Ceil]);
+        assert_insn!(r#"f64.floor"#, [F64Floor]);
+        assert_insn!(r#"f64.trunc"#, [F64Trunc]);
+        assert_insn!(r#"f64.nearest"#, [F64Nearest]);
+        assert_insn!(r#"f64.sqrt"#, [F64Sqrt]);
+        assert_insn!(r#"f64.add"#, [F64Add]);
+        assert_insn!(r#"f64.sub"#, [F64Sub]);
+        assert_insn!(r#"f64.mul"#, [F64Mul]);
+        assert_insn!(r#"f64.div"#, [F64Div]);
+        assert_insn!(r#"f64.min"#, [F64Min]);
+        assert_insn!(r#"f64.max"#, [F64Max]);
+        assert_insn!(r#"f64.copysign"#, [F64Copysign]);
+        assert_insn!(r#"i32.eqz"#, [I32Eqz]);
+        assert_insn!(r#"i32.eq"#, [I32Eq]);
+        assert_insn!(r#"i32.ne"#, [I32Ne]);
+        assert_insn!(r#"i32.lt_s"#, [I32LtS]);
+        assert_insn!(r#"i32.lt_u"#, [I32LtU]);
+        assert_insn!(r#"i32.gt_s"#, [I32GtS]);
+        assert_insn!(r#"i32.gt_u"#, [I32GtU]);
+        assert_insn!(r#"i32.le_s"#, [I32LeS]);
+        assert_insn!(r#"i32.le_u"#, [I32LeU]);
+        assert_insn!(r#"i32.ge_s"#, [I32GeS]);
+        assert_insn!(r#"i32.ge_u"#, [I32GeU]);
+        assert_insn!(r#"i64.eqz"#, [I64Eqz]);
+        assert_insn!(r#"i64.eq"#, [I64Eq]);
+        assert_insn!(r#"i64.ne"#, [I64Ne]);
+        assert_insn!(r#"i64.lt_s"#, [I64LtS]);
+        assert_insn!(r#"i64.lt_u"#, [I64LtU]);
+        assert_insn!(r#"i64.gt_s"#, [I64GtS]);
+        assert_insn!(r#"i64.gt_u"#, [I64GtU]);
+        assert_insn!(r#"i64.le_s"#, [I64LeS]);
+        assert_insn!(r#"i64.le_u"#, [I64LeU]);
+        assert_insn!(r#"i64.ge_s"#, [I64GeS]);
+        assert_insn!(r#"i64.ge_u"#, [I64GeU]);
+        assert_insn!(r#"f32.eq"#, [F32Eq]);
+        assert_insn!(r#"f32.ne"#, [F32Ne]);
+        assert_insn!(r#"f32.lt"#, [F32Lt]);
+        assert_insn!(r#"f32.gt"#, [F32Gt]);
+        assert_insn!(r#"f32.le"#, [F32Le]);
+        assert_insn!(r#"f32.ge"#, [F32Ge]);
+        assert_insn!(r#"f64.eq"#, [F64Eq]);
+        assert_insn!(r#"f64.ne"#, [F64Ne]);
+        assert_insn!(r#"f64.lt"#, [F64Lt]);
+        assert_insn!(r#"f64.gt"#, [F64Gt]);
+        assert_insn!(r#"f64.le"#, [F64Le]);
+        assert_insn!(r#"f64.ge"#, [F64Ge]);
+        assert_insn!(r#"i32.wrap_i64"#, [I32WrapI64]);
+        assert_insn!(r#"i32.trunc_f32_s"#, [I32TruncF32S]);
+        assert_insn!(r#"i32.trunc_f32_u"#, [I32TruncF32U]);
+        assert_insn!(r#"i32.trunc_f64_s"#, [I32TruncF64S]);
+        assert_insn!(r#"i32.trunc_f64_u"#, [I32TruncF64U]);
+        assert_insn!(r#"i64.extend_i32_s"#, [I64ExtendI32S]);
+        assert_insn!(r#"i64.extend_i32_u"#, [I64ExtendI32U]);
+        assert_insn!(r#"i64.trunc_f32_s"#, [I64TruncF32S]);
+        assert_insn!(r#"i64.trunc_f32_u"#, [I64TruncF32U]);
+        assert_insn!(r#"i64.trunc_f64_s"#, [I64TruncF64S]);
+        assert_insn!(r#"i64.trunc_f64_u"#, [I64TruncF64U]);
+        assert_insn!(r#"f32.convert_i32_s"#, [F32ConvertI32S]);
+        assert_insn!(r#"f32.convert_i32_u"#, [F32ConvertI32U]);
+        assert_insn!(r#"f32.convert_i64_s"#, [F32ConvertI64S]);
+        assert_insn!(r#"f32.convert_i64_u"#, [F32ConvertI64U]);
+        assert_insn!(r#"f32.demote_f64"#, [F32DemoteF64]);
+        assert_insn!(r#"f64.convert_i32_s"#, [F64ConvertI32S]);
+        assert_insn!(r#"f64.convert_i32_u"#, [F64ConvertI32U]);
+        assert_insn!(r#"f64.convert_i64_s"#, [F64ConvertI64S]);
+        assert_insn!(r#"f64.convert_i64_u"#, [F64ConvertI64U]);
+        assert_insn!(r#"f64.promote_f32"#, [F64PromoteF32]);
+        assert_insn!(r#"i32.reinterpret_f32"#, [I32ReinterpretF32]);
+        assert_insn!(r#"i64.reinterpret_f64"#, [I64ReinterpretF64]);
+        assert_insn!(r#"f32.reinterpret_i32"#, [F32ReinterpretI32]);
+        assert_insn!(r#"f64.reinterpret_i64"#, [F64ReinterpretI64]);
     }
 }
