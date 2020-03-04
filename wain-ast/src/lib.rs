@@ -17,7 +17,8 @@ pub struct Module<'a> {
     pub exports: Vec<Export<'a>>,
     pub funcs: Vec<Func<'a>>,
     pub elems: Vec<Elem<'a>>,
-    // TODO: table, memory, globals, start, data
+    pub tables: Vec<Table<'a>>,
+    // TODO: memory, globals, start, data
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -421,6 +422,14 @@ pub struct Elem<'a> {
     pub idx: Index<'a>,
     pub offset: Vec<Instruction<'a>>,
     pub init: Vec<Index<'a>>,
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#tables
+#[derive(Debug)]
+pub struct Table<'a> {
+    pub start: usize,
+    pub id: Option<&'a str>,
+    pub ty: TableType,
 }
 
 #[cfg(test)]

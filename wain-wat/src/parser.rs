@@ -524,6 +524,7 @@ enum Segment<'a> {
     Export(Export<'a>),
     Func(FuncAbbrev<'a>),
     Elem(Elem<'a>),
+    Table(TableAbbrev<'a>),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
@@ -539,6 +540,7 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut exports = vec![];
         let mut funcs = vec![];
         let mut elems = vec![];
+        let mut tables = vec![];
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module segment")? {
             match parser.parse()? {
@@ -552,7 +554,24 @@ impl<'a> Parse<'a> for Module<'a> {
                 }
                 Segment::Func(FuncAbbrev::NoAbbrev(func)) => funcs.push(func),
                 Segment::Elem(elem) => elems.push(elem),
-                // TODO: Add more segments
+                Segment::Table(TableAbbrev {
+                    exports: mut abbrev_exports,
+                    end,
+                }) => {
+                    exports.append(&mut abbrev_exports);
+                    match end {
+                        TableAbbrevEnd::Table(table) => {
+                            tables.push(table);
+                        }
+                        TableAbbrevEnd::Elem(table, elem) => {
+                            tables.push(table);
+                            elems.push(elem);
+                        }
+                        TableAbbrevEnd::Import(import) => {
+                            imports.push(import);
+                        }
+                    }
+                }
             }
         }
 
@@ -565,6 +584,7 @@ impl<'a> Parse<'a> for Module<'a> {
             exports,
             funcs,
             elems,
+            tables,
         })
     }
 }
@@ -579,6 +599,7 @@ impl<'a> Parse<'a> for Segment<'a> {
             "export" => Ok(Segment::Export(parser.parse()?)),
             "func" => Ok(Segment::Func(parser.parse()?)),
             "elem" => Ok(Segment::Elem(parser.parse()?)),
+            "table" => Ok(Segment::Table(parser.parse()?)),
             // TODO: Add more fields
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
@@ -1719,6 +1740,129 @@ impl<'a> Parse<'a> for Elem<'a> {
             offset,
             init,
         })
+    }
+}
+
+// Helper struct to resolve import/export/elem abbreviation in 'table' segment
+// https://webassembly.github.io/spec/core/text/modules.html#text-table-abbrev
+#[cfg_attr(test, derive(Debug))]
+struct TableAbbrev<'a> {
+    exports: Vec<Export<'a>>,
+    end: TableAbbrevEnd<'a>,
+}
+#[cfg_attr(test, derive(Debug))]
+enum TableAbbrevEnd<'a> {
+    Elem(Table<'a>, Elem<'a>),
+    Table(Table<'a>),
+    Import(Import<'a>),
+}
+
+impl<'a> Parse<'a> for TableAbbrev<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let start = parser.opening_paren("table")?;
+        match_token!(parser, "'table' keyword", Token::Keyword("table"));
+
+        let mut id = parser.maybe_ident("identifier for table segment")?;
+
+        let mut exports = vec![];
+        loop {
+            match parser.peek("argument of table segment")?.0 {
+                Token::LParen => {
+                    parser.eat_token(); // eat '('
+                    let (keyword, offset) = match_token!(parser, "'import' or 'export' for table segment", Token::Keyword(k) => k);
+                    match keyword {
+                        "import" => {
+                            // (table {id}? (import {name} {name} ) {tabletype}) ==
+                            //    (import {name} {name} (table {id}? {tabletype}))
+                            let mod_name = parser.parse()?;
+                            let name = parser.parse()?;
+                            let ty = parser.parse()?;
+                            parser.closing_paren("import argument of table segment")?;
+                            parser.closing_paren("table")?;
+                            return Ok(TableAbbrev {
+                                exports,
+                                end: TableAbbrevEnd::Import(Import {
+                                    start,
+                                    mod_name,
+                                    name,
+                                    desc: ImportDesc::Table { start, id, ty },
+                                }),
+                            });
+                        }
+                        "export" => {
+                            // (table {id}? (export {name}) ...) ==
+                            //   (export {name} (table {id}')) (table {id}' ...)
+                            //   note that this occurs repeatedly
+                            let name = parser.parse()?;
+                            parser.closing_paren("export argument in table segment")?;
+                            let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
+                            id = Some(id_dash);
+                            exports.push(Export {
+                                start,
+                                name,
+                                kind: ExportKind::Table,
+                                idx: Index::Ident(id_dash),
+                            });
+                            // 'export' can be chained by'import', 'export', 'elem' and tabletype
+                        }
+                        kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
+                    }
+                }
+                Token::Keyword("funcref") => {
+                    // (table {id}? funcref (elem  {funcidx}*)) ==
+                    //   (table {id}' n n funcref) (elem {id}' (i32.const 0) {funcidx}*)
+                    //   where n is length of {funcidx}*
+                    parser.eat_token(); // eat 'funcref' (elemtype)
+                    let elem_start = parser.opening_paren("elem argument in table segment")?;
+                    match_token!(
+                        parser,
+                        "'elem' keyword for table segment",
+                        Token::Keyword("elem")
+                    );
+
+                    let mut init = vec![];
+                    while let Token::Int(..) | Token::Ident(_) =
+                        parser.peek("function indices in elem in table segment")?.0
+                    {
+                        init.push(parser.parse()?);
+                    }
+
+                    parser.closing_paren("elem argument in table segment")?;
+                    parser.closing_paren("table")?;
+                    let id = id.unwrap_or_else(|| parser.fresh_id()); // id'
+                    let n = init.len() as u32; // TODO: Check length <= 2^32
+                    let table = Table {
+                        start,
+                        id: Some(id),
+                        ty: TableType {
+                            limit: Limits::Range { min: n, max: n },
+                        },
+                    };
+                    let elem = Elem {
+                        start: elem_start,
+                        idx: Index::Ident(id),
+                        offset: vec![Instruction {
+                            start: elem_start,
+                            kind: InsnKind::I32Const(0),
+                        }],
+                        init,
+                    };
+                    return Ok(TableAbbrev {
+                        exports,
+                        end: TableAbbrevEnd::Elem(table, elem),
+                    });
+                }
+                _ => {
+                    // tabletype
+                    let ty = parser.parse()?;
+                    parser.closing_paren("table")?;
+                    return Ok(TableAbbrev {
+                        exports,
+                        end: TableAbbrevEnd::Table(Table { start, id, ty }),
+                    });
+                }
+            }
+        }
     }
 }
 
