@@ -16,7 +16,8 @@ pub struct Module<'a> {
     pub imports: Vec<Import<'a>>,
     pub exports: Vec<Export<'a>>,
     pub funcs: Vec<Func<'a>>,
-    // TODO: table, memory, globals, start, elems, data
+    pub elems: Vec<Elem<'a>>,
+    // TODO: table, memory, globals, start, data
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -411,6 +412,15 @@ impl<'a> InsnKind<'a> {
             _ => false,
         }
     }
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#element-segments
+#[derive(Debug)]
+pub struct Elem<'a> {
+    pub start: usize,
+    pub idx: Index<'a>,
+    pub offset: Vec<Instruction<'a>>,
+    pub init: Vec<Index<'a>>,
 }
 
 #[cfg(test)]

@@ -523,6 +523,7 @@ enum ModuleField<'a> {
     Import(Import<'a>),
     Export(Export<'a>),
     Func(FuncAbbrev<'a>),
+    Elem(Elem<'a>),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
@@ -537,6 +538,7 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut imports = vec![];
         let mut exports = vec![];
         let mut funcs = vec![];
+        let mut elems = vec![];
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
             match parser.parse()? {
@@ -549,6 +551,7 @@ impl<'a> Parse<'a> for Module<'a> {
                     funcs.push(func);
                 }
                 ModuleField::Func(FuncAbbrev::NoAbbrev(func)) => funcs.push(func),
+                ModuleField::Elem(elem) => elems.push(elem),
                 // TODO: Add more fields
             }
         }
@@ -561,6 +564,7 @@ impl<'a> Parse<'a> for Module<'a> {
             imports,
             exports,
             funcs,
+            elems,
         })
     }
 }
@@ -574,6 +578,7 @@ impl<'a> Parse<'a> for ModuleField<'a> {
             "import" => Ok(ModuleField::Import(parser.parse()?)),
             "export" => Ok(ModuleField::Export(parser.parse()?)),
             "func" => Ok(ModuleField::Func(parser.parse()?)),
+            "elem" => Ok(ModuleField::Elem(parser.parse()?)),
             // TODO: Add more fields
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
@@ -1635,17 +1640,23 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
     fn parse(&mut self) -> Result<'a, ()> {
         // Parser {insn}*
         loop {
-            // This assumes that instr* is always ending with ')', 'end' or 'else' but I did not assure.
+            // This assumes that instr* is always ending with
+            //   - ')' and 'end' for end of instruction
+            //   - 'else' for 'then' clause of 'if' instruction
+            //   - integer or id for funcidx of 'elem' segment. `(offset {instr}) {funcidx}*` can be abbreviated to `{instr} {funcidx}*`
             // If some other folded statement like (foo) is following instr*, this assumption does not
             // work. In the case, we need to peek current and next tokens without consuming the tokens.
             match self
                 .parser
                 .peek("instruction keyword or '(' for folded instruction")?
+                .0
             {
-                (Token::LParen, _) => self.parse_folded()?,
-                (Token::RParen, _) | (Token::Keyword("end"), _) | (Token::Keyword("else"), _) => {
-                    return Ok(())
-                }
+                Token::LParen => self.parse_folded()?,
+                Token::RParen
+                | Token::Keyword("end")
+                | Token::Keyword("else")
+                | Token::Int(..)
+                | Token::Ident(_) => return Ok(()),
                 _ => {
                     let insn = parse_one_insn(self.parser, true)?;
                     self.insns.push(insn);
@@ -1660,6 +1671,54 @@ impl<'a> Parse<'a> for Vec<Instruction<'a>> {
         let mut parser = MaybeFoldedInsn::new(parser);
         parser.parse()?;
         Ok(parser.insns)
+    }
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#element-segments
+impl<'a> Parse<'a> for Elem<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        // Need to parse several abbreviations
+        // https://webassembly.github.io/spec/core/text/modules.html#id7
+        let start = parser.opening_paren("elem")?;
+        match_token!(parser, "'elem' keyword", Token::Keyword("elem"));
+
+        // tableidx can be omitted
+        let idx = match parser.peek("table index of elem")?.0 {
+            Token::Int(..) | Token::Ident(_) => parser.parse()?,
+            _ => Index::Num(0),
+        };
+
+        let offset = match parser.peek("offset parameter of elem")?.0 {
+            Token::LParen if parser.lookahead_keyword("'offset' keyword")?.0 == "offset" => {
+                parser.eat_token(); // Eat '('
+                parser.eat_token(); // Eat 'offset'
+                let expr = parser.parse()?;
+                parser.closing_paren("offset parameter of elem")?;
+                expr
+            }
+            Token::LParen => {
+                let mut parser = MaybeFoldedInsn::new(parser);
+                parser.parse_folded()?;
+                parser.insns
+            }
+            _ => vec![parse_one_insn(parser, true)?],
+        };
+
+        let mut init = vec![];
+        loop {
+            if let (Token::RParen, _) = parser.peek("')' for elem")? {
+                break;
+            }
+            init.push(parser.parse()?);
+        }
+
+        parser.closing_paren("elem")?;
+        Ok(Elem {
+            start,
+            idx,
+            offset,
+            init,
+        })
     }
 }
 
@@ -1792,6 +1851,11 @@ mod tests {
             r#"(export "n" (func $foo))"#,
             ModuleField<'_>,
             ModuleField::Export(..)
+        );
+        assert_parse!(
+            r#"(elem (offset i32.const 10) $func)"#,
+            ModuleField<'_>,
+            ModuleField::Elem(..)
         );
 
         assert_error!(r#"((type $f1 (func)))"#, ModuleField<'_>, UnexpectedToken{ expected: "keyword for module field", ..});
@@ -2957,5 +3021,111 @@ mod tests {
         assert_insn!(r#"i64.reinterpret_f64"#, [I64ReinterpretF64]);
         assert_insn!(r#"f32.reinterpret_i32"#, [F32ReinterpretI32]);
         assert_insn!(r#"f64.reinterpret_i64"#, [F64ReinterpretI64]);
+    }
+
+    #[test]
+    fn elem_segment() {
+        use InsnKind::*;
+        assert_parse!(
+            r#"(elem i32.const 10)"#,
+            Elem<'_>,
+            Elem {
+                idx: Index::Num(0),
+                offset,
+                init,
+                ..
+            } if is_match!(offset[0].kind, I32Const(10)) && init.is_empty()
+        );
+        assert_parse!(
+            r#"(elem 0x1f i32.const 10)"#,
+            Elem<'_>,
+            Elem {
+                idx: Index::Num(0x1f),
+                offset,
+                init,
+                ..
+            } if is_match!(offset[0].kind, I32Const(10)) && init.is_empty()
+        );
+        assert_parse!(
+            r#"(elem $e i32.const 10)"#,
+            Elem<'_>,
+            Elem {
+                idx: Index::Ident("$e"),
+                offset,
+                init,
+                ..
+            } if is_match!(offset[0].kind, I32Const(10)) && init.is_empty()
+        );
+        assert_parse!(
+            r#"(elem (offset))"#,
+            Elem<'_>,
+            Elem {
+                offset,
+                init,
+                ..
+            } if offset.is_empty() && init.is_empty()
+        );
+        assert_parse!(
+            r#"(elem (offset nop))"#,
+            Elem<'_>,
+            Elem {
+                offset,
+                init,
+                ..
+            } if is_match!(offset[0].kind, Nop) && init.is_empty()
+        );
+        assert_parse!(
+            r#"(elem (offset (nop (nop))))"#,
+            Elem<'_>,
+            Elem {
+                offset,
+                init,
+                ..
+            } if offset.len() == 2 && init.is_empty()
+        );
+        assert_parse!(
+            r#"(elem (offset nop nop))"#,
+            Elem<'_>,
+            Elem {
+                offset,
+                init,
+                ..
+            } if offset.len() == 2 && init.is_empty()
+        );
+        assert_parse!(
+            r#"(elem (offset nop) 0xf $f)"#,
+            Elem<'_>,
+            Elem {
+                offset,
+                init,
+                ..
+            } if offset.len() == 1 &&
+                 is_match!(init.as_slice(), [Index::Num(0xf), Index::Ident("$f")])
+        );
+        assert_parse!(
+            r#"(elem nop 0xf)"#,
+            Elem<'_>,
+            Elem {
+                offset,
+                init,
+                ..
+            } if is_match!(offset[0].kind, Nop) &&
+                 is_match!(init.as_slice(), [Index::Num(0xf)])
+        );
+        assert_parse!(
+            r#"(elem nop $f)"#,
+            Elem<'_>,
+            Elem {
+                offset,
+                init,
+                ..
+            } if is_match!(offset[0].kind, Nop) &&
+                 is_match!(init.as_slice(), [Index::Ident("$f")])
+        );
+        assert_parse!(
+            r#"(elem block end 0)"#,
+            Elem<'_>,
+            Elem { offset, .. } if is_match!(offset[0].kind, Block{..})
+        );
     }
 }
