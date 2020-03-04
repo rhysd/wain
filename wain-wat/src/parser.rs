@@ -506,7 +506,7 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
             // TODO: Check above restrictions
             for ty in another.types {
                 module.types.push(ty);
-                // TODO: Merge more fields
+                // TODO: Merge more segments
             }
         }
 
@@ -514,11 +514,11 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
     }
 }
 
-// Helper enum to parse module fields
+// Helper enum to parse module segment
 //
 // https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
 #[cfg_attr(test, derive(Debug))]
-enum ModuleField<'a> {
+enum Segment<'a> {
     Type(TypeDef<'a>),
     Import(Import<'a>),
     Export(Export<'a>),
@@ -540,19 +540,19 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut funcs = vec![];
         let mut elems = vec![];
 
-        while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
+        while let (Token::LParen, _) = parser.peek("opening paren for starting module segment")? {
             match parser.parse()? {
-                ModuleField::Type(ty) => types.push(ty),
-                ModuleField::Import(import) => imports.push(import),
-                ModuleField::Export(export) => exports.push(export),
-                ModuleField::Func(FuncAbbrev::Import(import)) => imports.push(import),
-                ModuleField::Func(FuncAbbrev::Export(export, func)) => {
+                Segment::Type(ty) => types.push(ty),
+                Segment::Import(import) => imports.push(import),
+                Segment::Export(export) => exports.push(export),
+                Segment::Func(FuncAbbrev::Import(import)) => imports.push(import),
+                Segment::Func(FuncAbbrev::Export(export, func)) => {
                     exports.push(export);
                     funcs.push(func);
                 }
-                ModuleField::Func(FuncAbbrev::NoAbbrev(func)) => funcs.push(func),
-                ModuleField::Elem(elem) => elems.push(elem),
-                // TODO: Add more fields
+                Segment::Func(FuncAbbrev::NoAbbrev(func)) => funcs.push(func),
+                Segment::Elem(elem) => elems.push(elem),
+                // TODO: Add more segments
             }
         }
 
@@ -570,15 +570,15 @@ impl<'a> Parse<'a> for Module<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
-impl<'a> Parse<'a> for ModuleField<'a> {
+impl<'a> Parse<'a> for Segment<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (keyword, offset) = parser.lookahead_keyword("keyword for module field")?;
+        let (keyword, offset) = parser.lookahead_keyword("keyword for module segment")?;
         match keyword {
-            "type" => Ok(ModuleField::Type(parser.parse()?)),
-            "import" => Ok(ModuleField::Import(parser.parse()?)),
-            "export" => Ok(ModuleField::Export(parser.parse()?)),
-            "func" => Ok(ModuleField::Func(parser.parse()?)),
-            "elem" => Ok(ModuleField::Elem(parser.parse()?)),
+            "type" => Ok(Segment::Type(parser.parse()?)),
+            "import" => Ok(Segment::Import(parser.parse()?)),
+            "export" => Ok(Segment::Export(parser.parse()?)),
+            "func" => Ok(Segment::Func(parser.parse()?)),
+            "elem" => Ok(Segment::Elem(parser.parse()?)),
             // TODO: Add more fields
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
@@ -1836,30 +1836,26 @@ mod tests {
     }
 
     #[test]
-    fn module_field() {
-        assert_parse!(
-            r#"(type $f1 (func))"#,
-            ModuleField<'_>,
-            ModuleField::Type(..)
-        );
+    fn module_segment() {
+        assert_parse!(r#"(type $f1 (func))"#, Segment<'_>, Segment::Type(..));
         assert_parse!(
             r#"(import "m" "n" (func (type 0)))"#,
-            ModuleField<'_>,
-            ModuleField::Import(..)
+            Segment<'_>,
+            Segment::Import(..)
         );
         assert_parse!(
             r#"(export "n" (func $foo))"#,
-            ModuleField<'_>,
-            ModuleField::Export(..)
+            Segment<'_>,
+            Segment::Export(..)
         );
         assert_parse!(
             r#"(elem (offset i32.const 10) $func)"#,
-            ModuleField<'_>,
-            ModuleField::Elem(..)
+            Segment<'_>,
+            Segment::Elem(..)
         );
 
-        assert_error!(r#"((type $f1 (func)))"#, ModuleField<'_>, UnexpectedToken{ expected: "keyword for module field", ..});
-        assert_error!(r#"(hello!)"#, ModuleField<'_>, UnexpectedKeyword("hello!"));
+        assert_error!(r#"((type $f1 (func)))"#, Segment<'_>, UnexpectedToken{ expected: "keyword for module segment", ..});
+        assert_error!(r#"(hello!)"#, Segment<'_>, UnexpectedKeyword("hello!"));
     }
 
     #[test]
