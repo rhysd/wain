@@ -16,7 +16,7 @@ pub struct Module<'a> {
     pub imports: Vec<Import<'a>>,
     pub exports: Vec<Export<'a>>,
     pub funcs: Vec<Func<'a>>,
-    // TODO: funcs, table, memory, globals, start, elems, data
+    // TODO: table, memory, globals, start, elems, data
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef

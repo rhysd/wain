@@ -35,6 +35,7 @@ pub enum ParseErrorKind<'a> {
         base: NumBase,
         sign: Sign,
     },
+    InvalidAlignment(u32),
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -91,6 +92,9 @@ impl<'a> fmt::Display for ParseError<'a> {
                     "cannot parse integer {}{}{}: {}",
                     sign, base, digits, reason
                 )?
+            }
+            InvalidAlignment(align) => {
+                write!(f, "alignment value must be 2^N but got {:x}", align)?
             }
         };
 
@@ -658,7 +662,6 @@ impl<'a> Parse<'a> for FuncResult {
 
 // https://webassembly.github.io/spec/core/text/values.html#text-name
 impl<'a> Parse<'a> for Name {
-    // TODO: Move this logic to parser as encoding literal into Vec<u8> then use it in this method
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         fn invalid_char_escape<'a>(parser: &mut Parser<'a>, offset: usize) -> Result<'a, Name> {
             parser.error(
@@ -1070,21 +1073,26 @@ impl<'a> Parse<'a> for Mem {
             parse_u32_str(parser, s, base, Sign::Plus, offset)
         }
 
-        let offset = match parser.peek("offset for memory instruction")? {
+        let offset = match parser.peek("'offset' keyword for memory instruction")? {
             (Token::Keyword(kw), offset) if kw.starts_with("offset=") => {
-                Some(parse_u32(&kw[7..], parser, offset)?)
+                let u = parse_u32(&kw[7..], parser, offset)?;
+                parser.eat_token(); // Eat 'offset' keyword
+                Some(u)
             }
             _ => None,
         };
 
-        let align = match parser.peek("align for memory instruction")? {
+        let align = match parser.peek("'align' keyword for memory instruction")? {
             (Token::Keyword(kw), offset) if kw.starts_with("align=") => {
-                Some(parse_u32(&kw[6..], parser, offset)?)
+                let u = parse_u32(&kw[6..], parser, offset)?;
+                parser.eat_token(); // Eat 'align' keyword
+                if u.count_ones() != 1 {
+                    return parser.error(ParseErrorKind::InvalidAlignment(u), offset);
+                }
+                Some(u)
             }
             _ => None,
         };
-
-        // TODO: Check align is 2^N
 
         Ok(Mem { offset, align })
     }
@@ -1104,12 +1112,12 @@ impl<'a> Parse<'a> for Mem {
 //       (i32.mul (i32.add (local.get $x) (i32.const 2)) (i32.const 3))
 //
 // https://webassembly.github.io/spec/core/text/instructions.html#folded-instructions
-struct InsnAbbrev<'a, 'p> {
+struct MaybeFoldedInsn<'a, 'p> {
     insns: Vec<Instruction<'a>>,
     parser: &'p mut Parser<'a>,
 }
 
-// Note: These are free functions not to modify `insns` field of InsnAbbrev.
+// Note: These are free functions not to modify `insns` field of MaybeFoldedInsn.
 
 fn parse_maybe_result_type<'a>(parser: &mut Parser<'a>) -> Result<'a, Option<ValType>> {
     // Note: This requires that next token exists
@@ -1473,11 +1481,10 @@ fn parse_one_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instruct
     }
 }
 
-// TODO: Rename to MaybeFoldedInsn
 // https://webassembly.github.io/spec/core/text/instructions.html#folded-instructions
-impl<'a, 'p> InsnAbbrev<'a, 'p> {
-    fn new(parser: &'p mut Parser<'a>) -> InsnAbbrev<'a, 'p> {
-        InsnAbbrev {
+impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
+    fn new(parser: &'p mut Parser<'a>) -> MaybeFoldedInsn<'a, 'p> {
+        MaybeFoldedInsn {
             insns: vec![],
             parser,
         }
@@ -1527,7 +1534,7 @@ impl<'a, 'p> InsnAbbrev<'a, 'p> {
 
 impl<'a> Parse<'a> for Vec<Instruction<'a>> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let mut parser = InsnAbbrev::new(parser);
+        let mut parser = MaybeFoldedInsn::new(parser);
         parser.parse()?;
         Ok(parser.insns)
     }
@@ -2425,6 +2432,106 @@ mod tests {
             r#"(if (then nop) else nop)"#,
             Vec<Instruction<'_>>,
             UnexpectedToken{ got: Token::Keyword("else"), .. }
+        );
+    }
+
+    #[test]
+    fn parametric_instructions() {
+        use InsnKind::*;
+        assert_insn!(r#"drop"#, [Drop]);
+        assert_insn!(r#"select"#, [Select]);
+    }
+
+    #[test]
+    fn variable_instructions() {
+        use InsnKind::*;
+        assert_insn!(r#"local.get 0"#, [LocalGet(Index::Num(0))]);
+        assert_insn!(r#"local.get $x"#, [LocalGet(Index::Ident("$x"))]);
+        assert_insn!(r#"local.set 0"#, [LocalSet(Index::Num(0))]);
+        assert_insn!(r#"local.tee 0"#, [LocalTee(Index::Num(0))]);
+        assert_insn!(r#"global.get 0"#, [GlobalGet(Index::Num(0))]);
+        assert_insn!(r#"global.set 0"#, [GlobalSet(Index::Num(0))]);
+
+        assert_error!(r#"local.get foo"#, Vec<Instruction<'_>>, UnexpectedToken{ .. });
+    }
+
+    #[test]
+    fn memory_instructions() {
+        use InsnKind::*;
+        assert_insn!(
+            r#"i32.load"#,
+            [I32Load(Mem {
+                align: None,
+                offset: None
+            })]
+        );
+        assert_insn!(
+            r#"i32.load align=32"#,
+            [I32Load(Mem {
+                align: Some(32),
+                offset: None,
+            })]
+        );
+        assert_insn!(
+            r#"i32.load offset=10"#,
+            [I32Load(Mem {
+                align: None,
+                offset: Some(10),
+            })]
+        );
+        assert_insn!(
+            r#"i32.load offset=10 align=32"#,
+            [I32Load(Mem {
+                align: Some(32),
+                offset: Some(10),
+            })]
+        );
+        assert_insn!(
+            r#"i32.load offset=0x1f align=0x80"#,
+            [I32Load(Mem {
+                align: Some(0x80),
+                offset: Some(0x1f),
+            })]
+        );
+        assert_insn!(r#"i64.load"#, [I64Load(..)]);
+        assert_insn!(r#"f32.load"#, [F32Load(..)]);
+        assert_insn!(r#"f64.load"#, [F64Load(..)]);
+        assert_insn!(r#"i32.load8_s"#, [I32Load8S(..)]);
+        assert_insn!(r#"i32.load8_u"#, [I32Load8U(..)]);
+        assert_insn!(r#"i32.load16_s"#, [I32Load16S(..)]);
+        assert_insn!(r#"i32.load16_u"#, [I32Load16U(..)]);
+        assert_insn!(r#"i64.load8_s"#, [I64Load8S(..)]);
+        assert_insn!(r#"i64.load8_u"#, [I64Load8U(..)]);
+        assert_insn!(r#"i64.load16_s"#, [I64Load16S(..)]);
+        assert_insn!(r#"i64.load16_u"#, [I64Load16U(..)]);
+        assert_insn!(r#"i64.load32_s"#, [I64Load32S(..)]);
+        assert_insn!(r#"i64.load32_u"#, [I64Load32U(..)]);
+        assert_insn!(r#"i32.store"#, [I32Store(..)]);
+        assert_insn!(r#"i64.store"#, [I64Store(..)]);
+        assert_insn!(r#"f32.store"#, [F32Store(..)]);
+        assert_insn!(r#"f64.store"#, [F64Store(..)]);
+        assert_insn!(r#"i32.store8"#, [I32Store8(..)]);
+        assert_insn!(r#"i32.store16"#, [I32Store16(..)]);
+        assert_insn!(r#"i64.store8"#, [I64Store8(..)]);
+        assert_insn!(r#"i64.store16"#, [I64Store16(..)]);
+        assert_insn!(r#"i64.store32"#, [I64Store32(..)]);
+        assert_insn!(r#"memory.size"#, [MemorySize]);
+        assert_insn!(r#"memory.grow"#, [MemoryGrow]);
+
+        assert_error!(
+            r#"i32.load align=11"#,
+            Vec<Instruction<'_>>,
+            InvalidAlignment(11)
+        );
+        assert_error!(
+            r#"i32.load align=32 offset=10"#,
+            Vec<Instruction<'_>>,
+            UnexpectedKeyword("offset=10")
+        );
+        assert_error!(
+            r#"i32.load align=pqr"#,
+            Vec<Instruction<'_>>,
+            CannotParseNum{ .. }
         );
     }
 
