@@ -593,6 +593,7 @@ enum Segment<'a> {
     Table(TableAbbrev<'a>),
     Data(Data<'a>),
     Memory(MemoryAbbrev<'a>),
+    Global(GlobalAbbrev<'a>),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
@@ -611,6 +612,7 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut tables = vec![];
         let mut data = vec![];
         let mut memories = vec![];
+        let mut globals = vec![];
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module segment")? {
             match parser.parse()? {
@@ -657,6 +659,14 @@ impl<'a> Parse<'a> for Module<'a> {
                         MemoryAbbrevEnd::Import(i) => imports.push(i),
                     }
                 }
+                Segment::Global(GlobalAbbrev::Import(mut abbrev_exports, import)) => {
+                    exports.append(&mut abbrev_exports);
+                    imports.push(import);
+                }
+                Segment::Global(GlobalAbbrev::Global(mut abbrev_exports, global)) => {
+                    exports.append(&mut abbrev_exports);
+                    globals.push(global);
+                }
             }
         }
 
@@ -672,6 +682,7 @@ impl<'a> Parse<'a> for Module<'a> {
             tables,
             data,
             memories,
+            globals,
         })
     }
 }
@@ -689,6 +700,7 @@ impl<'a> Parse<'a> for Segment<'a> {
             "table" => Ok(Segment::Table(parser.parse()?)),
             "data" => Ok(Segment::Data(parser.parse()?)),
             "memory" => Ok(Segment::Memory(parser.parse()?)),
+            "global" => Ok(Segment::Global(parser.parse()?)),
             // TODO: Add more fields
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
@@ -2104,6 +2116,96 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
     }
 }
 
+// Helper enum to resolve import/export abbreviation in global segment
+// https://webassembly.github.io/spec/core/text/modules.html#globals
+#[cfg_attr(test, derive(Debug))]
+enum GlobalAbbrev<'a> {
+    Import(Vec<Export<'a>>, Import<'a>),
+    Global(Vec<Export<'a>>, Global<'a>),
+}
+
+impl<'a> Parse<'a> for GlobalAbbrev<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let start = parser.opening_paren("global")?;
+        match_token!(parser, "'global' keyword", Token::Keyword("global"));
+
+        let mut id = parser.maybe_ident("identifier for global segment")?;
+
+        let mut exports = vec![];
+        loop {
+            match parser.peek("argument of global segment")?.0 {
+                Token::LParen => {
+                    parser.eat_token(); // Eat '('
+                    let (keyword, offset) = match_token!(parser, "'import' or 'export' for global segment", Token::Keyword(k) => k);
+                    match keyword {
+                        "import" => {
+                            // (global {id}? (import {name} {name} ) {globaltype}) ==
+                            //    (import {name} {name} (global {id}? {globaltype}))
+                            let mod_name = parser.parse()?;
+                            let name = parser.parse()?;
+                            parser.closing_paren("import argument of global segment")?;
+                            let ty = parser.parse()?;
+                            parser.closing_paren("global")?;
+                            let import = Import {
+                                start,
+                                mod_name,
+                                name,
+                                desc: ImportDesc::Global { start, id, ty },
+                            };
+                            return Ok(GlobalAbbrev::Import(exports, import));
+                        }
+                        "export" => {
+                            // (global {id}? (export {name}) ...) ==
+                            //   (export {name} (global {id}')) (global {id}' ...)
+                            //   note that this occurs repeatedly
+                            let name = parser.parse()?;
+                            parser.closing_paren("export argument in global segment")?;
+                            let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
+                            id = Some(id_dash);
+                            exports.push(Export {
+                                start,
+                                name,
+                                kind: ExportKind::Global,
+                                idx: Index::Ident(id_dash),
+                            });
+                        }
+                        "mut" => {
+                            // globaltype with mut
+                            let ty = parser.parse()?;
+                            parser.closing_paren("global mutable type")?;
+                            let init = parser.parse()?;
+                            parser.closing_paren("global")?;
+                            let ty = GlobalType { mutable: true, ty };
+                            let global = Global {
+                                start,
+                                id,
+                                ty,
+                                init,
+                            };
+                            return Ok(GlobalAbbrev::Global(exports, global));
+                        }
+                        kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
+                    }
+                }
+                _ => {
+                    // globaltype without mut
+                    let ty = parser.parse()?;
+                    let init = parser.parse()?;
+                    parser.closing_paren("global")?;
+                    let ty = GlobalType { mutable: false, ty };
+                    let global = Global {
+                        start,
+                        id,
+                        ty,
+                        init,
+                    };
+                    return Ok(GlobalAbbrev::Global(exports, global));
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2248,6 +2350,11 @@ mod tests {
             Segment::Data(..)
         );
         assert_parse!(r#"(memory 3)"#, Segment<'_>, Segment::Memory(..));
+        assert_parse!(
+            r#"(global (mut i32) i32.const 0)"#,
+            Segment<'_>,
+            Segment::Global(..)
+        );
 
         assert_error!(r#"((type $f1 (func)))"#, Segment<'_>, UnexpectedToken{ expected: "keyword for module segment", ..});
         assert_error!(r#"(hello!)"#, Segment<'_>, UnexpectedKeyword("hello!"));
@@ -3900,6 +4007,140 @@ mod tests {
             r#"(memory $m (data "hello") (export "n"))"#,
             MemoryAbbrev<'_>,
             MissingParen{ paren: ')', .. }
+        );
+    }
+
+    #[test]
+    fn global_segment_abbrev() {
+        assert_parse!(
+            r#"(global i32)"#,
+            GlobalAbbrev<'_>,
+            GlobalAbbrev::Global(
+                exports,
+                Global {
+                    id: None,
+                    ty: GlobalType {
+                        mutable: false,
+                        ty: ValType::I32,
+                    },
+                    init,
+                    ..
+                },
+            ) if exports.is_empty() && init.is_empty()
+        );
+        assert_parse!(
+            r#"(global $g i32)"#,
+            GlobalAbbrev<'_>,
+            GlobalAbbrev::Global(
+                exports,
+                Global {
+                    id: Some("$g"),
+                    ty: GlobalType {
+                        mutable: false,
+                        ty: ValType::I32,
+                    },
+                    init,
+                    ..
+                },
+            ) if exports.is_empty() && init.is_empty()
+        );
+        assert_parse!(
+            r#"(global (mut i32))"#,
+            GlobalAbbrev<'_>,
+            GlobalAbbrev::Global(
+                exports,
+                Global {
+                    ty: GlobalType {
+                        mutable: true,
+                        ty: ValType::I32,
+                    },
+                    init,
+                    ..
+                },
+            ) if exports.is_empty() && init.is_empty()
+        );
+        assert_parse!(
+            r#"(global $g (export "n") i32)"#,
+            GlobalAbbrev<'_>,
+            GlobalAbbrev::Global(
+                exports,
+                Global {
+                    ty: GlobalType {
+                        mutable: false,
+                        ty: ValType::I32,
+                    },
+                    ..
+                },
+            ) if is_match!(
+                &exports[0],
+                Export {
+                    name: Name(n),
+                    kind: ExportKind::Global,
+                    idx: Index::Ident("$g"),
+                    ..
+                } if n == "n"
+            )
+        );
+        assert_parse!(
+            r#"(global $g (export "n1") (export "n2") i32)"#,
+            GlobalAbbrev<'_>,
+            GlobalAbbrev::Global(
+                exports,
+                Global { .. },
+            ) if exports[0].name.0 == "n1" && exports[1].name.0 == "n2"
+        );
+        assert_parse!(
+            r#"(global $g (import "m" "n") i32)"#,
+            GlobalAbbrev<'_>,
+            GlobalAbbrev::Import(
+                exports,
+                Import {
+                    mod_name: Name(m),
+                    name: Name(n),
+                    desc: ImportDesc::Global {
+                        id: Some("$g"),
+                        ty: GlobalType {
+                            mutable: false,
+                            ty: ValType::I32,
+                        },
+                        ..
+                    },
+                    ..
+                },
+            ) if exports.is_empty() && m == "m" && n == "n"
+        );
+        assert_parse!(
+            r#"(global $g (export "e") (import "m" "n") i32)"#,
+            GlobalAbbrev<'_>,
+            GlobalAbbrev::Import(
+                exports,
+                Import { ..  },
+            ) if exports.len() == 1
+        );
+        assert_parse!(
+            r#"(global i32 i32.const 32 i32.load align=8)"#,
+            GlobalAbbrev<'_>,
+            GlobalAbbrev::Global(_, Global { init, .. })
+            if is_match!(&init[0].kind, InsnKind::I32Const(32)) &&
+               is_match!(&init[1].kind, InsnKind::I32Load(Mem{ align: Some(8), .. }))
+        );
+        assert_parse!(
+            r#"(global i32 (i32.add (i32.const 4)))"#,
+            GlobalAbbrev<'_>,
+            GlobalAbbrev::Global(_, Global { init, .. })
+            if is_match!(&init[0].kind, InsnKind::I32Const(4)) &&
+               is_match!(&init[1].kind, InsnKind::I32Add)
+        );
+
+        assert_error!(
+            r#"(global $g (import "m" "n") (export "e") i32)"#,
+            GlobalAbbrev<'_>,
+            UnexpectedToken{ .. }
+        );
+        assert_error!(
+            r#"(global $g (mut i32) (export "e"))"#,
+            GlobalAbbrev<'_>,
+            UnexpectedKeyword("export")
         );
     }
 }

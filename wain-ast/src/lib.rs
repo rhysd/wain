@@ -22,7 +22,8 @@ pub struct Module<'a> {
     pub tables: Vec<Table<'a>>,
     pub data: Vec<Data<'a>>,
     pub memories: Vec<Memory<'a>>,
-    // TODO: globals, start
+    pub globals: Vec<Global<'a>>,
+    // TODO: start
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -456,6 +457,15 @@ pub struct Memory<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
     pub ty: MemType,
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#globals
+#[derive(Debug)]
+pub struct Global<'a> {
+    pub start: usize,
+    pub id: Option<&'a str>,
+    pub ty: GlobalType,
+    pub init: Vec<Instruction<'a>>,
 }
 
 #[cfg(test)]
