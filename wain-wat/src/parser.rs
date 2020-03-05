@@ -592,6 +592,7 @@ enum Segment<'a> {
     Elem(Elem<'a>),
     Table(TableAbbrev<'a>),
     Data(Data<'a>),
+    Memory(MemoryAbbrev<'a>),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
@@ -609,6 +610,7 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut elems = vec![];
         let mut tables = vec![];
         let mut data = vec![];
+        let mut memories = vec![];
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module segment")? {
             match parser.parse()? {
@@ -641,6 +643,20 @@ impl<'a> Parse<'a> for Module<'a> {
                     }
                 }
                 Segment::Data(d) => data.push(d),
+                Segment::Memory(MemoryAbbrev {
+                    exports: mut abbrev_exports,
+                    end,
+                }) => {
+                    exports.append(&mut abbrev_exports);
+                    match end {
+                        MemoryAbbrevEnd::Memory(m) => memories.push(m),
+                        MemoryAbbrevEnd::Data(m, d) => {
+                            memories.push(m);
+                            data.push(d);
+                        }
+                        MemoryAbbrevEnd::Import(i) => imports.push(i),
+                    }
+                }
             }
         }
 
@@ -655,6 +671,7 @@ impl<'a> Parse<'a> for Module<'a> {
             elems,
             tables,
             data,
+            memories,
         })
     }
 }
@@ -671,6 +688,7 @@ impl<'a> Parse<'a> for Segment<'a> {
             "elem" => Ok(Segment::Elem(parser.parse()?)),
             "table" => Ok(Segment::Table(parser.parse()?)),
             "data" => Ok(Segment::Data(parser.parse()?)),
+            "memory" => Ok(Segment::Memory(parser.parse()?)),
             // TODO: Add more fields
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
@@ -1955,6 +1973,137 @@ impl<'a> Parse<'a> for Data<'a> {
     }
 }
 
+// Helper struct to resolve import/export/data abbreviation in memory segment
+// https://webassembly.github.io/spec/core/text/modules.html#memories
+#[cfg_attr(test, derive(Debug))]
+struct MemoryAbbrev<'a> {
+    exports: Vec<Export<'a>>,
+    end: MemoryAbbrevEnd<'a>,
+}
+#[cfg_attr(test, derive(Debug))]
+enum MemoryAbbrevEnd<'a> {
+    Import(Import<'a>),
+    Memory(Memory<'a>),
+    Data(Memory<'a>, Data<'a>),
+}
+impl<'a> Parse<'a> for MemoryAbbrev<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let start = parser.opening_paren("memory")?;
+        match_token!(parser, "'memory' keyword", Token::Keyword("memory"));
+
+        let mut id = parser.maybe_ident("identifier for memory segment")?;
+
+        let mut exports = vec![];
+        loop {
+            match parser.peek("argument of memory segment")?.0 {
+                Token::LParen => {
+                    parser.eat_token(); // eat '('
+                    let (keyword, offset) = match_token!(parser, "'import' or 'export' or 'data' for memory segment", Token::Keyword(k) => k);
+                    match keyword {
+                        "import" => {
+                            // (memory {id}? (import {name} {name} ) {memtype}) ==
+                            //    (import {name} {name} (memory {id}? {memtype}))
+                            let mod_name = parser.parse()?;
+                            let name = parser.parse()?;
+                            parser.closing_paren("import argument of memory segment")?;
+                            let ty = parser.parse()?;
+                            parser.closing_paren("memory")?;
+                            return Ok(MemoryAbbrev {
+                                exports,
+                                end: MemoryAbbrevEnd::Import(Import {
+                                    start,
+                                    mod_name,
+                                    name,
+                                    desc: ImportDesc::Memory { start, id, ty },
+                                }),
+                            });
+                        }
+                        "export" => {
+                            // (memory {id}? (export {name}) ...) ==
+                            //   (export {name} (memory {id}')) (memory {id}' ...)
+                            //   note that this occurs repeatedly
+                            let name = parser.parse()?;
+                            parser.closing_paren("export argument in memory segment")?;
+                            let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
+                            id = Some(id_dash);
+                            exports.push(Export {
+                                start,
+                                name,
+                                kind: ExportKind::Memory,
+                                idx: Index::Ident(id_dash),
+                            });
+                            // 'export' can be chained by'import', 'export', 'data' and tabletype
+                        }
+                        "data" => {
+                            // (memory {id}? (data  {datastring})) ==
+                            //   (memory {id}' m m) (data {id}' (i32.const 0) {datastring})
+                            //   where n = data bytes, m = ceil(n / 64Ki), Note: 64Ki means page size
+
+                            let mut data = vec![];
+                            loop {
+                                match parser.next_token(
+                                    "')' or string literal for data of memory segment",
+                                )? {
+                                    (Token::RParen, _) => break,
+                                    (Token::String(s), offset) => {
+                                        let mut decoded =
+                                            parser.parse_bytes_encoded_in_string(s, offset)?;
+                                        data.append(&mut decoded);
+                                    }
+                                    (tok, offset) => {
+                                        return parser.unexpected_token(
+                                            tok.clone(),
+                                            "')' or string literal for data of memory segment",
+                                            offset,
+                                        )
+                                    }
+                                }
+                            }
+                            parser.closing_paren("memory")?;
+
+                            let id = id.unwrap_or_else(|| parser.fresh_id()); // id'
+                                                                              // Infer memory limits from page size (64 * 1024 = 65536)
+                            let n = (data.len() as f64 / 65536.0).ceil() as u32;
+
+                            return Ok(MemoryAbbrev {
+                                exports,
+                                end: MemoryAbbrevEnd::Data(
+                                    Memory {
+                                        start,
+                                        id: Some(id),
+                                        ty: MemType {
+                                            limit: Limits::Range { min: n, max: n },
+                                        },
+                                    },
+                                    Data {
+                                        start,
+                                        idx: Index::Ident(id),
+                                        offset: vec![Instruction {
+                                            start,
+                                            kind: InsnKind::I32Const(0),
+                                        }],
+                                        data: Cow::Owned(data),
+                                    },
+                                ),
+                            });
+                        }
+                        kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
+                    }
+                }
+                _ => {
+                    // memtype
+                    let ty = parser.parse()?;
+                    parser.closing_paren("memory")?;
+                    return Ok(MemoryAbbrev {
+                        exports,
+                        end: MemoryAbbrevEnd::Memory(Memory { start, id, ty }),
+                    });
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2098,6 +2247,7 @@ mod tests {
             Segment<'_>,
             Segment::Data(..)
         );
+        assert_parse!(r#"(memory 3)"#, Segment<'_>, Segment::Memory(..));
 
         assert_error!(r#"((type $f1 (func)))"#, Segment<'_>, UnexpectedToken{ expected: "keyword for module segment", ..});
         assert_error!(r#"(hello!)"#, Segment<'_>, UnexpectedKeyword("hello!"));
@@ -3566,6 +3716,190 @@ mod tests {
             r#"(data 0 "hello")"#,
             Data<'_>,
             UnexpectedToken{ .. }
+        );
+    }
+
+    #[test]
+    fn memory_segment_abbrev() {
+        assert_parse!(
+            r#"(memory 3)"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev{
+                exports,
+                end: MemoryAbbrevEnd::Memory(
+                    Memory{
+                        id: None,
+                        ty: MemType{ limit: Limits::From{ min: 3 } },
+                        ..
+                    }
+                ),
+                ..
+            } if exports.is_empty()
+        );
+        assert_parse!(
+            r#"(memory 1 3)"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev{
+                exports,
+                end: MemoryAbbrevEnd::Memory(
+                    Memory{
+                        id: None,
+                        ty: MemType{ limit: Limits::Range{ min: 1, max: 3 } },
+                        ..
+                    }
+                ),
+                ..
+            } if exports.is_empty()
+        );
+        assert_parse!(
+            r#"(memory $m 1 3)"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev{
+                exports,
+                end: MemoryAbbrevEnd::Memory(
+                    Memory{
+                        id: Some("$m"),
+                        ty: MemType{ limit: Limits::Range{ min: 1, max: 3 } },
+                        ..
+                    }
+                ),
+                ..
+            } if exports.is_empty()
+        );
+        assert_parse!(
+            r#"(memory $m (data "foo" "bar"))"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev{
+                exports,
+                end: MemoryAbbrevEnd::Data(
+                    Memory{
+                        ty: MemType{ limit: Limits::Range{ min: 1, max: 1 } },
+                        ..
+                    },
+                    Data {
+                        idx: Index::Ident("$m"),
+                        offset,
+                        data,
+                        ..
+                    },
+                ),
+                ..
+            } if exports.is_empty() &&
+                 is_match!(offset[0].kind, InsnKind::I32Const(0)) &&
+                 data.as_ref() == b"foobar".as_ref()
+        );
+        assert_parse!(
+            r#"(memory $m (import "m" "n") 2)"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev{
+                exports,
+                end: MemoryAbbrevEnd::Import(
+                    Import {
+                        mod_name: Name(m),
+                        name: Name(n),
+                        desc: ImportDesc::Memory {
+                            id: Some("$m"),
+                            ty: MemType {
+                                limit: Limits::From{ min: 2 },
+                            },
+                            ..
+                        },
+                        ..
+                    }
+                )
+            } if exports.is_empty() && m == "m" && n == "n"
+        );
+        assert_parse!(
+            r#"(memory $m (export "n") 0)"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev{
+                exports,
+                end: MemoryAbbrevEnd::Memory(
+                    Memory{
+                        ty: MemType{ limit: Limits::From{ min: 0 } },
+                        ..
+                    },
+                ),
+                ..
+            } if is_match!(
+                &exports[0],
+                Export {
+                    name: Name(n),
+                    kind: ExportKind::Memory,
+                    idx: Index::Ident("$m"),
+                    ..
+                } if n == "n"
+            )
+        );
+        assert_parse!(
+            r#"(memory $m (export "n") (export "n2") 0)"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev{
+                exports,
+                end: MemoryAbbrevEnd::Memory(
+                    Memory{
+                        ty: MemType{ limit: Limits::From{ min: 0 } },
+                        ..
+                    },
+                ),
+                ..
+            } if exports[0].name.0 == "n" && exports[1].name.0 == "n2"
+        );
+        assert_parse!(
+            r#"(memory $m (export "e") (import "m" "n") 2)"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev{
+                exports,
+                end: MemoryAbbrevEnd::Import(
+                    Import {
+                        mod_name: Name(m),
+                        name: Name(n),
+                        desc: ImportDesc::Memory {
+                            id: Some("$m"),
+                            ty: MemType {
+                                limit: Limits::From{ min: 2 },
+                            },
+                            ..
+                        },
+                        ..
+                    }
+                )
+            } if m == "m" && n == "n" && is_match!(
+                &exports[0],
+                Export {
+                    name: Name(n),
+                    kind: ExportKind::Memory,
+                    idx: Index::Ident("$m"),
+                    ..
+                } if n == "e"
+            )
+        );
+        assert_parse!(
+            r#"(memory $m (export "e1") (export "e2") (import "m" "n") 2)"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev{
+                exports,
+                end: MemoryAbbrevEnd::Import(_)
+            } if exports.len() == 2
+        );
+        assert_parse!(
+            r#"(memory $m (export "e") (data "hello"))"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev{
+                exports,
+                end: MemoryAbbrevEnd::Data(..)
+            } if exports.len() == 1
+        );
+
+        assert_error!(
+            r#"(memory $m (import "m" "n") (export "n2") 0)"#,
+            MemoryAbbrev<'_>,
+            UnexpectedToken{ .. }
+        );
+        assert_error!(
+            r#"(memory $m (data "hello") (export "n"))"#,
+            MemoryAbbrev<'_>,
+            MissingParen{ paren: ')', .. }
         );
     }
 }

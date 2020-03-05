@@ -21,7 +21,8 @@ pub struct Module<'a> {
     pub elems: Vec<Elem<'a>>,
     pub tables: Vec<Table<'a>>,
     pub data: Vec<Data<'a>>,
-    // TODO: memory, globals, start
+    pub memories: Vec<Memory<'a>>,
+    // TODO: globals, start
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -447,6 +448,14 @@ pub struct Data<'a> {
     pub idx: Index<'a>,
     pub offset: Vec<Instruction<'a>>,
     pub data: Cow<'a, [u8]>,
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#memories
+#[derive(Debug)]
+pub struct Memory<'a> {
+    pub start: usize,
+    pub id: Option<&'a str>,
+    pub ty: MemType,
 }
 
 #[cfg(test)]
