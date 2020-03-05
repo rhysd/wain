@@ -1,4 +1,5 @@
 use crate::lexer::{Float, LexError, Lexer, NumBase, Sign, Token};
+use std::borrow::Cow;
 use std::char;
 use std::f32;
 use std::f64;
@@ -687,9 +688,9 @@ impl<'a> Parse<'a> for FuncResult {
 }
 
 // https://webassembly.github.io/spec/core/text/values.html#text-name
-impl<'a> Parse<'a> for Name {
+impl<'a> Parse<'a> for Name<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        fn invalid_char_escape<'a>(parser: &mut Parser<'a>, offset: usize) -> Result<'a, Name> {
+        fn invalid_char_escape<'a>(parser: &mut Parser<'a>, offset: usize) -> Result<'a, Name<'a>> {
             parser.error(
                 ParseErrorKind::InvalidStringFormat(
                     r#"escape must be one of \t, \n, \r, \", \', \\, \u{hexnum}, \MN"#,
@@ -752,7 +753,7 @@ impl<'a> Parse<'a> for Name {
                 }
             }
         }
-        Ok(Name(name))
+        Ok(Name(Cow::Owned(name)))
     }
 }
 
@@ -2068,20 +2069,20 @@ mod tests {
 
     #[test]
     fn name() {
-        assert_parse!(r#""n""#, Name, Name(n) if n == "n");
-        assert_parse!(r#""name""#, Name, Name(n) if n == "name");
-        assert_parse!(r#""a\tb\nc""#, Name, Name(n) if n == "a\tb\nc");
-        assert_parse!(r#""""#, Name, Name(n) if n.is_empty());
-        assert_parse!(r#""\t\n\r\"\'\\\u{3042}\41""#, Name, Name(n) if n == "\t\n\r\"'\\あA");
+        assert_parse!(r#""n""#, Name<'_>, Name(n) if n == "n");
+        assert_parse!(r#""name""#, Name<'_>, Name(n) if n == "name");
+        assert_parse!(r#""a\tb\nc""#, Name<'_>, Name(n) if n == "a\tb\nc");
+        assert_parse!(r#""""#, Name<'_>, Name(n) if n.is_empty());
+        assert_parse!(r#""\t\n\r\"\'\\\u{3042}\41""#, Name<'_>, Name(n) if n == "\t\n\r\"'\\あA");
 
-        assert_error!(r#""\x""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\0""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\0x""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\u""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\u{""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\u{41""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\u{}""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\u{hello!}""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\x""#, Name<'_>, InvalidStringFormat(..));
+        assert_error!(r#""\0""#, Name<'_>, InvalidStringFormat(..));
+        assert_error!(r#""\0x""#, Name<'_>, InvalidStringFormat(..));
+        assert_error!(r#""\u""#, Name<'_>, InvalidStringFormat(..));
+        assert_error!(r#""\u{""#, Name<'_>, InvalidStringFormat(..));
+        assert_error!(r#""\u{41""#, Name<'_>, InvalidStringFormat(..));
+        assert_error!(r#""\u{}""#, Name<'_>, InvalidStringFormat(..));
+        assert_error!(r#""\u{hello!}""#, Name<'_>, InvalidStringFormat(..));
     }
 
     #[test]

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 // Root of the tree
 #[derive(Debug)]
 pub struct SyntaxTree<'a> {
@@ -65,14 +67,19 @@ pub enum ValType {
 #[derive(Debug)]
 pub struct Import<'a> {
     pub start: usize,
-    pub mod_name: Name,
-    pub name: Name,
+    pub mod_name: Name<'a>,
+    pub name: Name<'a>,
     pub desc: ImportDesc<'a>,
 }
 
 // https://webassembly.github.io/spec/core/text/values.html#text-name
+//
+// Use Cow<'a, str> since it is String on text format and it is &str on binary format.
+// In text format, special characters in string literal are escaped. Unescaped string must
+// be allocated in heap. In binary format, it is directly encoded as bytes so borrowing the
+// part of source is enough.
 #[derive(Debug)]
-pub struct Name(pub String);
+pub struct Name<'a>(pub Cow<'a, str>);
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
 #[derive(Debug)]
@@ -146,7 +153,7 @@ pub struct GlobalType {
 #[derive(Debug)]
 pub struct Export<'a> {
     pub start: usize,
-    pub name: Name,
+    pub name: Name<'a>,
     pub kind: ExportKind,
     pub idx: Index<'a>,
 }
