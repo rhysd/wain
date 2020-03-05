@@ -227,6 +227,15 @@ impl<'a> Parser<'a> {
         )
     }
 
+    fn invalid_char_escape<T>(&self, offset: usize) -> Result<'a, T> {
+        self.error(
+            ParseErrorKind::InvalidStringFormat(
+                r#"escape must be one of \t, \n, \r, \", \', \\, \u{hexnum}, \MN where M and N are hex number"#,
+            ),
+            offset,
+        )
+    }
+
     fn cannot_parse_num<T>(
         &self,
         reason: &'static str,
@@ -350,6 +359,62 @@ impl<'a> Parser<'a> {
         Ok(parsed)
     }
 
+    fn parse_bytes_encoded_in_string(&self, src: &str, offset: usize) -> Result<'a, Vec<u8>> {
+        let mut buf: Vec<u8> = vec![];
+        let mut chars = src.char_indices();
+        while let Some((i, c)) = chars.next() {
+            if c != '\\' {
+                let mut b = [0; 4];
+                buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
+            } else {
+                // Note: Lexer guarantees that at least one char follows after '\'
+                match chars.next().unwrap().1 {
+                    't' => buf.push(b'\t'),
+                    'n' => buf.push(b'\n'),
+                    'r' => buf.push(b'\r'),
+                    '"' => buf.push(b'"'),
+                    '\'' => buf.push(b'\''),
+                    '\\' => buf.push(b'\\'),
+                    'u' => {
+                        match chars.next() {
+                            Some((i, '{')) => {
+                                let start = i + 1; // next to '{'
+                                let end = loop {
+                                    match chars.next() {
+                                        Some((i, '}')) => break i,
+                                        Some(_) => continue,
+                                        None => return self.invalid_utf8_char(offset + i),
+                                    }
+                                };
+                                if let Some(c) = u32::from_str_radix(&src[start..end], 16)
+                                    .ok()
+                                    .and_then(char::from_u32)
+                                {
+                                    let mut b = [0; 4];
+                                    buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
+                                } else {
+                                    return self.invalid_utf8_char(offset + i);
+                                }
+                            }
+                            _ => return self.invalid_utf8_char(offset + i),
+                        }
+                    }
+                    c => {
+                        let hi = c.to_digit(16);
+                        let lo = chars.next().and_then(|(_, c)| c.to_digit(16));
+                        match (hi, lo) {
+                            (Some(hi), Some(lo)) => {
+                                buf.push((hi * 16 + lo) as u8);
+                            }
+                            _ => return self.invalid_char_escape(offset + i),
+                        }
+                    }
+                }
+            }
+        }
+        Ok(buf)
+    }
+
     fn fresh_id(&mut self) -> &'a str {
         // For some syntax sugars, text format requires fresh IDs. They are unique IDs not conflicting
         // with existing IDs.
@@ -365,7 +430,7 @@ impl<'a> Parser<'a> {
 macro_rules! parse_integer_function {
     ($name:ident, $int:ty) => {
         fn $name<'a>(
-            parser: &mut Parser<'a>,
+            parser: &Parser<'a>,
             input: &'a str,
             base: NumBase,
             sign: Sign,
@@ -414,7 +479,7 @@ parse_integer_function!(parse_u64_str, u64);
 macro_rules! parse_float_number_function {
     ($name:ident, $float:ty) => {
         fn $name<'a>(
-            parser: &mut Parser<'a>,
+            parser: &Parser<'a>,
             input: &'a str,
             base: NumBase,
             sign: Sign,
@@ -526,6 +591,7 @@ enum Segment<'a> {
     Func(FuncAbbrev<'a>),
     Elem(Elem<'a>),
     Table(TableAbbrev<'a>),
+    Data(Data<'a>),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
@@ -542,6 +608,7 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut funcs = vec![];
         let mut elems = vec![];
         let mut tables = vec![];
+        let mut data = vec![];
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module segment")? {
             match parser.parse()? {
@@ -573,6 +640,7 @@ impl<'a> Parse<'a> for Module<'a> {
                         }
                     }
                 }
+                Segment::Data(d) => data.push(d),
             }
         }
 
@@ -586,6 +654,7 @@ impl<'a> Parse<'a> for Module<'a> {
             funcs,
             elems,
             tables,
+            data,
         })
     }
 }
@@ -601,6 +670,7 @@ impl<'a> Parse<'a> for Segment<'a> {
             "func" => Ok(Segment::Func(parser.parse()?)),
             "elem" => Ok(Segment::Elem(parser.parse()?)),
             "table" => Ok(Segment::Table(parser.parse()?)),
+            "data" => Ok(Segment::Data(parser.parse()?)),
             // TODO: Add more fields
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
@@ -690,15 +760,6 @@ impl<'a> Parse<'a> for FuncResult {
 // https://webassembly.github.io/spec/core/text/values.html#text-name
 impl<'a> Parse<'a> for Name<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        fn invalid_char_escape<'a>(parser: &mut Parser<'a>, offset: usize) -> Result<'a, Name<'a>> {
-            parser.error(
-                ParseErrorKind::InvalidStringFormat(
-                    r#"escape must be one of \t, \n, \r, \", \', \\, \u{hexnum}, \MN"#,
-                ),
-                offset,
-            )
-        }
-
         let (src, offset) = match_token!(parser, "string literal for name", Token::String(s) => s);
 
         // A name string must form a valid UTF-8 encoding as defined by Unicode (Section 2.5)
@@ -745,9 +806,9 @@ impl<'a> Parse<'a> for Name<'a> {
                         match (hi, lo) {
                             (Some(hi), Some(lo)) => match char::from_u32(hi * 16 + lo) {
                                 Some(c) => name.push(c),
-                                None => return invalid_char_escape(parser, offset + i),
+                                None => return parser.invalid_char_escape(offset + i),
                             },
-                            _ => return invalid_char_escape(parser, offset + i),
+                            _ => return parser.invalid_char_escape(offset + i),
                         }
                     }
                 }
@@ -1849,6 +1910,51 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
     }
 }
 
+impl<'a> Parse<'a> for Data<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let start = parser.opening_paren("data")?;
+        match_token!(parser, "'data' keyword", Token::Keyword("data"));
+
+        let idx = parser.parse()?;
+
+        let offset = match parser.peek("offset of data segment")?.0 {
+            Token::LParen => {
+                parser.opening_paren("offset of data segment")?;
+                match_token!(parser, "'offset' keyword", Token::Keyword("offset"));
+                let offset = parser.parse()?;
+                parser.closing_paren("offset of data segment")?;
+                offset
+            }
+            _ => vec![parse_one_insn(parser, true)?],
+        };
+
+        let mut data = vec![];
+        loop {
+            match parser.next_token("')' or string literal for data segment")? {
+                (Token::RParen, _) => {
+                    return Ok(Data {
+                        start,
+                        idx,
+                        offset,
+                        data: Cow::Owned(data),
+                    });
+                }
+                (Token::String(s), offset) => {
+                    let mut decoded = parser.parse_bytes_encoded_in_string(s, offset)?;
+                    data.append(&mut decoded);
+                }
+                (tok, offset) => {
+                    return parser.unexpected_token(
+                        tok.clone(),
+                        "')' or string literal for data segment",
+                        offset,
+                    )
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1987,6 +2093,11 @@ mod tests {
             Segment::Elem(..)
         );
         assert_parse!(r#"(table 0 funcref)"#, Segment<'_>, Segment::Table(..));
+        assert_parse!(
+            r#"(data 0 i32.const 0 "hello")"#,
+            Segment<'_>,
+            Segment::Data(..)
+        );
 
         assert_error!(r#"((type $f1 (func)))"#, Segment<'_>, UnexpectedToken{ expected: "keyword for module segment", ..});
         assert_error!(r#"(hello!)"#, Segment<'_>, UnexpectedKeyword("hello!"));
@@ -3405,6 +3516,56 @@ mod tests {
             r#"(table $t funcref (elem 1) (export "n"))"#,
             TableAbbrev<'_>,
             MissingParen{ paren: ')', .. }
+        );
+    }
+
+    #[test]
+    fn data_segment() {
+        assert_parse!(
+            r#"(data 0 i32.const 0)"#,
+            Data<'_>,
+            Data{
+                idx: Index::Num(0),
+                offset,
+                data,
+                ..
+            } if is_match!(offset[0].kind, InsnKind::I32Const(0)) && data.is_empty()
+        );
+        assert_parse!(
+            r#"(data 0 (offset i32.const 0))"#,
+            Data<'_>,
+            Data{
+                idx: Index::Num(0),
+                offset,
+                data,
+                ..
+            } if is_match!(offset[0].kind, InsnKind::I32Const(0)) && data.is_empty()
+        );
+        assert_parse!(
+            r#"(data 0 (offset i32.const 0) "hello")"#,
+            Data<'_>,
+            Data{ data, ..  } if data.as_ref() == b"hello".as_ref()
+        );
+        assert_parse!(
+            r#"(data 0 (offset i32.const 0) "hello" " dogs!")"#,
+            Data<'_>,
+            Data{ data, ..  } if data.as_ref() == b"hello dogs!".as_ref()
+        );
+        assert_parse!(
+            r#"(data 0 (offset i32.const 0) "\t\n\r" "\"\'\\" "\u{3042}\41")"#,
+            Data<'_>,
+            Data{ data, ..  } if data.as_ref() == b"\t\n\r\"'\\\xe3\x81\x82A".as_ref()
+        );
+        assert_parse!(
+            r#"(data 0 (offset i32.const 0) "\01\02\03\ff")"#,
+            Data<'_>,
+            Data{ data, ..  } if data.as_ref() == &[1, 2, 3, 255]
+        );
+
+        assert_error!(
+            r#"(data 0 "hello")"#,
+            Data<'_>,
+            UnexpectedToken{ .. }
         );
     }
 }

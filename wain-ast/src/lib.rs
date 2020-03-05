@@ -20,7 +20,8 @@ pub struct Module<'a> {
     pub funcs: Vec<Func<'a>>,
     pub elems: Vec<Elem<'a>>,
     pub tables: Vec<Table<'a>>,
-    // TODO: memory, globals, start, data
+    pub data: Vec<Data<'a>>,
+    // TODO: memory, globals, start
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -437,6 +438,15 @@ pub struct Table<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
     pub ty: TableType,
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-data
+#[derive(Debug)]
+pub struct Data<'a> {
+    pub start: usize,
+    pub idx: Index<'a>,
+    pub offset: Vec<Instruction<'a>>,
+    pub data: Cow<'a, [u8]>,
 }
 
 #[cfg(test)]
