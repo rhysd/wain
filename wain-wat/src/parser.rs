@@ -576,7 +576,7 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
             // TODO: Check above restrictions
             for ty in another.types {
                 module.types.push(ty);
-                // TODO: Merge more segments
+                // TODO: Merge more fields
             }
         }
 
@@ -584,11 +584,11 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
     }
 }
 
-// Helper enum to parse module segment
+// Helper enum to parse module field
 //
 // https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
 #[cfg_attr(test, derive(Debug))]
-enum Segment<'a> {
+enum ModuleField<'a> {
     Type(TypeDef<'a>),
     Import(Import<'a>),
     Export(Export<'a>),
@@ -620,19 +620,19 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut globals = vec![];
         let mut entrypoint = None;
 
-        while let (Token::LParen, _) = parser.peek("opening paren for starting module segment")? {
+        while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
             match parser.parse()? {
-                Segment::Type(ty) => types.push(ty),
-                Segment::Import(import) => imports.push(import),
-                Segment::Export(export) => exports.push(export),
-                Segment::Func(FuncAbbrev::Import(import)) => imports.push(import),
-                Segment::Func(FuncAbbrev::Export(export, func)) => {
+                ModuleField::Type(ty) => types.push(ty),
+                ModuleField::Import(import) => imports.push(import),
+                ModuleField::Export(export) => exports.push(export),
+                ModuleField::Func(FuncAbbrev::Import(import)) => imports.push(import),
+                ModuleField::Func(FuncAbbrev::Export(export, func)) => {
                     exports.push(export);
                     funcs.push(func);
                 }
-                Segment::Func(FuncAbbrev::NoAbbrev(func)) => funcs.push(func),
-                Segment::Elem(elem) => elems.push(elem),
-                Segment::Table(TableAbbrev {
+                ModuleField::Func(FuncAbbrev::NoAbbrev(func)) => funcs.push(func),
+                ModuleField::Elem(elem) => elems.push(elem),
+                ModuleField::Table(TableAbbrev {
                     exports: mut abbrev_exports,
                     end,
                 }) => {
@@ -650,8 +650,8 @@ impl<'a> Parse<'a> for Module<'a> {
                         }
                     }
                 }
-                Segment::Data(d) => data.push(d),
-                Segment::Memory(MemoryAbbrev {
+                ModuleField::Data(d) => data.push(d),
+                ModuleField::Memory(MemoryAbbrev {
                     exports: mut abbrev_exports,
                     end,
                 }) => {
@@ -665,15 +665,15 @@ impl<'a> Parse<'a> for Module<'a> {
                         MemoryAbbrevEnd::Import(i) => imports.push(i),
                     }
                 }
-                Segment::Global(GlobalAbbrev::Import(mut abbrev_exports, import)) => {
+                ModuleField::Global(GlobalAbbrev::Import(mut abbrev_exports, import)) => {
                     exports.append(&mut abbrev_exports);
                     imports.push(import);
                 }
-                Segment::Global(GlobalAbbrev::Global(mut abbrev_exports, global)) => {
+                ModuleField::Global(GlobalAbbrev::Global(mut abbrev_exports, global)) => {
                     exports.append(&mut abbrev_exports);
                     globals.push(global);
                 }
-                Segment::Start(start) => {
+                ModuleField::Start(start) => {
                     if let Some(prev) = entrypoint {
                         let offset = start.start;
                         return parser
@@ -704,20 +704,20 @@ impl<'a> Parse<'a> for Module<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
-impl<'a> Parse<'a> for Segment<'a> {
+impl<'a> Parse<'a> for ModuleField<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (keyword, offset) = parser.lookahead_keyword("keyword for module segment")?;
+        let (keyword, offset) = parser.lookahead_keyword("keyword for module field")?;
         match keyword {
-            "type" => Ok(Segment::Type(parser.parse()?)),
-            "import" => Ok(Segment::Import(parser.parse()?)),
-            "export" => Ok(Segment::Export(parser.parse()?)),
-            "func" => Ok(Segment::Func(parser.parse()?)),
-            "elem" => Ok(Segment::Elem(parser.parse()?)),
-            "table" => Ok(Segment::Table(parser.parse()?)),
-            "data" => Ok(Segment::Data(parser.parse()?)),
-            "memory" => Ok(Segment::Memory(parser.parse()?)),
-            "global" => Ok(Segment::Global(parser.parse()?)),
-            "start" => Ok(Segment::Start(parser.parse()?)),
+            "type" => Ok(ModuleField::Type(parser.parse()?)),
+            "import" => Ok(ModuleField::Import(parser.parse()?)),
+            "export" => Ok(ModuleField::Export(parser.parse()?)),
+            "func" => Ok(ModuleField::Func(parser.parse()?)),
+            "elem" => Ok(ModuleField::Elem(parser.parse()?)),
+            "table" => Ok(ModuleField::Table(parser.parse()?)),
+            "data" => Ok(ModuleField::Data(parser.parse()?)),
+            "memory" => Ok(ModuleField::Memory(parser.parse()?)),
+            "global" => Ok(ModuleField::Global(parser.parse()?)),
+            "start" => Ok(ModuleField::Start(parser.parse()?)),
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
     }
@@ -1794,17 +1794,17 @@ impl<'a> Parse<'a> for Elem<'a> {
         match_token!(parser, "'elem' keyword", Token::Keyword("elem"));
 
         // tableidx can be omitted
-        let idx = match parser.peek("table index of elem")?.0 {
+        let idx = match parser.peek("table index of elem segment")?.0 {
             Token::Int(..) | Token::Ident(_) => parser.parse()?,
             _ => Index::Num(0),
         };
 
-        let offset = match parser.peek("offset parameter of elem")?.0 {
+        let offset = match parser.peek("offset parameter of elem segment")?.0 {
             Token::LParen if parser.lookahead_keyword("'offset' keyword")?.0 == "offset" => {
                 parser.eat_token(); // Eat '('
                 parser.eat_token(); // Eat 'offset'
                 let expr = parser.parse()?;
-                parser.closing_paren("offset parameter of elem")?;
+                parser.closing_paren("offset parameter of elem segment")?;
                 expr
             }
             Token::LParen => {
@@ -1817,7 +1817,7 @@ impl<'a> Parse<'a> for Elem<'a> {
 
         let mut init = vec![];
         loop {
-            if let (Token::RParen, _) = parser.peek("')' for elem")? {
+            if let (Token::RParen, _) = parser.peek("')' for elem segment")? {
                 break;
             }
             init.push(parser.parse()?);
@@ -1833,7 +1833,7 @@ impl<'a> Parse<'a> for Elem<'a> {
     }
 }
 
-// Helper struct to resolve import/export/elem abbreviation in 'table' segment
+// Helper struct to resolve import/export/elem abbreviation in 'table' section
 // https://webassembly.github.io/spec/core/text/modules.html#text-table-abbrev
 #[cfg_attr(test, derive(Debug))]
 struct TableAbbrev<'a> {
@@ -1852,21 +1852,21 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
         let start = parser.opening_paren("table")?;
         match_token!(parser, "'table' keyword", Token::Keyword("table"));
 
-        let mut id = parser.maybe_ident("identifier for table segment")?;
+        let mut id = parser.maybe_ident("identifier for table section")?;
 
         let mut exports = vec![];
         loop {
-            match parser.peek("argument of table segment")?.0 {
+            match parser.peek("argument of table section")?.0 {
                 Token::LParen => {
                     parser.eat_token(); // eat '('
-                    let (keyword, offset) = match_token!(parser, "'import' or 'export' for table segment", Token::Keyword(k) => k);
+                    let (keyword, offset) = match_token!(parser, "'import' or 'export' for table section", Token::Keyword(k) => k);
                     match keyword {
                         "import" => {
                             // (table {id}? (import {name} {name} ) {tabletype}) ==
                             //    (import {name} {name} (table {id}? {tabletype}))
                             let mod_name = parser.parse()?;
                             let name = parser.parse()?;
-                            parser.closing_paren("import argument of table segment")?;
+                            parser.closing_paren("import argument of table section")?;
                             let ty = parser.parse()?;
                             parser.closing_paren("table")?;
                             return Ok(TableAbbrev {
@@ -1884,7 +1884,7 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                             //   (export {name} (table {id}')) (table {id}' ...)
                             //   note that this occurs repeatedly
                             let name = parser.parse()?;
-                            parser.closing_paren("export argument in table segment")?;
+                            parser.closing_paren("export argument in table section")?;
                             let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
                             id = Some(id_dash);
                             exports.push(Export {
@@ -1903,21 +1903,21 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                     //   (table {id}' n n funcref) (elem {id}' (i32.const 0) {funcidx}*)
                     //   where n is length of {funcidx}*
                     parser.eat_token(); // eat 'funcref' (elemtype)
-                    let elem_start = parser.opening_paren("elem argument in table segment")?;
+                    let elem_start = parser.opening_paren("elem argument in table section")?;
                     match_token!(
                         parser,
-                        "'elem' keyword for table segment",
+                        "'elem' keyword for table section",
                         Token::Keyword("elem")
                     );
 
                     let mut init = vec![];
                     while let Token::Int(..) | Token::Ident(_) =
-                        parser.peek("function indices in elem in table segment")?.0
+                        parser.peek("function indices in elem in table section")?.0
                     {
                         init.push(parser.parse()?);
                     }
 
-                    parser.closing_paren("elem argument in table segment")?;
+                    parser.closing_paren("elem argument in table section")?;
                     parser.closing_paren("table")?;
                     let id = id.unwrap_or_else(|| parser.fresh_id()); // id'
                     let n = init.len() as u32; // TODO: Check length <= 2^32
@@ -2001,7 +2001,7 @@ impl<'a> Parse<'a> for Data<'a> {
     }
 }
 
-// Helper struct to resolve import/export/data abbreviation in memory segment
+// Helper struct to resolve import/export/data abbreviation in memory section
 // https://webassembly.github.io/spec/core/text/modules.html#memories
 #[cfg_attr(test, derive(Debug))]
 struct MemoryAbbrev<'a> {
@@ -2019,21 +2019,21 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
         let start = parser.opening_paren("memory")?;
         match_token!(parser, "'memory' keyword", Token::Keyword("memory"));
 
-        let mut id = parser.maybe_ident("identifier for memory segment")?;
+        let mut id = parser.maybe_ident("identifier for memory section")?;
 
         let mut exports = vec![];
         loop {
-            match parser.peek("argument of memory segment")?.0 {
+            match parser.peek("argument of memory section")?.0 {
                 Token::LParen => {
                     parser.eat_token(); // eat '('
-                    let (keyword, offset) = match_token!(parser, "'import' or 'export' or 'data' for memory segment", Token::Keyword(k) => k);
+                    let (keyword, offset) = match_token!(parser, "'import' or 'export' or 'data' for memory section", Token::Keyword(k) => k);
                     match keyword {
                         "import" => {
                             // (memory {id}? (import {name} {name} ) {memtype}) ==
                             //    (import {name} {name} (memory {id}? {memtype}))
                             let mod_name = parser.parse()?;
                             let name = parser.parse()?;
-                            parser.closing_paren("import argument of memory segment")?;
+                            parser.closing_paren("import argument of memory section")?;
                             let ty = parser.parse()?;
                             parser.closing_paren("memory")?;
                             return Ok(MemoryAbbrev {
@@ -2051,7 +2051,7 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             //   (export {name} (memory {id}')) (memory {id}' ...)
                             //   note that this occurs repeatedly
                             let name = parser.parse()?;
-                            parser.closing_paren("export argument in memory segment")?;
+                            parser.closing_paren("export argument in memory section")?;
                             let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
                             id = Some(id_dash);
                             exports.push(Export {
@@ -2070,7 +2070,7 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             let mut data = vec![];
                             loop {
                                 match parser.next_token(
-                                    "')' or string literal for data of memory segment",
+                                    "')' or string literal for data of memory section",
                                 )? {
                                     (Token::RParen, _) => break,
                                     (Token::String(s), offset) => {
@@ -2081,7 +2081,7 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                                     (tok, offset) => {
                                         return parser.unexpected_token(
                                             tok.clone(),
-                                            "')' or string literal for data of memory segment",
+                                            "')' or string literal for data of memory section",
                                             offset,
                                         )
                                     }
@@ -2132,7 +2132,7 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
     }
 }
 
-// Helper enum to resolve import/export abbreviation in global segment
+// Helper enum to resolve import/export abbreviation in global section
 // https://webassembly.github.io/spec/core/text/modules.html#globals
 #[cfg_attr(test, derive(Debug))]
 enum GlobalAbbrev<'a> {
@@ -2145,21 +2145,21 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
         let start = parser.opening_paren("global")?;
         match_token!(parser, "'global' keyword", Token::Keyword("global"));
 
-        let mut id = parser.maybe_ident("identifier for global segment")?;
+        let mut id = parser.maybe_ident("identifier for global section")?;
 
         let mut exports = vec![];
         loop {
-            match parser.peek("argument of global segment")?.0 {
+            match parser.peek("argument of global section")?.0 {
                 Token::LParen => {
                     parser.eat_token(); // Eat '('
-                    let (keyword, offset) = match_token!(parser, "'import' or 'export' for global segment", Token::Keyword(k) => k);
+                    let (keyword, offset) = match_token!(parser, "'import' or 'export' for global section", Token::Keyword(k) => k);
                     match keyword {
                         "import" => {
                             // (global {id}? (import {name} {name} ) {globaltype}) ==
                             //    (import {name} {name} (global {id}? {globaltype}))
                             let mod_name = parser.parse()?;
                             let name = parser.parse()?;
-                            parser.closing_paren("import argument of global segment")?;
+                            parser.closing_paren("import argument of global section")?;
                             let ty = parser.parse()?;
                             parser.closing_paren("global")?;
                             let import = Import {
@@ -2175,7 +2175,7 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
                             //   (export {name} (global {id}')) (global {id}' ...)
                             //   note that this occurs repeatedly
                             let name = parser.parse()?;
-                            parser.closing_paren("export argument in global segment")?;
+                            parser.closing_paren("export argument in global section")?;
                             let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
                             id = Some(id_dash);
                             exports.push(Export {
@@ -2375,39 +2375,47 @@ mod tests {
     }
 
     #[test]
-    fn module_segment() {
-        assert_parse!(r#"(type $f1 (func))"#, Segment<'_>, Segment::Type(..));
+    fn module_field() {
+        assert_parse!(
+            r#"(type $f1 (func))"#,
+            ModuleField<'_>,
+            ModuleField::Type(..)
+        );
         assert_parse!(
             r#"(import "m" "n" (func (type 0)))"#,
-            Segment<'_>,
-            Segment::Import(..)
+            ModuleField<'_>,
+            ModuleField::Import(..)
         );
         assert_parse!(
             r#"(export "n" (func $foo))"#,
-            Segment<'_>,
-            Segment::Export(..)
+            ModuleField<'_>,
+            ModuleField::Export(..)
         );
         assert_parse!(
             r#"(elem (offset i32.const 10) $func)"#,
-            Segment<'_>,
-            Segment::Elem(..)
+            ModuleField<'_>,
+            ModuleField::Elem(..)
         );
-        assert_parse!(r#"(table 0 funcref)"#, Segment<'_>, Segment::Table(..));
+        assert_parse!(
+            r#"(table 0 funcref)"#,
+            ModuleField<'_>,
+            ModuleField::Table(..)
+        );
         assert_parse!(
             r#"(data 0 i32.const 0 "hello")"#,
-            Segment<'_>,
-            Segment::Data(..)
+            ModuleField<'_>,
+            ModuleField::Data(..)
         );
-        assert_parse!(r#"(memory 3)"#, Segment<'_>, Segment::Memory(..));
+        assert_parse!(r#"(memory 3)"#, ModuleField<'_>, ModuleField::Memory(..));
         assert_parse!(
             r#"(global (mut i32) i32.const 0)"#,
-            Segment<'_>,
-            Segment::Global(..)
+            ModuleField<'_>,
+            ModuleField::Global(..)
         );
-        assert_parse!(r#"(start 3)"#, Segment<'_>, Segment::Start(..));
+        assert_parse!(r#"(start 3)"#, ModuleField<'_>, ModuleField::Start(..));
 
-        assert_error!(r#"((type $f1 (func)))"#, Segment<'_>, UnexpectedToken{ expected: "keyword for module segment", ..});
-        assert_error!(r#"(hello!)"#, Segment<'_>, UnexpectedKeyword("hello!"));
+        assert_error!(r#"((type $f1 (func)))"#, ModuleField<'_>, UnexpectedToken{ expected: "keyword for module field", ..});
+        assert_error!(r#"(hello!)"#, ModuleField<'_>, UnexpectedKeyword("hello!"));
     }
 
     #[test]
@@ -3678,7 +3686,7 @@ mod tests {
     }
 
     #[test]
-    fn table_segment_abbrev() {
+    fn table_section_abbrev() {
         assert_parse!(
             r#"(table 0 0 funcref)"#,
             TableAbbrev<'_>,
@@ -3877,7 +3885,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_segment_abbrev() {
+    fn memory_section_abbrev() {
         assert_parse!(
             r#"(memory 3)"#,
             MemoryAbbrev<'_>,
@@ -4061,7 +4069,7 @@ mod tests {
     }
 
     #[test]
-    fn global_segment_abbrev() {
+    fn global_section_abbrev() {
         assert_parse!(
             r#"(global i32)"#,
             GlobalAbbrev<'_>,
