@@ -357,7 +357,7 @@ impl<'a> Parser<'a> {
         //
         // This method returns 'new' unowned string so there should be a trick. For example, having
         // &'a Vec<String> in Parser and generate a new ID in the vector and return it's slice.
-        unimplemented!()
+        unimplemented!("generating fresh ID is not implemented yet")
     }
 }
 
@@ -1777,8 +1777,8 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                             //    (import {name} {name} (table {id}? {tabletype}))
                             let mod_name = parser.parse()?;
                             let name = parser.parse()?;
-                            let ty = parser.parse()?;
                             parser.closing_paren("import argument of table segment")?;
+                            let ty = parser.parse()?;
                             parser.closing_paren("table")?;
                             return Ok(TableAbbrev {
                                 exports,
@@ -1911,7 +1911,10 @@ mod tests {
         ($input:expr, $node:ty, $expect:pat if $cond:expr) => {
             let input = $input;
             let mut parser = Parser::new(input);
-            let node: $node = parser.parse().unwrap();
+            let node: $node = match parser.parse() {
+                Ok(n) => n,
+                Err(e) => panic!("parse failed!: {}\n{:?}", e, e),
+            };
             match node {
                 $expect if $cond => { /* OK */ }
                 _ => panic!(
@@ -1942,12 +1945,15 @@ mod tests {
     }
 
     macro_rules! is_match {
-        ($e:expr, $p:pat) => {
+        ($e:expr, $p:pat if $c:expr) => {
             match $e {
-                $p => true,
+                $p if $c => true,
                 _ => false,
             }
         };
+        ($e:expr, $p:pat) => {
+            is_match!($e, $p if true)
+        }
     }
 
     #[test]
@@ -3267,6 +3273,155 @@ mod tests {
             r#"(elem block end 0)"#,
             Elem<'_>,
             Elem { offset, .. } if is_match!(offset[0].kind, Block{..})
+        );
+    }
+
+    #[test]
+    fn table_segment_abbrev() {
+        assert_parse!(
+            r#"(table 0 0 funcref)"#,
+            TableAbbrev<'_>,
+            TableAbbrev{
+                exports,
+                end: TableAbbrevEnd::Table(Table{ id: None, .. })
+            } if exports.is_empty()
+        );
+        assert_parse!(
+            r#"(table $tbl 0 0 funcref)"#,
+            TableAbbrev<'_>,
+            TableAbbrev{
+                exports,
+                end: TableAbbrevEnd::Table(Table{ id: Some("$tbl"), .. })
+            } if exports.is_empty()
+        );
+        assert_parse!(
+            r#"(table $tbl funcref (elem 0 1))"#,
+            TableAbbrev<'_>,
+            TableAbbrev{
+                exports,
+                end: TableAbbrevEnd::Elem(
+                    Table{ id: Some("$tbl"), ty: TableType{ limit: Limits::Range{ min: 2, max: 2 } }, .. },
+                    Elem{ idx: Index::Ident("$tbl"), offset, init, .. }
+                )
+            } if exports.is_empty() && is_match!(offset[0].kind, InsnKind::I32Const(0)) &&
+                 is_match!(init[0], Index::Num(0)) && is_match!(init[1], Index::Num(1))
+        );
+        assert_parse!(
+            r#"(table $tbl (import "m" "n") 2 2 funcref)"#,
+            TableAbbrev<'_>,
+            TableAbbrev{
+                exports,
+                end: TableAbbrevEnd::Import(
+                    Import {
+                        mod_name: Name(m),
+                        name: Name(n),
+                        desc: ImportDesc::Table {
+                            id: Some("$tbl"),
+                            ty: TableType {
+                                limit: Limits::Range{ min: 2, max: 2 },
+                            },
+                            ..
+                        },
+                        ..
+                    }
+                )
+            } if exports.is_empty() && m == "m" && n == "n"
+        );
+        assert_parse!(
+            r#"(table $tbl (export "n") 2 funcref)"#,
+            TableAbbrev<'_>,
+            TableAbbrev{
+                exports,
+                end: TableAbbrevEnd::Table(
+                    Table {
+                        id: Some("$tbl"),
+                        ty: TableType {
+                            limit: Limits::From{ min: 2 }
+                        },
+                        ..
+                    }
+                )
+            } if is_match!(
+                &exports[0],
+                Export {
+                    name: Name(n),
+                    kind: ExportKind::Table,
+                    idx: Index::Ident("$tbl"),
+                    ..
+                } if n == "n"
+            )
+        );
+        assert_parse!(
+            r#"(table $tbl (export "n1") (export "n2") 2 funcref)"#,
+            TableAbbrev<'_>,
+            TableAbbrev{
+                exports,
+                end: TableAbbrevEnd::Table(
+                    Table {
+                        id: Some("$tbl"),
+                        ty: TableType {
+                            limit: Limits::From{ min: 2 }
+                        },
+                        ..
+                    }
+                )
+            } if exports.len() == 2
+        );
+        assert_parse!(
+            r#"(table $tbl (export "n1") (import "m" "n2") 2 funcref)"#,
+            TableAbbrev<'_>,
+            TableAbbrev{
+                exports,
+                end: TableAbbrevEnd::Import(
+                    Import {
+                        mod_name: Name(m),
+                        name: Name(n),
+                        desc: ImportDesc::Table {
+                            id: Some("$tbl"),
+                            ty: TableType {
+                                limit: Limits::From{ min: 2 },
+                            },
+                            ..
+                        },
+                        ..
+                    }
+                )
+            } if m == "m" && n == "n2" &&
+                 is_match!(exports.as_slice(), [
+                     Export {
+                         name: Name(n),
+                         kind: ExportKind::Table,
+                         idx: Index::Ident("$tbl"),
+                         ..
+                     }
+                 ] if n == "n1")
+        );
+        assert_parse!(
+            r#"(table $tbl (export "n1") (export "n2") (import "m" "n3") 2 funcref)"#,
+            TableAbbrev<'_>,
+            TableAbbrev{
+                exports,
+                end: TableAbbrevEnd::Import(..)
+            } if exports.len() == 2
+        );
+        assert_parse!(
+            r#"(table $tbl (export "n1") funcref (elem 1 2 3))"#,
+            TableAbbrev<'_>,
+            TableAbbrev{
+                exports,
+                end: TableAbbrevEnd::Elem(..)
+            } if exports.len() == 1
+        );
+
+        assert_error!(
+            r#"(table $t (import "m" "n") (export "n2") 2 funcref)"#,
+            TableAbbrev<'_>,
+            UnexpectedToken{ .. }
+        );
+        assert_error!(
+            r#"(table $t funcref (elem 1) (export "n"))"#,
+            TableAbbrev<'_>,
+            MissingParen{ paren: ')', .. }
         );
     }
 }
