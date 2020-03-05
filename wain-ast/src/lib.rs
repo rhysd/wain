@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::fmt;
 
 // Root of the tree
 #[derive(Debug)]
@@ -23,7 +24,7 @@ pub struct Module<'a> {
     pub data: Vec<Data<'a>>,
     pub memories: Vec<Memory<'a>>,
     pub globals: Vec<Global<'a>>,
-    // TODO: start
+    pub entrypoint: Option<Start<'a>>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -123,6 +124,14 @@ pub struct TypeUse<'a> {
 pub enum Index<'a> {
     Num(u32),
     Ident(&'a str),
+}
+impl<'a> fmt::Display for Index<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Index::Num(i) => write!(f, "{}", i),
+            Index::Ident(i) => write!(f, "{}", i),
+        }
+    }
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-tabletype
@@ -466,6 +475,13 @@ pub struct Global<'a> {
     pub id: Option<&'a str>,
     pub ty: GlobalType,
     pub init: Vec<Instruction<'a>>,
+}
+
+// https://webassembly.github.io/spec/core/text/modules.html#text-start
+#[derive(Debug)]
+pub struct Start<'a> {
+    pub start: usize,
+    pub idx: Index<'a>,
 }
 
 #[cfg(test)]

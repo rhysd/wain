@@ -37,6 +37,7 @@ pub enum ParseErrorKind<'a> {
         sign: Sign,
     },
     InvalidAlignment(u32),
+    MultipleEntrypoints(Start<'a>, Start<'a>),
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -96,6 +97,9 @@ impl<'a> fmt::Display for ParseError<'a> {
             }
             InvalidAlignment(align) => {
                 write!(f, "alignment value must be 2^N but got {:x}", align)?
+            }
+            MultipleEntrypoints(prev, cur) => {
+                write!(f, "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}", cur.idx, prev.idx, prev.start)?
             }
         };
 
@@ -594,6 +598,7 @@ enum Segment<'a> {
     Data(Data<'a>),
     Memory(MemoryAbbrev<'a>),
     Global(GlobalAbbrev<'a>),
+    Start(Start<'a>),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
@@ -613,6 +618,7 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut data = vec![];
         let mut memories = vec![];
         let mut globals = vec![];
+        let mut entrypoint = None;
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module segment")? {
             match parser.parse()? {
@@ -667,6 +673,15 @@ impl<'a> Parse<'a> for Module<'a> {
                     exports.append(&mut abbrev_exports);
                     globals.push(global);
                 }
+                Segment::Start(start) => {
+                    if let Some(prev) = entrypoint {
+                        let offset = start.start;
+                        return parser
+                            .error(ParseErrorKind::MultipleEntrypoints(prev, start), offset);
+                    } else {
+                        entrypoint = Some(start);
+                    }
+                }
             }
         }
 
@@ -683,6 +698,7 @@ impl<'a> Parse<'a> for Module<'a> {
             data,
             memories,
             globals,
+            entrypoint,
         })
     }
 }
@@ -701,7 +717,7 @@ impl<'a> Parse<'a> for Segment<'a> {
             "data" => Ok(Segment::Data(parser.parse()?)),
             "memory" => Ok(Segment::Memory(parser.parse()?)),
             "global" => Ok(Segment::Global(parser.parse()?)),
-            // TODO: Add more fields
+            "start" => Ok(Segment::Start(parser.parse()?)),
             kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         }
     }
@@ -2206,6 +2222,17 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
     }
 }
 
+// https://webassembly.github.io/spec/core/text/modules.html#text-start
+impl<'a> Parse<'a> for Start<'a> {
+    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+        let start = parser.opening_paren("start")?;
+        match_token!(parser, "'start' keyword", Token::Keyword("start"));
+        let idx = parser.parse()?;
+        parser.closing_paren("start")?;
+        Ok(Start { start, idx })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2318,11 +2345,33 @@ mod tests {
                 (type $f1 (func))
                 (type $f1 (func)))
         "#, Module<'_>, Module { ident: "$foo", types, .. } if types.len() == 2);
+        assert_parse!(
+            r#"(module $foo (start $f))"#,
+            Module<'_>,
+            Module {
+                ident: "$foo",
+                entrypoint: Some(Start{ idx: Index::Ident("$f"), .. }),
+                ..
+            }
+        );
 
         assert_error!(r#"module"#, Module<'_>, MissingParen{ paren: '(', ..});
         assert_error!(r#"(module )"#, Module<'_>, UnexpectedToken{ expected: "identifier for module", ..});
         assert_error!(r#"(module"#, Module<'_>, UnexpectedEndOfFile{..});
         assert_error!(r#"(module $foo (type $f (func))"#, Module<'_>, UnexpectedEndOfFile{..});
+        assert_error!(
+            r#"(module $foo (start $f) (start 3))"#,
+            Module<'_>,
+            MultipleEntrypoints(
+                Start {
+                    idx: Index::Ident("$f"),
+                    ..
+                },
+                Start {
+                    idx: Index::Num(3), ..
+                },
+            )
+        );
     }
 
     #[test]
@@ -2355,6 +2404,7 @@ mod tests {
             Segment<'_>,
             Segment::Global(..)
         );
+        assert_parse!(r#"(start 3)"#, Segment<'_>, Segment::Start(..));
 
         assert_error!(r#"((type $f1 (func)))"#, Segment<'_>, UnexpectedToken{ expected: "keyword for module segment", ..});
         assert_error!(r#"(hello!)"#, Segment<'_>, UnexpectedKeyword("hello!"));
@@ -4142,5 +4192,11 @@ mod tests {
             GlobalAbbrev<'_>,
             UnexpectedKeyword("export")
         );
+    }
+
+    #[test]
+    fn start_function() {
+        assert_parse!(r#"(start 3)"#, Start<'_>, Start{ idx: Index::Num(3), .. });
+        assert_parse!(r#"(start $f)"#, Start<'_>, Start{ idx: Index::Ident("$f"), .. });
     }
 }
