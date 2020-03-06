@@ -14,7 +14,7 @@ pub struct SyntaxTree<'a> {
 #[derive(Debug)]
 pub struct Module<'a> {
     pub start: usize,
-    pub ident: &'a str,
+    pub id: Option<&'a str>,
     pub types: Vec<TypeDef<'a>>,
     pub imports: Vec<Import<'a>>,
     pub exports: Vec<Export<'a>>,
@@ -44,7 +44,7 @@ pub struct FuncType<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-param
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Param<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
@@ -52,7 +52,7 @@ pub struct Param<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-result
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FuncResult {
     pub start: usize,
     pub ty: ValType,
@@ -114,7 +114,8 @@ pub enum ImportDesc<'a> {
 #[derive(Debug)]
 pub struct TypeUse<'a> {
     pub start: usize,
-    pub idx: Index<'a>,
+    // (type {typeidx}) can be omitted due to abbreviation
+    pub idx: Option<Index<'a>>,
     pub params: Vec<Param<'a>>,
     pub results: Vec<FuncResult>,
 }

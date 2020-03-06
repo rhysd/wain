@@ -172,6 +172,7 @@ impl<I: Iterator> Iterator for LookAhead<I> {
 pub struct Parser<'a> {
     source: &'a str,
     tokens: LookAhead<Lexer<'a>>,
+    types: Vec<TypeDef<'a>>,
 }
 
 impl<'a> Parser<'a> {
@@ -179,6 +180,7 @@ impl<'a> Parser<'a> {
         Parser {
             source,
             tokens: LookAhead::new(Lexer::new(source)),
+            types: vec![],
         }
     }
 
@@ -607,9 +609,8 @@ impl<'a> Parse<'a> for Module<'a> {
         // https://webassembly.github.io/spec/core/text/modules.html#text-module
         let start = parser.opening_paren("module")?;
         match_token!(parser, "'module' keyword", Token::Keyword("module"));
-        let (ident, _) = match_token!(parser, "identifier for module", Token::Ident(id) => id);
+        let id = parser.maybe_ident("identifier for module")?;
 
-        let mut types = vec![];
         let mut imports = vec![];
         let mut exports = vec![];
         let mut funcs = vec![];
@@ -620,9 +621,12 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut globals = vec![];
         let mut entrypoint = None;
 
+        // Note: types are put in Parser struct field due to abbreviation of typeuse
+        // https://webassembly.github.io/spec/core/text/modules.html#abbreviations
+
         while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
             match parser.parse()? {
-                ModuleField::Type(ty) => types.push(ty),
+                ModuleField::Type(ty) => parser.types.push(ty),
                 ModuleField::Import(import) => imports.push(import),
                 ModuleField::Export(export) => exports.push(export),
                 ModuleField::Func(FuncAbbrev::Import(import)) => imports.push(import),
@@ -688,8 +692,8 @@ impl<'a> Parse<'a> for Module<'a> {
         parser.closing_paren("module")?;
         Ok(Module {
             start,
-            ident,
-            types,
+            id,
+            types: mem::replace(&mut parser.types, vec![]),
             imports,
             exports,
             funcs,
@@ -919,12 +923,19 @@ impl<'a> Parse<'a> for ImportDesc<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#type-uses
 impl<'a> Parse<'a> for TypeUse<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let start = parser.opening_paren("type use")?;
-        match_token!(parser, "'type' keyword for typeuse", Token::Keyword("type"));
-        let idx = parser.parse()?;
-        parser.closing_paren("type use")?;
+        let (token, start) = parser.peek("opening paren for typeuse")?;
+        let idx = match token {
+            Token::LParen if parser.lookahead_keyword("keyword for typeuse")?.0 == "type" => {
+                parser.eat_token(); // Eat '('
+                parser.eat_token(); // Eat 'type'
+                let idx = parser.parse()?;
+                parser.closing_paren("type")?;
+                Some(idx)
+            }
+            _ => None, // When abbreviated as described below
+        };
 
-        let mut params = vec![];
+        let mut params: Vec<Param<'a>> = vec![];
         loop {
             match parser.peek("opening paren for param in typeuse")? {
                 (Token::LParen, _)
@@ -936,7 +947,7 @@ impl<'a> Parse<'a> for TypeUse<'a> {
             }
         }
 
-        let mut results = vec![];
+        let mut results: Vec<FuncResult> = vec![];
         loop {
             match parser.peek("opening paren for result in typeuse")? {
                 (Token::LParen, _)
@@ -947,6 +958,60 @@ impl<'a> Parse<'a> for TypeUse<'a> {
                 _ => break,
             }
         }
+
+        let idx = idx.or_else(|| {
+            // Handle abbreviation:
+            //   https://webassembly.github.io/spec/core/text/modules.html#abbreviations
+            //
+            // A typeuse may also be replaced entirely by inline parameter and result declarations.
+            // In that case, a type index is automatically inserted.
+            //
+            //   {param}* {result}* == (type {x}) {param}* {result}*
+            //
+            // where {x} is an existing function type which has the same signature.
+            // If no function exists, insert new function type in module
+            //
+            //   (type (func {param}* {result}*))
+            //
+            for type_def in parser.types.iter() {
+                if type_def
+                    .ty
+                    .params
+                    .iter()
+                    .map(|t| t.ty)
+                    .ne(params.iter().map(|t| t.ty))
+                {
+                    continue;
+                }
+
+                if type_def
+                    .ty
+                    .results
+                    .iter()
+                    .map(|t| t.ty)
+                    .ne(results.iter().map(|t| t.ty))
+                {
+                    continue;
+                }
+
+                // When signature of params and results completely matched
+                return type_def.id.map(Index::Ident);
+            }
+
+            // When no existing function type found, generate and insert new one to current module
+            parser.types.push(TypeDef {
+                start,
+                id: None,
+                ty: FuncType {
+                    start,
+                    params: params.clone(),
+                    results: results.clone(),
+                },
+            });
+
+            // Generated function type does not have explicit type index
+            None
+        });
 
         Ok(TypeUse {
             start,
@@ -1086,7 +1151,7 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
         );
 
         let id = parser.maybe_ident("identifier for function")?;
-        let (keyword, offset) =
+        let (keyword, _) =
             parser.lookahead_keyword("one of 'import', 'export', 'type' for function")?;
         let abbrev = match keyword {
             "import" => {
@@ -1132,7 +1197,7 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
                     },
                 )
             }
-            "type" => {
+            _ => {
                 let ty = parser.parse()?;
                 let locals = parser.parse()?;
                 let body = parser.parse()?;
@@ -1143,7 +1208,6 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
                     body,
                 })
             }
-            kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         };
 
         parser.closing_paren("func")?;
@@ -1269,7 +1333,7 @@ fn parse_maybe_result_type<'a>(parser: &mut Parser<'a>) -> Result<'a, Option<Val
     }
 }
 
-fn parse_one_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instruction<'a>> {
+fn parse_naked_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instruction<'a>> {
     let (kw, start) = match_token!(parser, "keyword for instruction", Token::Keyword(k) => k);
     let kind = match kw {
         // Control instructions
@@ -1739,7 +1803,7 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
 
     fn parse_folded(&mut self) -> Result<'a, ()> {
         let start = self.parser.opening_paren("folded instruction")?;
-        let mut insn = parse_one_insn(self.parser, false)?;
+        let mut insn = parse_naked_insn(self.parser, false)?;
         insn.start = start;
 
         if !insn.kind.is_block() {
@@ -1756,8 +1820,19 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
         Ok(())
     }
 
+    fn parse_one(&mut self) -> Result<'a, ()> {
+        // Parse {instr}. Even if one {instr}, result is sequence of instructions because of
+        // folded form
+        if let Token::LParen = self.parser.peek("instruction keyword or '('")?.0 {
+            self.parse_folded()?;
+        } else {
+            self.insns.push(parse_naked_insn(self.parser, true)?);
+        }
+        Ok(())
+    }
+
     fn parse(&mut self) -> Result<'a, ()> {
-        // Parser {insn}*
+        // Parse {instr}*
         loop {
             // This assumes that instr* is always ending with
             //   - ')' and 'end' for end of instruction
@@ -1770,7 +1845,7 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
             {
                 Token::LParen => self.parse_folded()?,
                 Token::RParen | Token::Keyword("end") | Token::Keyword("else") => return Ok(()),
-                Token::Keyword(_) => self.insns.push(parse_one_insn(self.parser, true)?),
+                Token::Keyword(_) => self.insns.push(parse_naked_insn(self.parser, true)?),
                 _ => return Ok(()),
             };
         }
@@ -1812,7 +1887,12 @@ impl<'a> Parse<'a> for Elem<'a> {
                 parser.parse_folded()?;
                 parser.insns
             }
-            _ => vec![parse_one_insn(parser, true)?],
+            _ => {
+                // Abbreviation: {instr} == (offset {instr})
+                let mut parser = MaybeFoldedInsn::new(parser);
+                parser.parse_one()?;
+                parser.insns
+            }
         };
 
         let mut init = vec![];
@@ -1961,17 +2041,26 @@ impl<'a> Parse<'a> for Data<'a> {
         let start = parser.opening_paren("data")?;
         match_token!(parser, "'data' keyword", Token::Keyword("data"));
 
-        let idx = parser.parse()?;
+        // the memory index can be omitted, defaulting to 𝟶.
+        let idx = match parser.peek("memory index for data")?.0 {
+            Token::Int(..) | Token::Ident(_) => parser.parse()?,
+            _ => Index::Num(0),
+        };
 
         let offset = match parser.peek("offset of data segment")?.0 {
-            Token::LParen => {
-                parser.opening_paren("offset of data segment")?;
-                match_token!(parser, "'offset' keyword", Token::Keyword("offset"));
+            Token::LParen if parser.lookahead_keyword("'offset' keyword")?.0 == "offset" => {
+                parser.eat_token(); // Eat '('
+                parser.eat_token(); // Eat 'offset'
                 let offset = parser.parse()?;
                 parser.closing_paren("offset of data segment")?;
                 offset
             }
-            _ => vec![parse_one_insn(parser, true)?],
+            _ => {
+                // Abbreviation: {instr} == (offset {instr})
+                let mut parser = MaybeFoldedInsn::new(parser);
+                parser.parse_one()?;
+                parser.insns
+            }
         };
 
         let mut data = vec![];
@@ -2328,35 +2417,35 @@ mod tests {
             (module $foo)
             (module $foo)
             (module $foo)
-        "#, SyntaxTree<'_>, SyntaxTree{ module: Module { ident: "$foo", types, .. } } if types.is_empty());
+        "#, SyntaxTree<'_>, SyntaxTree{ module: Module { id: Some("$foo"), types, .. } } if types.is_empty());
         assert_parse!(r#"
             (module $foo (type $f1 (func)))
             (module $foo (type $f1 (func)))
             (module $foo (type $f1 (func)))
-        "#, SyntaxTree<'_>, SyntaxTree{ module: Module { ident: "$foo", types, .. } } if types.len() == 3);
+        "#, SyntaxTree<'_>, SyntaxTree{ module: Module { id: Some("$foo"), types, .. } } if types.len() == 3);
     }
 
     #[test]
     fn module() {
-        assert_parse!(r#"(module $foo)"#, Module<'_>, Module { ident: "$foo", types, .. } if types.is_empty());
-        assert_parse!(r#"(module $foo (type $f1 (func)))"#, Module<'_>, Module { ident: "$foo", types, .. } if types.len() == 1);
+        assert_parse!(r#"(module)"#, Module<'_>, Module { id: None, types, .. } if types.is_empty());
+        assert_parse!(r#"(module $foo)"#, Module<'_>, Module { id: Some("$foo"), types, .. } if types.is_empty());
+        assert_parse!(r#"(module $foo (type $f1 (func)))"#, Module<'_>, Module { id: Some("$foo"), types, .. } if types.len() == 1);
         assert_parse!(r#"
-            (module $foo
+            (module
                 (type $f1 (func))
                 (type $f1 (func)))
-        "#, Module<'_>, Module { ident: "$foo", types, .. } if types.len() == 2);
+        "#, Module<'_>, Module { id: None, types, .. } if types.len() == 2);
         assert_parse!(
-            r#"(module $foo (start $f))"#,
+            r#"(module (start $f))"#,
             Module<'_>,
             Module {
-                ident: "$foo",
+                id: None,
                 entrypoint: Some(Start{ idx: Index::Ident("$f"), .. }),
                 ..
             }
         );
 
         assert_error!(r#"module"#, Module<'_>, MissingParen{ paren: '(', ..});
-        assert_error!(r#"(module )"#, Module<'_>, UnexpectedToken{ expected: "identifier for module", ..});
         assert_error!(r#"(module"#, Module<'_>, UnexpectedEndOfFile{..});
         assert_error!(r#"(module $foo (type $f (func))"#, Module<'_>, UnexpectedEndOfFile{..});
         assert_error!(
@@ -2511,6 +2600,11 @@ mod tests {
                 ..
             } if mn == "mod" && n == "name"
         );
+        assert_parse!(
+            r#"(import "env" "print" (func $print (param i32)))"#,
+            Import<'_>,
+            Import { .. }
+        );
 
         assert_error!(r#"import"#, Import<'_>, MissingParen{ paren: '(', .. });
         assert_error!(r#"(hello"#, Import<'_>, UnexpectedToken{ expected: "'import' keyword", .. });
@@ -2544,7 +2638,7 @@ mod tests {
             r#"(func (type 0))"#,
             ImportDesc<'_>,
             ImportDesc::Func{
-                ty: TypeUse { params, results, .. },
+                ty: TypeUse { params, results, idx: Some(Index::Num(0)), .. },
                 ..
             } if params.is_empty() && results.is_empty()
         );
@@ -2552,7 +2646,7 @@ mod tests {
             r#"(func (type 0) (param i32))"#,
             ImportDesc<'_>,
             ImportDesc::Func{
-                ty: TypeUse { params, results, .. },
+                ty: TypeUse { params, results, idx: Some(Index::Num(0)), .. },
                 ..
             } if params.len() == 1 && results.is_empty()
         );
@@ -2560,7 +2654,7 @@ mod tests {
             r#"(func (type 0) (result i32))"#,
             ImportDesc<'_>,
             ImportDesc::Func{
-                ty: TypeUse { params, results, .. },
+                ty: TypeUse { params, results, idx: Some(Index::Num(0)), .. },
                 ..
             } if params.is_empty() && results.len() == 1
         );
@@ -2568,14 +2662,15 @@ mod tests {
             r#"(func (type 0) (param i32) (result i32))"#,
             ImportDesc<'_>,
             ImportDesc::Func{
-                ty: TypeUse { params, results, .. },
+                ty: TypeUse { params, results, idx: Some(Index::Num(0)), .. },
                 ..
             } if params.len() == 1 && results.len() == 1
         );
 
-        assert_error!(r#"type"#, TypeUse<'_>, MissingParen{ paren: '(', .. });
-        assert_error!(r#"(type 0"#, TypeUse<'_>, MissingParen{ paren: ')', .. });
-        assert_error!(r#"(hello"#, TypeUse<'_>, UnexpectedToken{ expected: "'type' keyword for typeuse", ..});
+        // Note: {typeuse} accepts empty string due to abbreviation. Empty string is accepted as
+        // TypeUse { idx: None, params: [], results: [], .. } with (type (func)) inserted to module.
+        // https://webassembly.github.io/spec/core/text/modules.html#abbreviations
+        // So any error case does not occur with this grammar.
     }
 
     #[test]
@@ -2714,7 +2809,7 @@ mod tests {
                 },
                 Func {
                     ty: TypeUse {
-                        idx: Index::Num(0),
+                        idx: Some(Index::Num(0)),
                         ..
                     },
                     locals,
@@ -2728,7 +2823,7 @@ mod tests {
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: Some(Index::Num(0)),
                     ..
                 },
                 locals,
@@ -2741,7 +2836,7 @@ mod tests {
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: Some(Index::Num(0)),
                     ..
                 },
                 locals,
@@ -2753,7 +2848,7 @@ mod tests {
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: Some(Index::Num(0)),
                     ..
                 },
                 locals,
@@ -2765,7 +2860,7 @@ mod tests {
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: Some(Index::Num(0)),
                     ..
                 },
                 locals,
@@ -2777,7 +2872,7 @@ mod tests {
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: Some(Index::Num(0)),
                     ..
                 },
                 locals,
@@ -2790,7 +2885,7 @@ mod tests {
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: Some(Index::Num(0)),
                     ..
                 },
                 locals,
@@ -2803,7 +2898,7 @@ mod tests {
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: Some(Index::Num(0)),
                     ..
                 },
                 locals,
@@ -2811,11 +2906,19 @@ mod tests {
             }) if locals.iter().map(|l| l.ty).collect::<Vec<_>>() == vec![ValType::I32, ValType::F64] &&
                 locals.iter().map(|l| l.id).collect::<Vec<_>>() == vec![Some("$l1"), Some("$l2")]
         );
-
-        assert_error!(
-            r#"(func (local i32))"#,
+        assert_parse!(
+            r#"(func $_start (result i32))"#,
             FuncAbbrev<'_>,
-            UnexpectedKeyword("local")
+            FuncAbbrev::NoAbbrev(Func {
+                ty: TypeUse {
+                    idx: None,
+                    params,
+                    results,
+                    ..
+                },
+                locals,
+                ..
+            }) if params.is_empty() && results[0].ty == ValType::I32 && locals.is_empty()
         );
     }
 
@@ -3168,7 +3271,7 @@ mod tests {
         );
         assert_insn!(r#"call 0"#, [Call(Index::Num(0))]);
         assert_insn!(r#"call $f"#, [Call(Index::Ident("$f"))]);
-        assert_insn!(r#"call_indirect (type 0)"#, [CallIndirect(TypeUse{ idx: Index::Num(0), .. })]);
+        assert_insn!(r#"call_indirect (type 0)"#, [CallIndirect(TypeUse{ idx: Some(Index::Num(0)), .. })]);
 
         assert_error!(r#"br_table)"#, Vec<Instruction<'_>>, InvalidOperand{ .. });
         assert_error!(
@@ -3876,6 +3979,17 @@ mod tests {
             Data<'_>,
             Data{ data, ..  } if data.as_ref() == &[1, 2, 3, 255]
         );
+        assert_parse!(
+            r#"(data (i32.const 1024) "Hello, world\n\00")"#,
+            Data<'_>,
+            Data{
+                idx: Index::Num(0),
+                offset,
+                data,
+                ..
+            } if is_match!(offset[0].kind, InsnKind::I32Const(1024)) &&
+                 data.as_ref() == b"Hello, world\n\0".as_ref()
+        );
 
         assert_error!(
             r#"(data 0 "hello")"#,
@@ -4206,5 +4320,29 @@ mod tests {
     fn start_function() {
         assert_parse!(r#"(start 3)"#, Start<'_>, Start{ idx: Index::Num(3), .. });
         assert_parse!(r#"(start $f)"#, Start<'_>, Start{ idx: Index::Ident("$f"), .. });
+    }
+
+    #[test]
+    fn hello_world() {
+        assert_parse!(r#"
+            (module
+             (type $i32_=>_none (func (param i32)))
+             (type $none_=>_i32 (func (result i32)))
+             (import "env" "print" (func $print (param i32)))
+             (memory $0 2)
+             (data (i32.const 1024) "Hello, world\n\00")
+             (table $0 1 1 funcref)
+             (global $global$0 (mut i32) (i32.const 66576))
+             (export "memory" (memory $0))
+             (export "_start" (func $_start))
+             (func $_start (; 1 ;) (result i32)
+              (call $print
+               (i32.const 1024)
+              )
+              (i32.const 0)
+             )
+             ;; custom section "producers", size 27
+            )
+        "#, Module<'_>, Module{ .. });
     }
 }
