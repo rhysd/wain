@@ -38,6 +38,7 @@ pub enum ParseErrorKind<'a> {
     },
     InvalidAlignment(u32),
     MultipleEntrypoints(Start<'a>, Start<'a>),
+    ModulesNotComposable(Module<'a>, Module<'a>, &'static str),
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -100,6 +101,19 @@ impl<'a> fmt::Display for ParseError<'a> {
             }
             MultipleEntrypoints(prev, cur) => {
                 write!(f, "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}", cur.idx, prev.idx, prev.start)?
+            }
+            ModulesNotComposable(mod1, mod2, msg) => {
+                if let Some(id) = mod2.id {
+                    write!(f, "module {} at offset {}", id, mod2.start)?;
+                } else {
+                    write!(f, "module at offset {}", mod2.start)?;
+                }
+                if let Some(id) = mod1.id {
+                    write!(f, " cannot be merged into existing module {} at offset {}: ", id, mod1.start)?;
+                } else {
+                    write!(f, " cannot be merged into existing module at offset {}: ", mod1.start)?;
+                }
+                f.write_str(msg)?;
             }
         };
 
@@ -188,12 +202,12 @@ impl<'a> Parser<'a> {
         self.source
     }
 
-    pub fn reset(&mut self) {
-        self.tokens = LookAhead::new(Lexer::new(self.source));
+    fn is_done(&self) -> bool {
+        self.tokens.peek().is_none()
     }
 
-    pub fn is_done(&self) -> bool {
-        self.tokens.peek().is_none()
+    pub fn parse_wat(mut self) -> Result<'a, SyntaxTree<'a>> {
+        self.parse()
     }
 
     fn parse<P: Parse<'a>>(&mut self) -> Result<'a, P> {
@@ -574,11 +588,52 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
         // - m1.start = ϵ ∨ m2.start = ϵ
         // - m1.funcs = m1.tables = m1.mems = m1.mems = ϵ ∨ m2.imports = ϵ
         while !parser.is_done() {
-            let another: Module<'a> = parser.parse()?;
-            // TODO: Check above restrictions
-            for ty in another.types {
-                module.types.push(ty);
-                // TODO: Merge more fields
+            let mut another: Module<'a> = parser.parse()?;
+
+            // XXX: Modules may have the same ID. IDs must be resolved before merging
+            // IDs in AST nodes should be replaced with indices while parsing
+
+            // Check first restriction
+            if module.entrypoint.is_some() && another.entrypoint.is_some() {
+                let offset = another.start;
+                return parser.error(
+                    ParseErrorKind::ModulesNotComposable(
+                        module,
+                        another,
+                        "only one module can have 'start' section",
+                    ),
+                    offset,
+                );
+            }
+
+            // Check second restriction
+            if !(module.funcs.is_empty() && module.tables.is_empty() && module.memories.is_empty()
+                || another.imports.is_empty())
+            {
+                let offset = another.start;
+                return parser.error(
+                    ParseErrorKind::ModulesNotComposable(
+                        module,
+                        another,
+                        "when module M1 is merged into module M2, one of (1) or (2) must be met. \
+                        (1) M1 has no 'import' section. \
+                        (2) M2 has no 'func', 'table', 'memory' sections",
+                    ),
+                    offset,
+                );
+            }
+
+            module.types.append(&mut another.types);
+            module.imports.append(&mut another.imports);
+            module.exports.append(&mut another.exports);
+            module.funcs.append(&mut another.funcs);
+            module.elems.append(&mut another.elems);
+            module.tables.append(&mut another.tables);
+            module.data.append(&mut another.data);
+            module.memories.append(&mut another.memories);
+            module.globals.append(&mut another.globals);
+            if another.entrypoint.is_some() {
+                module.entrypoint = another.entrypoint;
             }
         }
 
@@ -623,6 +678,7 @@ impl<'a> Parse<'a> for Module<'a> {
 
         // Note: types are put in Parser struct field due to abbreviation of typeuse
         // https://webassembly.github.io/spec/core/text/modules.html#abbreviations
+        parser.types.clear();
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
             match parser.parse()? {
@@ -1146,68 +1202,83 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
         let start = parser.opening_paren("func")?;
         match_token!(
             parser,
-            "'func' keyword for function",
+            "'func' keyword for func field",
             Token::Keyword("func")
         );
 
-        let id = parser.maybe_ident("identifier for function")?;
-        let (keyword, _) =
-            parser.lookahead_keyword("one of 'import', 'export', 'type' for function")?;
-        let abbrev = match keyword {
-            "import" => {
-                // `(func $id (import "m" "n") {typeuse})` is a syntax sugar of
-                // `(import "m" "n" (func $id {typeuse}))`
-                parser.opening_paren("import in func")?;
-                parser.eat_token(); // Eat 'import' keyword
-                let mod_name = parser.parse()?;
-                let name = parser.parse()?;
-                parser.closing_paren("import in func")?;
-                let ty = parser.parse()?;
-                let desc = ImportDesc::Func { start, id, ty };
-                FuncAbbrev::Import(Import {
-                    start,
-                    mod_name,
-                    name,
-                    desc,
-                })
-            }
-            "export" => {
-                // `(func $id (export "n") {typeuse})` is a syntax sugar of
-                // `(export "n" (func $id)) (func $id {typeuse})`
-                let export_start = parser.opening_paren("export in func")?;
-                parser.eat_token(); // Eat 'export' keyword
-                let name = parser.parse()?;
-                parser.closing_paren("export in func")?;
-                let ty = parser.parse()?;
-                let locals = parser.parse()?;
-                let body = parser.parse()?;
-                let id = id.unwrap_or_else(|| parser.fresh_id());
-                FuncAbbrev::Export(
-                    Export {
-                        start: export_start,
+        let id = parser.maybe_ident("identifier for func field")?;
+        let abbrev = if let Token::LParen = parser
+            .peek("')' for closing func or '(' for argument of func")?
+            .0
+        {
+            let (keyword, _) =
+                parser.lookahead_keyword("one of 'import', 'export', typeuse for func field")?;
+            match keyword {
+                "import" => {
+                    // `(func $id (import "m" "n") {typeuse})` is a syntax sugar of
+                    // `(import "m" "n" (func $id {typeuse}))`
+                    parser.opening_paren("import in func")?;
+                    parser.eat_token(); // Eat 'import' keyword
+                    let mod_name = parser.parse()?;
+                    let name = parser.parse()?;
+                    parser.closing_paren("import in func")?;
+                    let ty = parser.parse()?;
+                    let desc = ImportDesc::Func { start, id, ty };
+                    FuncAbbrev::Import(Import {
+                        start,
+                        mod_name,
                         name,
-                        kind: ExportKind::Func,
-                        idx: Index::Ident(id),
-                    },
-                    Func {
+                        desc,
+                    })
+                }
+                "export" => {
+                    // `(func $id (export "n") {typeuse})` is a syntax sugar of
+                    // `(export "n" (func $id)) (func $id {typeuse})`
+                    let export_start = parser.opening_paren("export in func")?;
+                    parser.eat_token(); // Eat 'export' keyword
+                    let name = parser.parse()?;
+                    parser.closing_paren("export in func")?;
+                    let ty = parser.parse()?;
+                    let locals = parser.parse()?;
+                    let body = parser.parse()?;
+                    let id = id.unwrap_or_else(|| parser.fresh_id());
+                    FuncAbbrev::Export(
+                        Export {
+                            start: export_start,
+                            name,
+                            kind: ExportKind::Func,
+                            idx: Index::Ident(id),
+                        },
+                        Func {
+                            start,
+                            ty,
+                            locals,
+                            body,
+                        },
+                    )
+                }
+                _ => {
+                    let ty = parser.parse()?;
+                    let locals = parser.parse()?;
+                    let body = parser.parse()?;
+                    FuncAbbrev::NoAbbrev(Func {
                         start,
                         ty,
                         locals,
                         body,
-                    },
-                )
+                    })
+                }
             }
-            _ => {
-                let ty = parser.parse()?;
-                let locals = parser.parse()?;
-                let body = parser.parse()?;
-                FuncAbbrev::NoAbbrev(Func {
-                    start,
-                    ty,
-                    locals,
-                    body,
-                })
-            }
+        } else {
+            let ty = parser.parse()?;
+            let locals = parser.parse()?;
+            let body = parser.parse()?;
+            FuncAbbrev::NoAbbrev(Func {
+                start,
+                ty,
+                locals,
+                body,
+            })
         };
 
         parser.closing_paren("func")?;
@@ -2423,6 +2494,132 @@ mod tests {
             (module $foo (type $f1 (func)))
             (module $foo (type $f1 (func)))
         "#, SyntaxTree<'_>, SyntaxTree{ module: Module { id: Some("$foo"), types, .. } } if types.len() == 3);
+        // Composing multiple modules
+        assert_parse!(
+            r#"
+            (module $m1
+                (type $f1 (func))
+                (import "m" "n" (func (type 0)))
+                (export "n" (func $foo))
+                (elem (offset i32.const 10) $func)
+                (table 0 funcref)
+                (data 0 i32.const 0 "hello")
+                (memory 3)
+                (global (mut i32) i32.const 0)
+                (func)
+            )
+            (module $m2
+                (type $f1 (func))
+                (export "n" (func $foo))
+                (elem (offset i32.const 10) $func)
+                (table 0 funcref)
+                (data 0 i32.const 0 "hello")
+                (memory 3)
+                (global (mut i32) i32.const 0)
+                (func (result i32))
+                (start 3)
+            )
+            "#,
+            SyntaxTree<'_>,
+            SyntaxTree {
+                module: Module {
+                    id: Some("$m1"),
+                    types,
+                    imports,
+                    exports,
+                    elems,
+                    tables,
+                    data,
+                    memories,
+                    globals,
+                    funcs,
+                    entrypoint,
+                    ..
+                }
+            }
+            if types.len() == 3 // One type is added by abbreviation of typeuse
+               && imports.len() == 1
+               && exports.len() == 2
+               && elems.len() == 2
+               && tables.len() == 2
+               && data.len() == 2
+               && memories.len() == 2
+               && globals.len() == 2
+               && funcs.len() == 2
+               && entrypoint.is_some()
+        );
+        assert_parse!(
+            r#"
+            (module $m1
+                (type $f1 (func))
+                (import "m" "n" (func (type 0)))
+                (export "n" (func $foo))
+                (elem (offset i32.const 10) $func)
+                (data 0 i32.const 0 "hello")
+                (global (mut i32) i32.const 0)
+                (start 3)
+            )
+            (module $m2
+                (type $f1 (func))
+                (import "m" "n" (func (type 0)))
+                (export "n" (func $foo))
+                (elem (offset i32.const 10) $func)
+                (table 0 funcref)
+                (data 0 i32.const 0 "hello")
+                (memory 3)
+                (global (mut i32) i32.const 0)
+                (func)
+            )
+            "#,
+            SyntaxTree<'_>,
+            SyntaxTree {
+                module: Module {
+                    id: Some("$m1"),
+                    types,
+                    imports,
+                    exports,
+                    elems,
+                    tables,
+                    data,
+                    memories,
+                    globals,
+                    entrypoint,
+                    funcs,
+                    ..
+                }
+            }
+            if types.len() == 2
+               && imports.len() == 2
+               && exports.len() == 2
+               && elems.len() == 2
+               && tables.len() == 1
+               && data.len() == 2
+               && memories.len() == 1
+               && globals.len() == 2
+               && funcs.len() == 1
+               && entrypoint.is_some()
+        );
+
+        assert_error!(
+            r#"
+            (module $m1 (start 0))
+            (module $m2 (start 3))
+            "#,
+            SyntaxTree<'_>,
+            ModulesNotComposable(_, _, "only one module can have 'start' section")
+        );
+        for field in &["(func)", "(table 0 funcref)", "(memory 0)"] {
+            let source = format!(
+                r#"(module $m1 {}) (module $m2 (import "m" "n" (func)))"#,
+                field
+            );
+            assert_error!(
+                &source,
+                SyntaxTree<'_>,
+                ModulesNotComposable(_, _, msg)
+                if msg.contains("when module M1 is merged into module M2, one of (1) or (2) must be met.")
+            );
+        }
     }
 
     #[test]
@@ -2444,6 +2641,7 @@ mod tests {
                 ..
             }
         );
+        assert_parse!(r#"(module (func))"#, Module<'_>, Module { funcs, .. } if funcs.len() == 1);
 
         assert_error!(r#"module"#, Module<'_>, MissingParen{ paren: '(', ..});
         assert_error!(r#"(module"#, Module<'_>, UnexpectedEndOfFile{..});
@@ -2502,6 +2700,7 @@ mod tests {
             ModuleField::Global(..)
         );
         assert_parse!(r#"(start 3)"#, ModuleField<'_>, ModuleField::Start(..));
+        assert_parse!(r#"(func)"#, ModuleField<'_>, ModuleField::Func(..));
 
         assert_error!(r#"((type $f1 (func)))"#, ModuleField<'_>, UnexpectedToken{ expected: "keyword for module field", ..});
         assert_error!(r#"(hello!)"#, ModuleField<'_>, UnexpectedKeyword("hello!"));
