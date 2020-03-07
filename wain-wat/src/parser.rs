@@ -306,10 +306,13 @@ impl<'a> Parser<'a> {
         self.tokens.next().is_some()
     }
 
-    fn lookahead_keyword(&self, expected: &'static str) -> Result<'a, (&'a str, usize)> {
-        match self.lookahead(expected)? {
-            (Token::Keyword(kw), offset) => Ok((*kw, offset)),
-            (tok, offset) => self.unexpected_token(tok.clone(), expected, offset),
+    fn peek_fold_start(&self, expected: &'static str) -> Result<'a, (Option<&'a str>, usize)> {
+        match self.peek(expected)? {
+            (Token::LParen, offset) => match self.lookahead(expected)? {
+                (Token::Keyword(kw), _) => Ok((Some(*kw), offset)),
+                (tok, offset) => self.unexpected_token(tok.clone(), expected, offset),
+            },
+            (_, offset) => Ok((None, offset)),
         }
     }
 
@@ -766,19 +769,25 @@ impl<'a> Parse<'a> for Module<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
 impl<'a> Parse<'a> for ModuleField<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (keyword, offset) = parser.lookahead_keyword("keyword for module field")?;
-        match keyword {
-            "type" => Ok(ModuleField::Type(parser.parse()?)),
-            "import" => Ok(ModuleField::Import(parser.parse()?)),
-            "export" => Ok(ModuleField::Export(parser.parse()?)),
-            "func" => Ok(ModuleField::Func(parser.parse()?)),
-            "elem" => Ok(ModuleField::Elem(parser.parse()?)),
-            "table" => Ok(ModuleField::Table(parser.parse()?)),
-            "data" => Ok(ModuleField::Data(parser.parse()?)),
-            "memory" => Ok(ModuleField::Memory(parser.parse()?)),
-            "global" => Ok(ModuleField::Global(parser.parse()?)),
-            "start" => Ok(ModuleField::Start(parser.parse()?)),
-            kw => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
+        let expected = "one of 'type', 'import', 'export', 'func', 'elem', 'table', 'data', 'memory', 'global', 'start' sections in module";
+        match parser.peek_fold_start(expected)? {
+            (Some(kw), offset) => match kw {
+                "type" => Ok(ModuleField::Type(parser.parse()?)),
+                "import" => Ok(ModuleField::Import(parser.parse()?)),
+                "export" => Ok(ModuleField::Export(parser.parse()?)),
+                "func" => Ok(ModuleField::Func(parser.parse()?)),
+                "elem" => Ok(ModuleField::Elem(parser.parse()?)),
+                "table" => Ok(ModuleField::Table(parser.parse()?)),
+                "data" => Ok(ModuleField::Data(parser.parse()?)),
+                "memory" => Ok(ModuleField::Memory(parser.parse()?)),
+                "global" => Ok(ModuleField::Global(parser.parse()?)),
+                "start" => Ok(ModuleField::Start(parser.parse()?)),
+                _ => parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
+            },
+            (None, offset) => {
+                let token = parser.peek(expected)?.0.clone();
+                parser.unexpected_token(token, expected, offset)
+            }
         }
     }
 }
@@ -802,15 +811,8 @@ impl<'a> Parse<'a> for FuncType<'a> {
         match_token!(parser, "'func' keyword", Token::Keyword("func"));
 
         let mut params = vec![];
-        loop {
-            match parser.peek("opening paren for param in functype")? {
-                (Token::LParen, _)
-                    if parser.lookahead_keyword("param keyword in functype")?.0 == "param" =>
-                {
-                    params.push(parser.parse()?);
-                }
-                _ => break,
-            }
+        while let Some("param") = parser.peek_fold_start("parameter in functype")?.0 {
+            params.push(parser.parse()?);
         }
 
         let results = parser.parse_multiple("result in function type")?;
@@ -979,40 +981,25 @@ impl<'a> Parse<'a> for ImportDesc<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#type-uses
 impl<'a> Parse<'a> for TypeUse<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let (token, start) = parser.peek("opening paren for typeuse")?;
-        let idx = match token {
-            Token::LParen if parser.lookahead_keyword("keyword for typeuse")?.0 == "type" => {
-                parser.eat_token(); // Eat '('
-                parser.eat_token(); // Eat 'type'
-                let idx = parser.parse()?;
-                parser.closing_paren("type")?;
-                Some(idx)
-            }
-            _ => None, // When abbreviated as described below
+        let (keyword, start) = parser.peek_fold_start("type or param or result in typeuse")?;
+        let idx = if let Some("type") = keyword {
+            parser.eat_token(); // Eat '('
+            parser.eat_token(); // Eat 'type'
+            let idx = parser.parse()?;
+            parser.closing_paren("type")?;
+            Some(idx)
+        } else {
+            None
         };
 
         let mut params: Vec<Param<'a>> = vec![];
-        loop {
-            match parser.peek("')' for typeuse or '(' for param or result in typeuse")? {
-                (Token::LParen, _)
-                    if parser.lookahead_keyword("param keyword in typeuse")?.0 == "param" =>
-                {
-                    params.push(parser.parse()?);
-                }
-                _ => break,
-            }
+        while let Some("param") = parser.peek_fold_start("param or result in typeuse")?.0 {
+            params.push(parser.parse()?);
         }
 
         let mut results: Vec<FuncResult> = vec![];
-        loop {
-            match parser.peek("')' for typeuse or '(' for result in typeuse")? {
-                (Token::LParen, _)
-                    if parser.lookahead_keyword("'result' keyword in typeuse")?.0 == "result" =>
-                {
-                    results.push(parser.parse()?);
-                }
-                _ => break,
-            }
+        while let Some("result") = parser.peek_fold_start("result in typeuse")?.0 {
+            results.push(parser.parse()?);
         }
 
         let idx = idx.or_else(|| {
@@ -1207,78 +1194,64 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
         );
 
         let id = parser.maybe_ident("identifier for func field")?;
-        let abbrev = if let Token::LParen = parser
-            .peek("')' for closing func or '(' for argument of func")?
+        let abbrev = match parser
+            .peek_fold_start("'import', 'export' or typeuse in func field")?
             .0
         {
-            let (keyword, _) =
-                parser.lookahead_keyword("one of 'import', 'export', typeuse for func field")?;
-            match keyword {
-                "import" => {
-                    // `(func $id (import "m" "n") {typeuse})` is a syntax sugar of
-                    // `(import "m" "n" (func $id {typeuse}))`
-                    parser.opening_paren("import in func")?;
-                    parser.eat_token(); // Eat 'import' keyword
-                    let mod_name = parser.parse()?;
-                    let name = parser.parse()?;
-                    parser.closing_paren("import in func")?;
-                    let ty = parser.parse()?;
-                    let desc = ImportDesc::Func { start, id, ty };
-                    FuncAbbrev::Import(Import {
-                        start,
-                        mod_name,
+            Some("import") => {
+                // `(func $id (import "m" "n") {typeuse})` is a syntax sugar of
+                // `(import "m" "n" (func $id {typeuse}))`
+                parser.opening_paren("import in func")?;
+                parser.eat_token(); // Eat 'import' keyword
+                let mod_name = parser.parse()?;
+                let name = parser.parse()?;
+                parser.closing_paren("import in func")?;
+                let ty = parser.parse()?;
+                let desc = ImportDesc::Func { start, id, ty };
+                FuncAbbrev::Import(Import {
+                    start,
+                    mod_name,
+                    name,
+                    desc,
+                })
+            }
+            Some("export") => {
+                // `(func $id (export "n") {typeuse})` is a syntax sugar of
+                // `(export "n" (func $id)) (func $id {typeuse})`
+                let export_start = parser.opening_paren("export in func")?;
+                parser.eat_token(); // Eat 'export' keyword
+                let name = parser.parse()?;
+                parser.closing_paren("export in func")?;
+                let ty = parser.parse()?;
+                let locals = parser.parse()?;
+                let body = parser.parse()?;
+                let id = id.unwrap_or_else(|| parser.fresh_id());
+                FuncAbbrev::Export(
+                    Export {
+                        start: export_start,
                         name,
-                        desc,
-                    })
-                }
-                "export" => {
-                    // `(func $id (export "n") {typeuse})` is a syntax sugar of
-                    // `(export "n" (func $id)) (func $id {typeuse})`
-                    let export_start = parser.opening_paren("export in func")?;
-                    parser.eat_token(); // Eat 'export' keyword
-                    let name = parser.parse()?;
-                    parser.closing_paren("export in func")?;
-                    let ty = parser.parse()?;
-                    let locals = parser.parse()?;
-                    let body = parser.parse()?;
-                    let id = id.unwrap_or_else(|| parser.fresh_id());
-                    FuncAbbrev::Export(
-                        Export {
-                            start: export_start,
-                            name,
-                            kind: ExportKind::Func,
-                            idx: Index::Ident(id),
-                        },
-                        Func {
-                            start,
-                            ty,
-                            locals,
-                            body,
-                        },
-                    )
-                }
-                _ => {
-                    let ty = parser.parse()?;
-                    let locals = parser.parse()?;
-                    let body = parser.parse()?;
-                    FuncAbbrev::NoAbbrev(Func {
+                        kind: ExportKind::Func,
+                        idx: Index::Ident(id),
+                    },
+                    Func {
                         start,
                         ty,
                         locals,
                         body,
-                    })
-                }
+                    },
+                )
             }
-        } else {
-            let ty = parser.parse()?;
-            let locals = parser.parse()?;
-            let body = parser.parse()?;
-            FuncAbbrev::NoAbbrev(Func {
-                start,
-                ty,
-                locals,
-                body,
-            })
+            _ => {
+                let ty = parser.parse()?;
+                let locals = parser.parse()?;
+                let body = parser.parse()?;
+                FuncAbbrev::NoAbbrev(Func {
+                    start,
+                    ty,
+                    locals,
+                    body,
+                })
+            }
         };
 
         parser.closing_paren("func")?;
@@ -1293,35 +1266,29 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
 impl<'a> Parse<'a> for Vec<Local<'a>> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         let mut locals = vec![];
-        while let (Token::LParen, start) = parser.peek("'(' for local")? {
-            if parser.lookahead_keyword("'local' keyword for locals")?.0 != "local" {
-                break;
-            }
-
+        while let (Some("local"), start) = parser.peek_fold_start("local")? {
             parser.eat_token(); // Eat '(' keyword
             parser.eat_token(); // Eat 'local' keyword
 
             if let Some(id) = parser.maybe_ident("identifier for local")? {
                 let ty = parser.parse()?;
-                parser.closing_paren("local")?;
                 locals.push(Local {
                     start,
                     id: Some(id),
                     ty,
                 });
-                continue;
-            }
-
-            // Only when ID is omitted, multiple types can be combined into one local statement
-            // `(local ty*)` means `(local ty)*`. Here parse `i64 f32` of `(local i32 i64 f32)`
-            loop {
-                match parser.peek("')' or typeuse for local")? {
-                    (Token::RParen, _) => break,
-                    _ => locals.push(Local {
-                        start,
-                        id: None,
-                        ty: parser.parse()?,
-                    }),
+            } else {
+                // Only when ID is omitted, multiple types can be combined into one local statement
+                // `(local ty*)` means `(local ty)*`. Here parse `i64 f32` of `(local i32 i64 f32)`
+                loop {
+                    match parser.peek("')' or typeuse for local")? {
+                        (Token::RParen, _) => break,
+                        _ => locals.push(Local {
+                            start,
+                            id: None,
+                            ty: parser.parse()?,
+                        }),
+                    }
                 }
             }
 
@@ -1390,17 +1357,14 @@ struct MaybeFoldedInsn<'a, 'p> {
 
 fn parse_maybe_result_type<'a>(parser: &mut Parser<'a>) -> Result<'a, Option<ValType>> {
     // Note: This requires that next token exists
-    match parser.peek("'(' for result type")? {
-        (Token::LParen, _)
-            if parser.lookahead_keyword("'result' keyword in block")?.0 == "result" =>
-        {
-            parser.eat_token(); // Eat '('
-            parser.eat_token(); // Eat 'result'
-            let ty = parser.parse()?;
-            parser.closing_paren("result in block")?;
-            Ok(Some(ty))
-        }
-        _ => Ok(None),
+    if let Some("result") = parser.peek_fold_start("result type")?.0 {
+        parser.eat_token(); // Eat '('
+        parser.eat_token(); // Eat 'result'
+        let ty = parser.parse()?;
+        parser.closing_paren("result type")?;
+        Ok(Some(ty))
+    } else {
+        Ok(None)
     }
 }
 
@@ -1945,25 +1909,17 @@ impl<'a> Parse<'a> for Elem<'a> {
             _ => Index::Num(0),
         };
 
-        let offset = match parser.peek("offset parameter of elem segment")?.0 {
-            Token::LParen if parser.lookahead_keyword("'offset' keyword")?.0 == "offset" => {
-                parser.eat_token(); // Eat '('
-                parser.eat_token(); // Eat 'offset'
-                let expr = parser.parse()?;
-                parser.closing_paren("offset parameter of elem segment")?;
-                expr
-            }
-            Token::LParen => {
-                let mut parser = MaybeFoldedInsn::new(parser);
-                parser.parse_folded()?;
-                parser.insns
-            }
-            _ => {
-                // Abbreviation: {instr} == (offset {instr})
-                let mut parser = MaybeFoldedInsn::new(parser);
-                parser.parse_one()?;
-                parser.insns
-            }
+        let offset = if let Some("offset") = parser.peek_fold_start("offset in elem segment")?.0 {
+            parser.eat_token(); // Eat '('
+            parser.eat_token(); // Eat 'offset'
+            let expr = parser.parse()?;
+            parser.closing_paren("offset parameter of elem segment")?;
+            expr
+        } else {
+            // Abbreviation: {instr} == (offset {instr})
+            let mut parser = MaybeFoldedInsn::new(parser);
+            parser.parse_one()?;
+            parser.insns
         };
 
         let mut init = vec![];
@@ -2118,20 +2074,17 @@ impl<'a> Parse<'a> for Data<'a> {
             _ => Index::Num(0),
         };
 
-        let offset = match parser.peek("offset of data segment")?.0 {
-            Token::LParen if parser.lookahead_keyword("'offset' keyword")?.0 == "offset" => {
-                parser.eat_token(); // Eat '('
-                parser.eat_token(); // Eat 'offset'
-                let offset = parser.parse()?;
-                parser.closing_paren("offset of data segment")?;
-                offset
-            }
-            _ => {
-                // Abbreviation: {instr} == (offset {instr})
-                let mut parser = MaybeFoldedInsn::new(parser);
-                parser.parse_one()?;
-                parser.insns
-            }
+        let offset = if let Some("offset") = parser.peek_fold_start("offset in data segment")?.0 {
+            parser.eat_token(); // Eat '('
+            parser.eat_token(); // Eat 'offset'
+            let offset = parser.parse()?;
+            parser.closing_paren("offset of data segment")?;
+            offset
+        } else {
+            // Abbreviation: {instr} == (offset {instr})
+            let mut parser = MaybeFoldedInsn::new(parser);
+            parser.parse_one()?;
+            parser.insns
         };
 
         let mut data = vec![];
@@ -2702,7 +2655,6 @@ mod tests {
         assert_parse!(r#"(start 3)"#, ModuleField<'_>, ModuleField::Start(..));
         assert_parse!(r#"(func)"#, ModuleField<'_>, ModuleField::Func(..));
 
-        assert_error!(r#"((type $f1 (func)))"#, ModuleField<'_>, UnexpectedToken{ expected: "keyword for module field", ..});
         assert_error!(r#"(hello!)"#, ModuleField<'_>, UnexpectedKeyword("hello!"));
     }
 
@@ -2732,7 +2684,7 @@ mod tests {
 
         assert_error!(r#"func"#, FuncType<'_>, MissingParen{ paren: '(', .. });
         assert_error!(r#"(type"#, FuncType<'_>, UnexpectedToken{ expected: "'func' keyword", .. });
-        assert_error!(r#"(func "#, FuncType<'_>, UnexpectedEndOfFile{ expected: "opening paren for param in functype", .. });
+        assert_error!(r#"(func "#, FuncType<'_>, UnexpectedEndOfFile{ expected: "parameter in functype", .. });
         assert_error!(r#"(func (result i32)"#, FuncType<'_>, MissingParen{ paren: '(', got: None, .. });
         assert_error!(r#"(func (result i32) foo"#, FuncType<'_>, MissingParen{ paren: ')', .. });
     }
