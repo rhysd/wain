@@ -937,7 +937,7 @@ impl<'a> Parse<'a> for TypeUse<'a> {
 
         let mut params: Vec<Param<'a>> = vec![];
         loop {
-            match parser.peek("opening paren for param in typeuse")? {
+            match parser.peek("')' for typeuse or '(' for param or result in typeuse")? {
                 (Token::LParen, _)
                     if parser.lookahead_keyword("param keyword in typeuse")?.0 == "param" =>
                 {
@@ -949,7 +949,7 @@ impl<'a> Parse<'a> for TypeUse<'a> {
 
         let mut results: Vec<FuncResult> = vec![];
         loop {
-            match parser.peek("opening paren for result in typeuse")? {
+            match parser.peek("')' for typeuse or '(' for result in typeuse")? {
                 (Token::LParen, _)
                     if parser.lookahead_keyword("'result' keyword in typeuse")?.0 == "result" =>
                 {
@@ -2637,15 +2637,23 @@ mod tests {
         assert_parse!(
             r#"(func (type 0))"#,
             ImportDesc<'_>,
-            ImportDesc::Func{
+            ImportDesc::Func {
                 ty: TypeUse { params, results, idx: Some(Index::Num(0)), .. },
+                ..
+            } if params.is_empty() && results.is_empty()
+        );
+        assert_parse!(
+            r#"(func (type $f))"#,
+            ImportDesc<'_>,
+            ImportDesc::Func {
+                ty: TypeUse { params, results, idx: Some(Index::Ident("$f")), .. },
                 ..
             } if params.is_empty() && results.is_empty()
         );
         assert_parse!(
             r#"(func (type 0) (param i32))"#,
             ImportDesc<'_>,
-            ImportDesc::Func{
+            ImportDesc::Func {
                 ty: TypeUse { params, results, idx: Some(Index::Num(0)), .. },
                 ..
             } if params.len() == 1 && results.is_empty()
@@ -2653,7 +2661,7 @@ mod tests {
         assert_parse!(
             r#"(func (type 0) (result i32))"#,
             ImportDesc<'_>,
-            ImportDesc::Func{
+            ImportDesc::Func {
                 ty: TypeUse { params, results, idx: Some(Index::Num(0)), .. },
                 ..
             } if params.is_empty() && results.len() == 1
@@ -2661,11 +2669,83 @@ mod tests {
         assert_parse!(
             r#"(func (type 0) (param i32) (result i32))"#,
             ImportDesc<'_>,
-            ImportDesc::Func{
+            ImportDesc::Func {
                 ty: TypeUse { params, results, idx: Some(Index::Num(0)), .. },
                 ..
             } if params.len() == 1 && results.len() == 1
         );
+        // Abbreviation
+        assert_parse!(
+            r#"(func (param i32) (result i32))"#,
+            ImportDesc<'_>,
+            ImportDesc::Func {
+                ty: TypeUse { params, results, idx: None, .. },
+                ..
+            } if params.len() == 1 && results.len() == 1
+        );
+        assert_parse!(
+            r#"(func (result i32))"#,
+            ImportDesc<'_>,
+            ImportDesc::Func {
+                ty: TypeUse { params, results, idx: None, .. },
+                ..
+            } if params.is_empty() && results.len() == 1
+        );
+        assert_parse!(
+            r#"(func)"#,
+            ImportDesc<'_>,
+            ImportDesc::Func {
+                ty: TypeUse { params, results, idx: None, .. },
+                ..
+            } if params.is_empty() && results.is_empty()
+        );
+
+        // typeuse has special abbreviation and it affects entire module. It means that assert_parse!
+        // is not avaiable
+        {
+            let input = r#"
+                (module
+                 (type $f (func (param i32) (result i32)))
+                 (type $g (func (param i32) (result i32)))
+                 (func (param i32) (result i32))
+                )
+            "#;
+            let mut parser = Parser::new(input);
+            let m: Module<'_> = parser.parse().unwrap();
+            // First function type which has the same signature is chosen
+            match &m.funcs[0].ty.idx {
+                Some(Index::Ident(i)) => assert_eq!(*i, "$f"),
+                x => panic!("Index is not set correctly: {:?}", x),
+            }
+        }
+        {
+            let input = r#"
+                (module
+                 (func (param f32) (result i32))
+                )
+            "#;
+            let mut parser = Parser::new(input);
+            let m: Module<'_> = parser.parse().unwrap();
+            // If there is no function type matching to the function's signature, new function type
+            // is inserted to the module
+            assert_eq!(m.types.len(), 1);
+            match &m.types[0] {
+                TypeDef {
+                    id: None,
+                    ty: FuncType {
+                        params, results, ..
+                    },
+                    ..
+                } => {
+                    assert_eq!(params.len(), 1);
+                    assert_eq!(params[0].id, None);
+                    assert_eq!(params[0].ty, ValType::F32);
+                    assert_eq!(results.len(), 1);
+                    assert_eq!(results[0].ty, ValType::I32);
+                }
+                t => panic!("Type section entry is not set correctly: {:?}", t),
+            }
+        }
 
         // Note: {typeuse} accepts empty string due to abbreviation. Empty string is accepted as
         // TypeUse { idx: None, params: [], results: [], .. } with (type (func)) inserted to module.
@@ -3785,6 +3865,11 @@ mod tests {
             r#"(elem block end 0)"#,
             Elem<'_>,
             Elem { offset, .. } if is_match!(offset[0].kind, Block{..})
+        );
+        assert_parse!(
+            r#"(elem (i32.const 42) 0)"#,
+            Elem<'_>,
+            Elem { offset, .. } if is_match!(offset[0].kind, I32Const(42))
         );
     }
 
