@@ -38,7 +38,13 @@ pub enum ParseErrorKind<'a> {
     },
     InvalidAlignment(u32),
     MultipleEntrypoints(Start<'a>, Start<'a>),
-    ModulesNotComposable(Module<'a>, Module<'a>, &'static str),
+    ModulesNotComposable {
+        mod1_id: Option<&'a str>,
+        mod1_offset: usize,
+        mod2_id: Option<&'a str>,
+        mod2_offset: usize,
+        msg: &'static str,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -102,16 +108,22 @@ impl<'a> fmt::Display for ParseError<'a> {
             MultipleEntrypoints(prev, cur) => {
                 write!(f, "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}", cur.idx, prev.idx, prev.start)?
             }
-            ModulesNotComposable(mod1, mod2, msg) => {
-                if let Some(id) = mod2.id {
-                    write!(f, "module {} at offset {}", id, mod2.start)?;
+            ModulesNotComposable{
+                mod1_id,
+                mod1_offset,
+                mod2_id,
+                mod2_offset,
+                msg,
+            } => {
+                if let Some(id) = mod2_id {
+                    write!(f, "module {} at offset {}", id, mod2_offset)?;
                 } else {
-                    write!(f, "module at offset {}", mod2.start)?;
+                    write!(f, "module at offset {}", mod2_offset)?;
                 }
-                if let Some(id) = mod1.id {
-                    write!(f, " cannot be merged into existing module {} at offset {}: ", id, mod1.start)?;
+                if let Some(id) = mod1_id {
+                    write!(f, " cannot be merged into existing module {} at offset {}: ", id, mod1_offset)?;
                 } else {
-                    write!(f, " cannot be merged into existing module at offset {}: ", mod1.start)?;
+                    write!(f, " cannot be merged into existing module at offset {}: ", mod1_offset)?;
                 }
                 f.write_str(msg)?;
             }
@@ -600,11 +612,13 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
             if module.entrypoint.is_some() && another.entrypoint.is_some() {
                 let offset = another.start;
                 return parser.error(
-                    ParseErrorKind::ModulesNotComposable(
-                        module,
-                        another,
-                        "only one module can have 'start' section",
-                    ),
+                    ParseErrorKind::ModulesNotComposable {
+                        mod1_id: module.id,
+                        mod1_offset: module.start,
+                        mod2_id: another.id,
+                        mod2_offset: another.start,
+                        msg: "only one module can have 'start' section",
+                    },
                     offset,
                 );
             }
@@ -615,13 +629,15 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
             {
                 let offset = another.start;
                 return parser.error(
-                    ParseErrorKind::ModulesNotComposable(
-                        module,
-                        another,
-                        "when module M1 is merged into module M2, one of (1) or (2) must be met. \
+                    ParseErrorKind::ModulesNotComposable{
+                        mod1_id: module.id,
+                        mod1_offset: module.start,
+                        mod2_id: another.id,
+                        mod2_offset: another.start,
+                        msg: "when module M1 is merged into module M2, one of (1) or (2) must be met. \
                         (1) M1 has no 'import' section. \
                         (2) M2 has no 'func', 'table', 'memory' sections",
-                    ),
+                    },
                     offset,
                 );
             }
@@ -2559,7 +2575,7 @@ mod tests {
             (module $m2 (start 3))
             "#,
             SyntaxTree<'_>,
-            ModulesNotComposable(_, _, "only one module can have 'start' section")
+            ModulesNotComposable{ msg: "only one module can have 'start' section", .. }
         );
         for field in &["(func)", "(table 0 funcref)", "(memory 0)"] {
             let source = format!(
@@ -2569,7 +2585,7 @@ mod tests {
             assert_error!(
                 &source,
                 SyntaxTree<'_>,
-                ModulesNotComposable(_, _, msg)
+                ModulesNotComposable{ msg, .. }
                 if msg.contains("when module M1 is merged into module M2, one of (1) or (2) must be met.")
             );
         }
