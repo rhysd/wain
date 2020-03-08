@@ -114,8 +114,7 @@ pub enum ImportDesc<'a> {
 #[derive(Debug)]
 pub struct TypeUse<'a> {
     pub start: usize,
-    // (type {typeidx}) can be omitted due to abbreviation
-    pub idx: Option<Index<'a>>,
+    pub idx: u32,
     pub params: Vec<Param<'a>>,
     pub results: Vec<FuncResult>,
 }
@@ -184,6 +183,7 @@ pub enum ExportKind {
 #[derive(Debug)]
 pub struct Func<'a> {
     pub start: usize,
+    pub id: Option<&'a str>,
     pub ty: TypeUse<'a>,
     pub locals: Vec<Local<'a>>,
     pub body: Vec<Instruction<'a>>,
