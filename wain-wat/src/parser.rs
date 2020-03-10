@@ -338,6 +338,17 @@ impl<'a> ParseContext<'a> {
             label_indices: Indices::new(source, "label", "instructions sequence"),
         }
     }
+
+    fn clear(&mut self) {
+        self.types.clear();
+        self.type_indices.clear();
+        self.func_indices.clear();
+        self.table_indices.clear();
+        self.mem_indices.clear();
+        self.global_indices.clear();
+        self.local_indices.clear();
+        self.label_indices.clear();
+    }
 }
 
 // TODO: Add index-to-id tables for types, funcs, tables, mems, globals, locals and labels
@@ -750,6 +761,9 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
         // - m1.start = ϵ ∨ m2.start = ϵ
         // - m1.funcs = m1.tables = m1.mems = m1.mems = ϵ ∨ m2.imports = ϵ
         while !parser.is_done() {
+            // Module have its own scope so all contexts should be cleared before parsing
+            parser.ctx.clear();
+
             let mut another: Module<'a> = parser.parse()?;
 
             // XXX: Modules may have the same ID. IDs must be resolved before merging
