@@ -130,15 +130,20 @@ impl<'a> fmt::Display for ParseError<'a> {
         };
 
         let start = self.offset;
-        let end = self.source[start..]
-            .find(['\n', '\r'].as_ref())
-            .unwrap_or_else(|| self.source.len());
-        write!(
-            f,
-            " at byte offset {}\n\n ... {}\n     ^\n     start from here",
-            self.offset,
-            &self.source[start..end],
-        )
+        if start == self.source.len() {
+            write!(f, " at byte offset {} (end of input)", self.offset,)
+        } else {
+            let source = &self.source[start..];
+            let end = source
+                .find(['\n', '\r'].as_ref())
+                .unwrap_or_else(|| source.len());
+            write!(
+                f,
+                " at byte offset {}\n\n ... {}\n     ^\n     start from here",
+                self.offset,
+                &source[..end],
+            )
+        }
     }
 }
 
