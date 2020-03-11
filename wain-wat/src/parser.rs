@@ -783,9 +783,10 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
             }
 
             // Check second restriction
-            if !(module.funcs.is_empty() && module.tables.is_empty() && module.memories.is_empty()
-                || !parser.ctx.saw_import)
-            {
+            let no_func = module.funcs.iter().find(|f| !f.is_import()).is_none();
+            let no_table = module.tables.iter().find(|t| !t.is_import()).is_none();
+            let no_memory = module.memories.iter().find(|m| !m.is_import()).is_none();
+            if !(no_func && no_table && no_memory || !parser.ctx.saw_import) {
                 let offset = another.start;
                 return parser.error(
                     ParseErrorKind::ModulesNotComposable{
@@ -1139,6 +1140,7 @@ impl<'a> Parse<'a> for ImportItem<'a> {
             kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         };
 
+        parser.closing_paren("import item")?;
         parser.closing_paren("import")?;
         Ok(item)
     }
@@ -2665,7 +2667,7 @@ mod tests {
                && data.len() == 2
                && memories.len() == 2
                && globals.len() == 2
-               && funcs.len() == 2 // include an import
+               && funcs.len() == 3 // include an import
                && entrypoint.is_some()
         );
         assert_parse!(
@@ -2910,17 +2912,19 @@ mod tests {
         assert_parse!(
             p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(import "mod" "name" (func (type 0)))"#,
-            Import<'_>,
-            Import {
-                mod_name: Name(mn),
-                name: Name(n),
+            ImportItem<'_>,
+            ImportItem::Func(Func {
+                kind: FuncKind::Import(Import{
+                    mod_name: Name(mn),
+                    name: Name(n),
+                }),
                 ..
-            } if mn == "mod" && n == "name"
+            }) if mn == "mod" && n == "name"
         );
         assert_parse!(
             r#"(import "env" "print" (func $print (param i32)))"#,
-            Import<'_>,
-            Import { .. }
+            ImportItem<'_>,
+            ImportItem::Func(Func { .. })
         );
 
         assert_parse!(
@@ -2979,8 +2983,12 @@ mod tests {
         assert_error!(r#"(import (func)"#, ImportItem<'_>, UnexpectedToken{ .. });
 
         assert_error!(r#"func"#, ImportItem<'_>, MissingParen{ paren: '(', .. });
-        assert_error!(r#"(func"#, ImportItem<'_>, UnexpectedEndOfFile{ .. });
-        assert_error!(r#"(hello $foo"#, ImportItem<'_>, UnexpectedKeyword("hello"));
+        assert_error!(r#"(import "m" "n" (func"#, ImportItem<'_>, UnexpectedEndOfFile{ .. });
+        assert_error!(
+            r#"(import "m" "n" (hello $foo"#,
+            ImportItem<'_>,
+            UnexpectedKeyword("hello")
+        );
     }
 
     #[test]
@@ -2990,7 +2998,7 @@ mod tests {
         // problem because typeuse is always used within other statement.
         assert_parse!(
             p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
-            r#"((func (type 0)))"#,
+            r#"(func (type 0))"#,
             Func<'_>,
             Func {
                 ty: TypeUse { params, results, idx: 0, .. },
@@ -3131,7 +3139,7 @@ mod tests {
         // https://webassembly.github.io/spec/core/text/modules.html#abbreviations
 
         assert_error!(
-            r#"(func (type $f))"#,
+            r#"(import "m" "n" (func (type $f)))"#,
             ImportItem<'_>,
             IdNotDefined{ id: "$f", what: "type", .. }
         );
@@ -3144,7 +3152,7 @@ mod tests {
             IdNotDefined{ id: "$g", what: "type", .. }
         );
         assert_error!(
-            r#"(func (type 99))"#,
+            r#"(import "m" "n" (func (type 99)))"#,
             ImportItem<'_>,
             IndexOutOfBounds{ idx: 99, what: "type", .. }
         );
@@ -3302,7 +3310,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Func,
-                idx: Index::Ident("$f"),
+                idx: Index::Num(0),
                 ..
             } if n == "n" => { /* OK */ }
             e => panic!("did not match: {:?}", e),
@@ -4388,7 +4396,7 @@ mod tests {
                     import: None,
                     ..
                 },
-                Elem{ idx: Index::Ident("$tbl"), offset, init, .. }
+                Elem{ idx: Index::Num(0), offset, init, .. }
             )
             if is_match!(offset[0].kind, InsnKind::I32Const(0)) &&
                is_match!(init[0], Index::Num(0)) && is_match!(init[1], Index::Num(1))
@@ -4426,7 +4434,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Table,
-                idx: Index::Ident("$tbl"),
+                idx: Index::Num(0),
                 ..
             } if n == "n" => { /* OK */ }
             e => panic!("did not match: {:?}", e),
@@ -4466,7 +4474,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Table,
-                idx: Index::Ident("$tbl"),
+                idx: Index::Num(0),
                 ..
             } if n == "n1" => { /* OK */ }
             e => panic!("did not match: {:?}", e),
@@ -4609,7 +4617,7 @@ mod tests {
                     ..
                 },
                 Data {
-                    idx: Index::Ident("$m"),
+                    idx: Index::Num(0),
                     offset,
                     data,
                     ..
@@ -4649,7 +4657,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Memory,
-                idx: Index::Ident("$m"),
+                idx: Index::Num(0),
                 ..
             } if n == "n" => { /* OK */ }
             e => panic!("did not match: {:?}", e),
@@ -4687,7 +4695,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Memory,
-                idx: Index::Ident("$m"),
+                idx: Index::Num(0),
                 ..
             } if n == "e" => { /* OK */ }
             e => panic!("did not match: {:?}", e),
@@ -4774,7 +4782,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Global,
-                idx: Index::Ident("$g"),
+                idx: Index::Num(0),
                 ..
             } if n == "n" => { /* OK */ }
             e => panic!("did not match: {:?}", e),

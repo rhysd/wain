@@ -167,6 +167,14 @@ pub struct Func<'a> {
     pub ty: TypeUse<'a>,
     pub kind: FuncKind<'a>,
 }
+impl<'a> Func<'a> {
+    pub fn is_import(&self) -> bool {
+        match self.kind {
+            FuncKind::Import(_) => true,
+            FuncKind::Body { .. } => false,
+        }
+    }
+}
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-local
 #[derive(Debug)]
@@ -431,6 +439,11 @@ pub struct Table<'a> {
     pub ty: TableType,
     pub import: Option<Import<'a>>,
 }
+impl<'a> Table<'a> {
+    pub fn is_import(&self) -> bool {
+        self.import.is_some()
+    }
+}
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-data
 #[derive(Debug)]
@@ -448,6 +461,11 @@ pub struct Memory<'a> {
     pub id: Option<&'a str>,
     pub ty: MemType,
     pub import: Option<Import<'a>>,
+}
+impl<'a> Memory<'a> {
+    pub fn is_import(&self) -> bool {
+        self.import.is_some()
+    }
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#globals
