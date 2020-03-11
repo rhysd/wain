@@ -324,6 +324,9 @@ struct ParseContext<'a> {
     global_indices: Indices<'a>,
     local_indices: Indices<'a>,
     label_indices: Indices<'a>,
+    // A flag indicating the current module is including any import
+    // This flag is necessary to compose multiple modules into one
+    saw_import: bool,
 }
 
 impl<'a> ParseContext<'a> {
@@ -338,6 +341,7 @@ impl<'a> ParseContext<'a> {
             global_indices: Indices::new(source, "global", "module"),
             local_indices: Indices::new(source, "local variable", "function"),
             label_indices: Indices::new(source, "label", "instructions sequence"),
+            saw_import: false,
         }
     }
 
@@ -351,6 +355,7 @@ impl<'a> ParseContext<'a> {
         self.global_indices.clear();
         self.local_indices.clear();
         self.label_indices.clear();
+        self.saw_import = false;
     }
 }
 
@@ -610,16 +615,6 @@ impl<'a> Parser<'a> {
         }
         Ok(buf)
     }
-
-    fn fresh_id(&mut self) -> &'a str {
-        // For some syntax sugars, text format requires fresh IDs. They are unique IDs not conflicting
-        // with existing IDs.
-        // https://webassembly.github.io/spec/core/text/values.html#text-id-fresh
-        //
-        // This method returns 'new' unowned string so there should be a trick. For example, having
-        // &'a Vec<String> in Parser and generate a new ID in the vector and return it's slice.
-        unimplemented!("generating fresh ID is not implemented yet")
-    }
 }
 
 // TODO: Use trait rather than macros to avoid duplication of implementations
@@ -789,7 +784,7 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
 
             // Check second restriction
             if !(module.funcs.is_empty() && module.tables.is_empty() && module.memories.is_empty()
-                || another.imports.is_empty())
+                || !parser.ctx.saw_import)
             {
                 let offset = another.start;
                 return parser.error(
@@ -807,7 +802,6 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
             }
 
             module.types.append(&mut another.types);
-            module.imports.append(&mut another.imports);
             module.exports.append(&mut another.exports);
             module.funcs.append(&mut another.funcs);
             module.elems.append(&mut another.elems);
@@ -830,14 +824,14 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
 #[cfg_attr(test, derive(Debug))]
 enum ModuleField<'a> {
     Type(TypeDef<'a>),
-    Import(Import<'a>),
+    Import(ImportItem<'a>),
     Export(Export<'a>),
-    Func(FuncAbbrev<'a>),
+    Func(Func<'a>),
     Elem(Elem<'a>),
     Table(TableAbbrev<'a>),
     Data(Data<'a>),
     Memory(MemoryAbbrev<'a>),
-    Global(GlobalAbbrev<'a>),
+    Global(Global<'a>),
     Start(Start<'a>),
 }
 
@@ -849,7 +843,6 @@ impl<'a> Parse<'a> for Module<'a> {
         match_token!(parser, "'module' keyword", Token::Keyword("module"));
         let id = parser.maybe_ident("identifier for module")?;
 
-        let mut imports = vec![];
         let mut funcs = vec![];
         let mut elems = vec![];
         let mut tables = vec![];
@@ -866,30 +859,25 @@ impl<'a> Parse<'a> for Module<'a> {
         while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
             match parser.parse()? {
                 ModuleField::Type(ty) => parser.ctx.types.push(ty),
-                ModuleField::Import(import) => imports.push(import),
+                ModuleField::Import(ImportItem::Func(func)) => funcs.push(func),
+                ModuleField::Import(ImportItem::Table(table)) => tables.push(table),
+                ModuleField::Import(ImportItem::Memory(memory)) => memories.push(memory),
+                ModuleField::Import(ImportItem::Global(global)) => globals.push(global),
                 ModuleField::Export(export) => parser.ctx.exports.push(export),
-                ModuleField::Func(FuncAbbrev::Import(import)) => imports.push(import),
-                ModuleField::Func(FuncAbbrev::Export(export, func)) => {
-                    parser.ctx.exports.push(export);
-                    funcs.push(func);
-                }
-                ModuleField::Func(FuncAbbrev::NoAbbrev(func)) => funcs.push(func),
+                ModuleField::Func(func) => funcs.push(func),
                 ModuleField::Elem(elem) => elems.push(elem),
                 ModuleField::Table(TableAbbrev::Table(table)) => tables.push(table),
                 ModuleField::Table(TableAbbrev::Elem(table, elem)) => {
                     tables.push(table);
                     elems.push(elem);
                 }
-                ModuleField::Table(TableAbbrev::Import(import)) => imports.push(import),
                 ModuleField::Data(d) => data.push(d),
                 ModuleField::Memory(MemoryAbbrev::Memory(m)) => memories.push(m),
                 ModuleField::Memory(MemoryAbbrev::Data(m, d)) => {
                     memories.push(m);
                     data.push(d);
                 }
-                ModuleField::Memory(MemoryAbbrev::Import(i)) => imports.push(i),
-                ModuleField::Global(GlobalAbbrev::Import(import)) => imports.push(import),
-                ModuleField::Global(GlobalAbbrev::Global(global)) => globals.push(global),
+                ModuleField::Global(global) => globals.push(global),
                 ModuleField::Start(start) => {
                     if let Some(prev) = entrypoint {
                         let offset = start.start;
@@ -907,7 +895,6 @@ impl<'a> Parse<'a> for Module<'a> {
             start,
             id,
             types: mem::replace(&mut parser.ctx.types, vec![]),
-            imports,
             exports: mem::replace(&mut parser.ctx.exports, vec![]),
             funcs,
             elems,
@@ -1082,54 +1069,78 @@ impl<'a> Parse<'a> for Name<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-import
+// Parse "mod name" "name" sequence in import section
 impl<'a> Parse<'a> for Import<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let start = parser.opening_paren("import")?;
-        match_token!(parser, "'import' keyword", Token::Keyword("import"));
         let mod_name = parser.parse()?;
         let name = parser.parse()?;
-        let desc = parser.parse()?;
-        parser.closing_paren("import")?;
-        Ok(Import {
-            start,
-            mod_name,
-            name,
-            desc,
-        })
+        parser.ctx.saw_import = true;
+        Ok(Import { mod_name, name })
     }
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
-impl<'a> Parse<'a> for ImportDesc<'a> {
+// https://webassembly.github.io/spec/core/text/modules.html#text-import
+#[cfg_attr(test, derive(Debug))]
+enum ImportItem<'a> {
+    Func(Func<'a>),
+    Table(Table<'a>),
+    Memory(Memory<'a>),
+    Global(Global<'a>),
+}
+impl<'a> Parse<'a> for ImportItem<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let start = parser.opening_paren("import item")?;
+        let start = parser.opening_paren("import")?;
+        match_token!(parser, "'import' keyword", Token::Keyword("import"));
+        let import = parser.parse()?;
+
+        parser.opening_paren("import item")?;
         let (keyword, offset) = match_token!(parser, "one of 'func', 'table', 'memory', 'global'", Token::Keyword(kw) => kw);
+
         let id = parser.maybe_ident("identifier for import item")?;
-        let desc = match keyword {
-            "func" => ImportDesc::Func {
-                start,
-                id,
-                ty: parser.parse()?,
-            },
-            "table" => ImportDesc::Table {
-                start,
-                id,
-                ty: parser.parse()?,
-            },
-            "memory" => ImportDesc::Memory {
-                start,
-                id,
-                ty: parser.parse()?,
-            },
-            "global" => ImportDesc::Global {
-                start,
-                id,
-                ty: parser.parse()?,
-            },
+
+        // https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
+        let item = match keyword {
+            "func" => {
+                parser.ctx.func_indices.new_idx(id, start)?;
+                ImportItem::Func(Func {
+                    start,
+                    id,
+                    ty: parser.parse()?,
+                    kind: FuncKind::Import(import),
+                })
+            }
+            "table" => {
+                parser.ctx.table_indices.new_idx(id, start)?;
+                ImportItem::Table(Table {
+                    start,
+                    id,
+                    ty: parser.parse()?,
+                    import: Some(import),
+                })
+            }
+            "memory" => {
+                parser.ctx.mem_indices.new_idx(id, start)?;
+                ImportItem::Memory(Memory {
+                    start,
+                    id,
+                    ty: parser.parse()?,
+                    import: Some(import),
+                })
+            }
+            "global" => {
+                parser.ctx.global_indices.new_idx(id, start)?;
+                ImportItem::Global(Global {
+                    start,
+                    id,
+                    ty: parser.parse()?,
+                    kind: GlobalKind::Import(import),
+                })
+            }
             kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         };
-        parser.closing_paren("import item")?;
-        Ok(desc)
+
+        parser.closing_paren("import")?;
+        Ok(item)
     }
 }
 
@@ -1348,17 +1359,8 @@ impl<'a> Parse<'a> for Export<'a> {
     }
 }
 
-// Helper enum to resolve import/export abbreviation in `func` syntax
-// https://webassembly.github.io/spec/core/text/modules.html#text-func-abbrev
-#[cfg_attr(test, derive(Debug))]
-enum FuncAbbrev<'a> {
-    Import(Import<'a>),
-    Export(Export<'a>, Func<'a>),
-    NoAbbrev(Func<'a>),
-}
-
 // https://webassembly.github.io/spec/core/text/modules.html#text-func
-impl<'a> Parse<'a> for FuncAbbrev<'a> {
+impl<'a> Parse<'a> for Func<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         let start = parser.opening_paren("func")?;
         match_token!(
@@ -1367,8 +1369,12 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
             Token::Keyword("func")
         );
 
+        // Note: func has some abbreviations
+        // https://webassembly.github.io/spec/core/text/modules.html#text-func-abbrev
+
         let id = parser.maybe_ident("identifier for func field")?;
-        let abbrev = match parser
+        let idx = parser.ctx.func_indices.new_idx(id, start)?;
+        let func = match parser
             .peek_fold_start("'import', 'export' or typeuse in func field")?
             .0
         {
@@ -1377,17 +1383,15 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
                 // `(import "m" "n" (func $id {typeuse}))`
                 parser.opening_paren("import in func")?;
                 parser.eat_token(); // Eat 'import' keyword
-                let mod_name = parser.parse()?;
-                let name = parser.parse()?;
+                let import = parser.parse()?;
                 parser.closing_paren("import in func")?;
                 let ty = parser.parse()?;
-                let desc = ImportDesc::Func { start, id, ty };
-                FuncAbbrev::Import(Import {
+                Func {
                     start,
-                    mod_name,
-                    name,
-                    desc,
-                })
+                    id,
+                    ty,
+                    kind: FuncKind::Import(import),
+                }
             }
             Some("export") => {
                 // `(func $id (export "n") {typeuse})` is a syntax sugar of
@@ -1396,42 +1400,38 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
                 parser.eat_token(); // Eat 'export' keyword
                 let name = parser.parse()?;
                 parser.closing_paren("export in func")?;
+                parser.ctx.exports.push(Export {
+                    start: export_start,
+                    name,
+                    kind: ExportKind::Func,
+                    idx: Index::Num(idx),
+                });
+
                 let ty = parser.parse()?;
                 let locals = parser.parse()?;
                 let body = parser.parse()?;
-                let id = id.unwrap_or_else(|| parser.fresh_id());
-                FuncAbbrev::Export(
-                    Export {
-                        start: export_start,
-                        name,
-                        kind: ExportKind::Func,
-                        idx: Index::Ident(id),
-                    },
-                    Func {
-                        start,
-                        id: Some(id),
-                        ty,
-                        locals,
-                        body,
-                    },
-                )
+                Func {
+                    start,
+                    id,
+                    ty,
+                    kind: FuncKind::Body { locals, body },
+                }
             }
             _ => {
                 let ty = parser.parse()?;
                 let locals = parser.parse()?;
                 let body = parser.parse()?;
-                FuncAbbrev::NoAbbrev(Func {
+                Func {
                     start,
                     id,
                     ty,
-                    locals,
-                    body,
-                })
+                    kind: FuncKind::Body { locals, body },
+                }
             }
         };
 
         parser.closing_paren("func")?;
-        Ok(abbrev)
+        Ok(func)
     }
 }
 
@@ -2122,7 +2122,6 @@ impl<'a> Parse<'a> for Elem<'a> {
 enum TableAbbrev<'a> {
     Elem(Table<'a>, Elem<'a>),
     Table(Table<'a>),
-    Import(Import<'a>),
 }
 
 impl<'a> Parse<'a> for TableAbbrev<'a> {
@@ -2130,7 +2129,8 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
         let start = parser.opening_paren("table")?;
         match_token!(parser, "'table' keyword", Token::Keyword("table"));
 
-        let mut id = parser.maybe_ident("identifier for table section")?;
+        let id = parser.maybe_ident("identifier for table section")?;
+        let idx = parser.ctx.func_indices.new_idx(id, start)?;
 
         loop {
             match parser.peek("argument of table section")?.0 {
@@ -2141,16 +2141,15 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                         "import" => {
                             // (table {id}? (import {name} {name} ) {tabletype}) ==
                             //    (import {name} {name} (table {id}? {tabletype}))
-                            let mod_name = parser.parse()?;
-                            let name = parser.parse()?;
+                            let import = parser.parse()?;
                             parser.closing_paren("import argument of table section")?;
                             let ty = parser.parse()?;
                             parser.closing_paren("table")?;
-                            return Ok(TableAbbrev::Import(Import {
+                            return Ok(TableAbbrev::Table(Table {
                                 start,
-                                mod_name,
-                                name,
-                                desc: ImportDesc::Table { start, id, ty },
+                                id,
+                                ty,
+                                import: Some(import),
                             }));
                         }
                         "export" => {
@@ -2159,13 +2158,11 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                             //   note that this occurs repeatedly
                             let name = parser.parse()?;
                             parser.closing_paren("export argument in table section")?;
-                            let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
-                            id = Some(id_dash);
                             parser.ctx.exports.push(Export {
                                 start,
                                 name,
                                 kind: ExportKind::Table,
-                                idx: Index::Ident(id_dash),
+                                idx: Index::Num(idx),
                             });
                             // 'export' can be chained by'import', 'export', 'elem' and tabletype
                         }
@@ -2193,18 +2190,18 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
 
                     parser.closing_paren("elem argument in table section")?;
                     parser.closing_paren("table")?;
-                    let id = id.unwrap_or_else(|| parser.fresh_id()); // id'
                     let n = init.len() as u32; // TODO: Check length <= 2^32
                     let table = Table {
                         start,
-                        id: Some(id),
+                        id,
                         ty: TableType {
                             limit: Limits::Range { min: n, max: n },
                         },
+                        import: None,
                     };
                     let elem = Elem {
                         start: elem_start,
-                        idx: Index::Ident(id),
+                        idx: Index::Num(idx),
                         offset: vec![Instruction {
                             start: elem_start,
                             kind: InsnKind::I32Const(0),
@@ -2217,7 +2214,12 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                     // tabletype
                     let ty = parser.parse()?;
                     parser.closing_paren("table")?;
-                    return Ok(TableAbbrev::Table(Table { start, id, ty }));
+                    return Ok(TableAbbrev::Table(Table {
+                        start,
+                        id,
+                        ty,
+                        import: None,
+                    }));
                 }
             }
         }
@@ -2279,7 +2281,6 @@ impl<'a> Parse<'a> for Data<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#memories
 #[cfg_attr(test, derive(Debug))]
 enum MemoryAbbrev<'a> {
-    Import(Import<'a>),
     Memory(Memory<'a>),
     Data(Memory<'a>, Data<'a>),
 }
@@ -2288,7 +2289,8 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
         let start = parser.opening_paren("memory")?;
         match_token!(parser, "'memory' keyword", Token::Keyword("memory"));
 
-        let mut id = parser.maybe_ident("identifier for memory section")?;
+        let id = parser.maybe_ident("identifier for memory section")?;
+        let idx = parser.ctx.mem_indices.new_idx(id, start)?;
 
         loop {
             match parser.peek("argument of memory section")?.0 {
@@ -2299,16 +2301,15 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                         "import" => {
                             // (memory {id}? (import {name} {name} ) {memtype}) ==
                             //    (import {name} {name} (memory {id}? {memtype}))
-                            let mod_name = parser.parse()?;
-                            let name = parser.parse()?;
+                            let import = parser.parse()?;
                             parser.closing_paren("import argument of memory section")?;
                             let ty = parser.parse()?;
                             parser.closing_paren("memory")?;
-                            return Ok(MemoryAbbrev::Import(Import {
+                            return Ok(MemoryAbbrev::Memory(Memory {
                                 start,
-                                mod_name,
-                                name,
-                                desc: ImportDesc::Memory { start, id, ty },
+                                id,
+                                ty,
+                                import: Some(import),
                             }));
                         }
                         "export" => {
@@ -2317,13 +2318,11 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             //   note that this occurs repeatedly
                             let name = parser.parse()?;
                             parser.closing_paren("export argument in memory section")?;
-                            let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
-                            id = Some(id_dash);
                             parser.ctx.exports.push(Export {
                                 start,
                                 name,
                                 kind: ExportKind::Memory,
-                                idx: Index::Ident(id_dash),
+                                idx: Index::Num(idx),
                             });
                             // 'export' can be chained by'import', 'export', 'data' and tabletype
                         }
@@ -2354,22 +2353,21 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             }
                             parser.closing_paren("memory")?;
 
-                            let id = id.unwrap_or_else(|| parser.fresh_id()); // id'
-
                             // Infer memory limits from page size (64 * 1024 = 65536)
                             let n = (data.len() as f64 / 65536.0).ceil() as u32;
 
                             return Ok(MemoryAbbrev::Data(
                                 Memory {
                                     start,
-                                    id: Some(id),
+                                    id,
                                     ty: MemType {
                                         limit: Limits::Range { min: n, max: n },
                                     },
+                                    import: None,
                                 },
                                 Data {
                                     start,
-                                    idx: Index::Ident(id),
+                                    idx: Index::Num(idx),
                                     offset: vec![Instruction {
                                         start,
                                         kind: InsnKind::I32Const(0),
@@ -2385,28 +2383,29 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                     // memtype
                     let ty = parser.parse()?;
                     parser.closing_paren("memory")?;
-                    return Ok(MemoryAbbrev::Memory(Memory { start, id, ty }));
+                    return Ok(MemoryAbbrev::Memory(Memory {
+                        start,
+                        id,
+                        ty,
+                        import: None,
+                    }));
                 }
             }
         }
     }
 }
 
-// Helper enum to resolve import/export abbreviation in global section
 // https://webassembly.github.io/spec/core/text/modules.html#globals
-#[cfg_attr(test, derive(Debug))]
-enum GlobalAbbrev<'a> {
-    Import(Import<'a>),
-    Global(Global<'a>),
-}
-
-impl<'a> Parse<'a> for GlobalAbbrev<'a> {
+impl<'a> Parse<'a> for Global<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         let start = parser.opening_paren("global")?;
         match_token!(parser, "'global' keyword", Token::Keyword("global"));
 
-        let mut id = parser.maybe_ident("identifier for global section")?;
+        let id = parser.maybe_ident("identifier for global section")?;
+        let idx = parser.ctx.global_indices.new_idx(id, start)?;
 
+        // Note: Global section has import/export abbreviation
+        // https://webassembly.github.io/spec/core/text/modules.html#globals
         loop {
             match parser.peek("argument of global section")?.0 {
                 Token::LParen => {
@@ -2416,18 +2415,16 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
                         "import" => {
                             // (global {id}? (import {name} {name} ) {globaltype}) ==
                             //    (import {name} {name} (global {id}? {globaltype}))
-                            let mod_name = parser.parse()?;
-                            let name = parser.parse()?;
+                            let import = parser.parse()?;
                             parser.closing_paren("import argument of global section")?;
                             let ty = parser.parse()?;
                             parser.closing_paren("global")?;
-                            let import = Import {
+                            return Ok(Global {
                                 start,
-                                mod_name,
-                                name,
-                                desc: ImportDesc::Global { start, id, ty },
-                            };
-                            return Ok(GlobalAbbrev::Import(import));
+                                id,
+                                ty,
+                                kind: GlobalKind::Import(import),
+                            });
                         }
                         "export" => {
                             // (global {id}? (export {name}) ...) ==
@@ -2435,13 +2432,11 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
                             //   note that this occurs repeatedly
                             let name = parser.parse()?;
                             parser.closing_paren("export argument in global section")?;
-                            let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
-                            id = Some(id_dash);
                             parser.ctx.exports.push(Export {
                                 start,
                                 name,
                                 kind: ExportKind::Global,
-                                idx: Index::Ident(id_dash),
+                                idx: Index::Num(idx),
                             });
                         }
                         "mut" => {
@@ -2451,13 +2446,12 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
                             let init = parser.parse()?;
                             parser.closing_paren("global")?;
                             let ty = GlobalType { mutable: true, ty };
-                            let global = Global {
+                            return Ok(Global {
                                 start,
                                 id,
                                 ty,
-                                init,
-                            };
-                            return Ok(GlobalAbbrev::Global(global));
+                                kind: GlobalKind::Init(init),
+                            });
                         }
                         kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
                     }
@@ -2468,13 +2462,12 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
                     let init = parser.parse()?;
                     parser.closing_paren("global")?;
                     let ty = GlobalType { mutable: false, ty };
-                    let global = Global {
+                    return Ok(Global {
                         start,
                         id,
                         ty,
-                        init,
-                    };
-                    return Ok(GlobalAbbrev::Global(global));
+                        kind: GlobalKind::Init(init),
+                    });
                 }
             }
         }
