@@ -866,14 +866,14 @@ impl<'a> Parse<'a> for Module<'a> {
                 ModuleField::Export(export) => parser.ctx.exports.push(export),
                 ModuleField::Func(func) => funcs.push(func),
                 ModuleField::Elem(elem) => elems.push(elem),
-                ModuleField::Table(TableAbbrev::Table(table)) => tables.push(table),
-                ModuleField::Table(TableAbbrev::Elem(table, elem)) => {
+                ModuleField::Table(TableAbbrev::NoAbbrev(table)) => tables.push(table),
+                ModuleField::Table(TableAbbrev::WithElem(table, elem)) => {
                     tables.push(table);
                     elems.push(elem);
                 }
                 ModuleField::Data(d) => data.push(d),
-                ModuleField::Memory(MemoryAbbrev::Memory(m)) => memories.push(m),
-                ModuleField::Memory(MemoryAbbrev::Data(m, d)) => {
+                ModuleField::Memory(MemoryAbbrev::NoAbbrev(m)) => memories.push(m),
+                ModuleField::Memory(MemoryAbbrev::WithData(m, d)) => {
                     memories.push(m);
                     data.push(d);
                 }
@@ -2120,8 +2120,8 @@ impl<'a> Parse<'a> for Elem<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#text-table-abbrev
 #[cfg_attr(test, derive(Debug))]
 enum TableAbbrev<'a> {
-    Elem(Table<'a>, Elem<'a>),
-    Table(Table<'a>),
+    WithElem(Table<'a>, Elem<'a>),
+    NoAbbrev(Table<'a>),
 }
 
 impl<'a> Parse<'a> for TableAbbrev<'a> {
@@ -2145,7 +2145,7 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                             parser.closing_paren("import argument of table section")?;
                             let ty = parser.parse()?;
                             parser.closing_paren("table")?;
-                            return Ok(TableAbbrev::Table(Table {
+                            return Ok(TableAbbrev::NoAbbrev(Table {
                                 start,
                                 id,
                                 ty,
@@ -2208,13 +2208,13 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                         }],
                         init,
                     };
-                    return Ok(TableAbbrev::Elem(table, elem));
+                    return Ok(TableAbbrev::WithElem(table, elem));
                 }
                 _ => {
                     // tabletype
                     let ty = parser.parse()?;
                     parser.closing_paren("table")?;
-                    return Ok(TableAbbrev::Table(Table {
+                    return Ok(TableAbbrev::NoAbbrev(Table {
                         start,
                         id,
                         ty,
@@ -2281,8 +2281,8 @@ impl<'a> Parse<'a> for Data<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#memories
 #[cfg_attr(test, derive(Debug))]
 enum MemoryAbbrev<'a> {
-    Memory(Memory<'a>),
-    Data(Memory<'a>, Data<'a>),
+    NoAbbrev(Memory<'a>),
+    WithData(Memory<'a>, Data<'a>),
 }
 impl<'a> Parse<'a> for MemoryAbbrev<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
@@ -2305,7 +2305,7 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             parser.closing_paren("import argument of memory section")?;
                             let ty = parser.parse()?;
                             parser.closing_paren("memory")?;
-                            return Ok(MemoryAbbrev::Memory(Memory {
+                            return Ok(MemoryAbbrev::NoAbbrev(Memory {
                                 start,
                                 id,
                                 ty,
@@ -2356,7 +2356,7 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             // Infer memory limits from page size (64 * 1024 = 65536)
                             let n = (data.len() as f64 / 65536.0).ceil() as u32;
 
-                            return Ok(MemoryAbbrev::Data(
+                            return Ok(MemoryAbbrev::WithData(
                                 Memory {
                                     start,
                                     id,
@@ -2383,7 +2383,7 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                     // memtype
                     let ty = parser.parse()?;
                     parser.closing_paren("memory")?;
-                    return Ok(MemoryAbbrev::Memory(Memory {
+                    return Ok(MemoryAbbrev::NoAbbrev(Memory {
                         start,
                         id,
                         ty,
@@ -4363,7 +4363,7 @@ mod tests {
         assert_parse!(
             r#"(table 0 0 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev::Table(Table {
+            TableAbbrev::NoAbbrev(Table {
                 id: None,
                 import: None,
                 ..
@@ -4372,7 +4372,7 @@ mod tests {
         assert_parse!(
             r#"(table $tbl 0 0 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev::Table(Table {
+            TableAbbrev::NoAbbrev(Table {
                 id: Some("$tbl"),
                 import: None,
                 ..
@@ -4381,7 +4381,7 @@ mod tests {
         assert_parse!(
             r#"(table $tbl funcref (elem 0 1))"#,
             TableAbbrev<'_>,
-            TableAbbrev::Elem(
+            TableAbbrev::WithElem(
                 Table{
                     id: Some("$tbl"),
                     ty: TableType{ limit: Limits::Range{ min: 2, max: 2 } },
@@ -4396,7 +4396,7 @@ mod tests {
         assert_parse!(
             r#"(table $tbl (import "m" "n") 2 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev::Table(Table {
+            TableAbbrev::NoAbbrev(Table {
                 id: Some("$tbl"),
                 ty: TableType {
                     limit: Limits::Range{ min: 2, max: 2 },
@@ -4412,7 +4412,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(table $tbl (export "n") 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev::Table(Table {
+            TableAbbrev::NoAbbrev(Table {
                 id: Some("$tbl"),
                 ty:
                     TableType {
@@ -4434,7 +4434,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(table $tbl (export "n1") (export "n2") 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev::Table(Table {
+            TableAbbrev::NoAbbrev(Table {
                 id: Some("$tbl"),
                 ty:
                     TableType {
@@ -4448,7 +4448,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(table $tbl (export "n1") (import "m" "n2") 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev::Table(Table {
+            TableAbbrev::NoAbbrev(Table {
                 id: Some("$tbl"),
                 ty: TableType {
                     limit: Limits::From{ min: 2 },
@@ -4474,7 +4474,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(table $tbl (export "n1") (export "n2") (import "m" "n3") 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev::Table(Table {
+            TableAbbrev::NoAbbrev(Table {
                 import: Some(_), ..
             })
         );
@@ -4482,7 +4482,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(table $tbl (export "n1") funcref (elem 1 2 3))"#,
             TableAbbrev<'_>,
-            TableAbbrev::Elem(..)
+            TableAbbrev::WithElem(..)
         );
         assert_eq!(parser.ctx.exports.len(), 1);
 
@@ -4564,7 +4564,7 @@ mod tests {
         assert_parse!(
             r#"(memory 3)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Memory(Memory {
+            MemoryAbbrev::NoAbbrev(Memory {
                 id: None,
                 ty: MemType {
                     limit: Limits::From { min: 3 },
@@ -4576,7 +4576,7 @@ mod tests {
         assert_parse!(
             r#"(memory 1 3)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Memory(Memory {
+            MemoryAbbrev::NoAbbrev(Memory {
                 id: None,
                 ty:
                     MemType {
@@ -4589,7 +4589,7 @@ mod tests {
         assert_parse!(
             r#"(memory $m 1 3)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Memory(Memory {
+            MemoryAbbrev::NoAbbrev(Memory {
                 id: Some("$m"),
                 ty:
                     MemType {
@@ -4602,7 +4602,7 @@ mod tests {
         assert_parse!(
             r#"(memory $m (data "foo" "bar"))"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Data(
+            MemoryAbbrev::WithData(
                 Memory{
                     ty: MemType{ limit: Limits::Range{ min: 1, max: 1 } },
                     import: None,
@@ -4621,7 +4621,7 @@ mod tests {
         assert_parse!(
             r#"(memory $m (import "m" "n") 2)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Memory(Memory {
+            MemoryAbbrev::NoAbbrev(Memory {
                 id: Some("$m"),
                 ty: MemType {
                     limit: Limits::From{ min: 2 },
@@ -4637,7 +4637,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(memory $m (export "n") 0)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Memory(Memory {
+            MemoryAbbrev::NoAbbrev(Memory {
                 ty: MemType {
                     limit: Limits::From { min: 0 },
                 },
@@ -4657,7 +4657,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(memory $m (export "n") (export "n2") 0)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Memory(Memory {
+            MemoryAbbrev::NoAbbrev(Memory {
                 ty: MemType {
                     limit: Limits::From { min: 0 },
                 },
@@ -4670,7 +4670,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(memory $m (export "e") (import "m" "n") 2)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Memory(Memory {
+            MemoryAbbrev::NoAbbrev(Memory {
                 id: Some("$m"),
                 ty: MemType {
                     limit: Limits::From{ min: 2 },
@@ -4695,7 +4695,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(memory $m (export "e1") (export "e2") (import "m" "n") 2)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Memory(Memory {
+            MemoryAbbrev::NoAbbrev(Memory {
                 import: Some(_), ..
             })
         );
@@ -4703,7 +4703,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(memory $m (export "e") (data "hello"))"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Data(..)
+            MemoryAbbrev::WithData(..)
         );
         assert_eq!(parser.ctx.exports.len(), 1);
 
