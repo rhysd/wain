@@ -24,7 +24,6 @@ pub struct Module<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
     pub types: Vec<TypeDef<'a>>,
-    pub imports: Vec<Import<'a>>,
     pub exports: Vec<Export<'a>>,
     pub funcs: Vec<Func<'a>>,
     pub elems: Vec<Elem<'a>>,
@@ -80,11 +79,9 @@ pub enum ValType {
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-import
 #[cfg_attr(test, derive(Debug))]
-pub struct Import<'a> {
-    pub start: usize,
+pub struct Import {
     pub mod_name: Name,
     pub name: Name,
-    pub desc: ImportDesc<'a>,
 }
 
 // https://webassembly.github.io/spec/core/text/values.html#text-name
@@ -95,31 +92,6 @@ pub struct Import<'a> {
 // part of source is enough.
 #[cfg_attr(test, derive(Debug))]
 pub struct Name(pub String);
-
-// https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
-#[cfg_attr(test, derive(Debug))]
-pub enum ImportDesc<'a> {
-    Func {
-        start: usize,
-        id: Option<&'a str>,
-        ty: TypeUse<'a>,
-    },
-    Table {
-        start: usize,
-        id: Option<&'a str>,
-        ty: TableType,
-    },
-    Memory {
-        start: usize,
-        id: Option<&'a str>,
-        ty: MemType,
-    },
-    Global {
-        start: usize,
-        id: Option<&'a str>,
-        ty: GlobalType,
-    },
-}
 
 // https://webassembly.github.io/spec/core/text/modules.html#type-uses
 #[cfg_attr(test, derive(Debug))]
@@ -192,12 +164,19 @@ pub enum ExportKind {
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-func
 #[cfg_attr(test, derive(Debug))]
+pub enum FuncKind<'a> {
+    Import(Import),
+    Body {
+        locals: Vec<Local<'a>>,
+        body: Vec<Instruction<'a>>,
+    },
+}
+#[cfg_attr(test, derive(Debug))]
 pub struct Func<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
     pub ty: TypeUse<'a>,
-    pub locals: Vec<Local<'a>>,
-    pub body: Vec<Instruction<'a>>,
+    pub kind: FuncKind<'a>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-local
@@ -461,6 +440,7 @@ pub struct Table<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
     pub ty: TableType,
+    pub import: Option<Import>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-data
@@ -478,15 +458,21 @@ pub struct Memory<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
     pub ty: MemType,
+    pub import: Option<Import>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#globals
+#[cfg_attr(test, derive(Debug))]
+pub enum GlobalKind<'a> {
+    Import(Import),
+    Init(Vec<Instruction<'a>>),
+}
 #[cfg_attr(test, derive(Debug))]
 pub struct Global<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
     pub ty: GlobalType,
-    pub init: Vec<Instruction<'a>>,
+    pub kind: GlobalKind<'a>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-start
