@@ -314,6 +314,7 @@ struct ParseContext<'a> {
     // types are put in Parser context due to abbreviation of typeuse
     // https://webassembly.github.io/spec/core/text/modules.html#abbreviations
     types: Vec<TypeDef<'a>>,
+    exports: Vec<Export<'a>>,
     // Indices for each spaces.
     // https://webassembly.github.io/spec/core/syntax/modules.html#syntax-index
     type_indices: Indices<'a>,
@@ -329,6 +330,7 @@ impl<'a> ParseContext<'a> {
     fn new(source: &'a str) -> Self {
         ParseContext {
             types: vec![],
+            exports: vec![],
             type_indices: Indices::new(source, "type", "module"),
             func_indices: Indices::new(source, "func", "module"),
             table_indices: Indices::new(source, "table", "module"),
@@ -341,6 +343,7 @@ impl<'a> ParseContext<'a> {
 
     fn clear(&mut self) {
         self.types.clear();
+        self.exports.clear();
         self.type_indices.clear();
         self.func_indices.clear();
         self.table_indices.clear();
@@ -847,7 +850,6 @@ impl<'a> Parse<'a> for Module<'a> {
         let id = parser.maybe_ident("identifier for module")?;
 
         let mut imports = vec![];
-        let mut exports = vec![];
         let mut funcs = vec![];
         let mut elems = vec![];
         let mut tables = vec![];
@@ -859,60 +861,35 @@ impl<'a> Parse<'a> for Module<'a> {
         // Note: types are put in Parser struct field due to abbreviation of typeuse
         // https://webassembly.github.io/spec/core/text/modules.html#abbreviations
         parser.ctx.types.clear();
+        parser.ctx.exports.clear();
 
         while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
             match parser.parse()? {
                 ModuleField::Type(ty) => parser.ctx.types.push(ty),
                 ModuleField::Import(import) => imports.push(import),
-                ModuleField::Export(export) => exports.push(export),
+                ModuleField::Export(export) => parser.ctx.exports.push(export),
                 ModuleField::Func(FuncAbbrev::Import(import)) => imports.push(import),
                 ModuleField::Func(FuncAbbrev::Export(export, func)) => {
-                    exports.push(export);
+                    parser.ctx.exports.push(export);
                     funcs.push(func);
                 }
                 ModuleField::Func(FuncAbbrev::NoAbbrev(func)) => funcs.push(func),
                 ModuleField::Elem(elem) => elems.push(elem),
-                ModuleField::Table(TableAbbrev {
-                    exports: mut abbrev_exports,
-                    end,
-                }) => {
-                    exports.append(&mut abbrev_exports);
-                    match end {
-                        TableAbbrevEnd::Table(table) => {
-                            tables.push(table);
-                        }
-                        TableAbbrevEnd::Elem(table, elem) => {
-                            tables.push(table);
-                            elems.push(elem);
-                        }
-                        TableAbbrevEnd::Import(import) => {
-                            imports.push(import);
-                        }
-                    }
+                ModuleField::Table(TableAbbrev::Table(table)) => tables.push(table),
+                ModuleField::Table(TableAbbrev::Elem(table, elem)) => {
+                    tables.push(table);
+                    elems.push(elem);
                 }
+                ModuleField::Table(TableAbbrev::Import(import)) => imports.push(import),
                 ModuleField::Data(d) => data.push(d),
-                ModuleField::Memory(MemoryAbbrev {
-                    exports: mut abbrev_exports,
-                    end,
-                }) => {
-                    exports.append(&mut abbrev_exports);
-                    match end {
-                        MemoryAbbrevEnd::Memory(m) => memories.push(m),
-                        MemoryAbbrevEnd::Data(m, d) => {
-                            memories.push(m);
-                            data.push(d);
-                        }
-                        MemoryAbbrevEnd::Import(i) => imports.push(i),
-                    }
+                ModuleField::Memory(MemoryAbbrev::Memory(m)) => memories.push(m),
+                ModuleField::Memory(MemoryAbbrev::Data(m, d)) => {
+                    memories.push(m);
+                    data.push(d);
                 }
-                ModuleField::Global(GlobalAbbrev::Import(mut abbrev_exports, import)) => {
-                    exports.append(&mut abbrev_exports);
-                    imports.push(import);
-                }
-                ModuleField::Global(GlobalAbbrev::Global(mut abbrev_exports, global)) => {
-                    exports.append(&mut abbrev_exports);
-                    globals.push(global);
-                }
+                ModuleField::Memory(MemoryAbbrev::Import(i)) => imports.push(i),
+                ModuleField::Global(GlobalAbbrev::Import(import)) => imports.push(import),
+                ModuleField::Global(GlobalAbbrev::Global(global)) => globals.push(global),
                 ModuleField::Start(start) => {
                     if let Some(prev) = entrypoint {
                         let offset = start.start;
@@ -931,7 +908,7 @@ impl<'a> Parse<'a> for Module<'a> {
             id,
             types: mem::replace(&mut parser.ctx.types, vec![]),
             imports,
-            exports,
+            exports: mem::replace(&mut parser.ctx.exports, vec![]),
             funcs,
             elems,
             tables,
@@ -1223,7 +1200,7 @@ impl<'a> Parse<'a> for TypeUse<'a> {
                         .map(|t| t.ty)
                         .eq(results.iter().map(|t| t.ty))
                 {
-                    // Index of parser.types is available as typeidx here because all types are defined
+                    // Index of parser.ctx.types is available as typeidx here because all types are defined
                     // with (type ...) syntax unlike memory, globals, tables and funcs.
                     Some(i as u32)
                 } else {
@@ -2142,12 +2119,7 @@ impl<'a> Parse<'a> for Elem<'a> {
 // Helper struct to resolve import/export/elem abbreviation in 'table' section
 // https://webassembly.github.io/spec/core/text/modules.html#text-table-abbrev
 #[cfg_attr(test, derive(Debug))]
-struct TableAbbrev<'a> {
-    exports: Vec<Export<'a>>,
-    end: TableAbbrevEnd<'a>,
-}
-#[cfg_attr(test, derive(Debug))]
-enum TableAbbrevEnd<'a> {
+enum TableAbbrev<'a> {
     Elem(Table<'a>, Elem<'a>),
     Table(Table<'a>),
     Import(Import<'a>),
@@ -2160,7 +2132,6 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
 
         let mut id = parser.maybe_ident("identifier for table section")?;
 
-        let mut exports = vec![];
         loop {
             match parser.peek("argument of table section")?.0 {
                 Token::LParen => {
@@ -2175,15 +2146,12 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                             parser.closing_paren("import argument of table section")?;
                             let ty = parser.parse()?;
                             parser.closing_paren("table")?;
-                            return Ok(TableAbbrev {
-                                exports,
-                                end: TableAbbrevEnd::Import(Import {
-                                    start,
-                                    mod_name,
-                                    name,
-                                    desc: ImportDesc::Table { start, id, ty },
-                                }),
-                            });
+                            return Ok(TableAbbrev::Import(Import {
+                                start,
+                                mod_name,
+                                name,
+                                desc: ImportDesc::Table { start, id, ty },
+                            }));
                         }
                         "export" => {
                             // (table {id}? (export {name}) ...) ==
@@ -2193,7 +2161,7 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                             parser.closing_paren("export argument in table section")?;
                             let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
                             id = Some(id_dash);
-                            exports.push(Export {
+                            parser.ctx.exports.push(Export {
                                 start,
                                 name,
                                 kind: ExportKind::Table,
@@ -2243,19 +2211,13 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                         }],
                         init,
                     };
-                    return Ok(TableAbbrev {
-                        exports,
-                        end: TableAbbrevEnd::Elem(table, elem),
-                    });
+                    return Ok(TableAbbrev::Elem(table, elem));
                 }
                 _ => {
                     // tabletype
                     let ty = parser.parse()?;
                     parser.closing_paren("table")?;
-                    return Ok(TableAbbrev {
-                        exports,
-                        end: TableAbbrevEnd::Table(Table { start, id, ty }),
-                    });
+                    return Ok(TableAbbrev::Table(Table { start, id, ty }));
                 }
             }
         }
@@ -2316,12 +2278,7 @@ impl<'a> Parse<'a> for Data<'a> {
 // Helper struct to resolve import/export/data abbreviation in memory section
 // https://webassembly.github.io/spec/core/text/modules.html#memories
 #[cfg_attr(test, derive(Debug))]
-struct MemoryAbbrev<'a> {
-    exports: Vec<Export<'a>>,
-    end: MemoryAbbrevEnd<'a>,
-}
-#[cfg_attr(test, derive(Debug))]
-enum MemoryAbbrevEnd<'a> {
+enum MemoryAbbrev<'a> {
     Import(Import<'a>),
     Memory(Memory<'a>),
     Data(Memory<'a>, Data<'a>),
@@ -2333,7 +2290,6 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
 
         let mut id = parser.maybe_ident("identifier for memory section")?;
 
-        let mut exports = vec![];
         loop {
             match parser.peek("argument of memory section")?.0 {
                 Token::LParen => {
@@ -2348,15 +2304,12 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             parser.closing_paren("import argument of memory section")?;
                             let ty = parser.parse()?;
                             parser.closing_paren("memory")?;
-                            return Ok(MemoryAbbrev {
-                                exports,
-                                end: MemoryAbbrevEnd::Import(Import {
-                                    start,
-                                    mod_name,
-                                    name,
-                                    desc: ImportDesc::Memory { start, id, ty },
-                                }),
-                            });
+                            return Ok(MemoryAbbrev::Import(Import {
+                                start,
+                                mod_name,
+                                name,
+                                desc: ImportDesc::Memory { start, id, ty },
+                            }));
                         }
                         "export" => {
                             // (memory {id}? (export {name}) ...) ==
@@ -2366,7 +2319,7 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             parser.closing_paren("export argument in memory section")?;
                             let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
                             id = Some(id_dash);
-                            exports.push(Export {
+                            parser.ctx.exports.push(Export {
                                 start,
                                 name,
                                 kind: ExportKind::Memory,
@@ -2402,30 +2355,28 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             parser.closing_paren("memory")?;
 
                             let id = id.unwrap_or_else(|| parser.fresh_id()); // id'
-                                                                              // Infer memory limits from page size (64 * 1024 = 65536)
+
+                            // Infer memory limits from page size (64 * 1024 = 65536)
                             let n = (data.len() as f64 / 65536.0).ceil() as u32;
 
-                            return Ok(MemoryAbbrev {
-                                exports,
-                                end: MemoryAbbrevEnd::Data(
-                                    Memory {
-                                        start,
-                                        id: Some(id),
-                                        ty: MemType {
-                                            limit: Limits::Range { min: n, max: n },
-                                        },
+                            return Ok(MemoryAbbrev::Data(
+                                Memory {
+                                    start,
+                                    id: Some(id),
+                                    ty: MemType {
+                                        limit: Limits::Range { min: n, max: n },
                                     },
-                                    Data {
+                                },
+                                Data {
+                                    start,
+                                    idx: Index::Ident(id),
+                                    offset: vec![Instruction {
                                         start,
-                                        idx: Index::Ident(id),
-                                        offset: vec![Instruction {
-                                            start,
-                                            kind: InsnKind::I32Const(0),
-                                        }],
-                                        data: Cow::Owned(data),
-                                    },
-                                ),
-                            });
+                                        kind: InsnKind::I32Const(0),
+                                    }],
+                                    data: Cow::Owned(data),
+                                },
+                            ));
                         }
                         kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
                     }
@@ -2434,10 +2385,7 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                     // memtype
                     let ty = parser.parse()?;
                     parser.closing_paren("memory")?;
-                    return Ok(MemoryAbbrev {
-                        exports,
-                        end: MemoryAbbrevEnd::Memory(Memory { start, id, ty }),
-                    });
+                    return Ok(MemoryAbbrev::Memory(Memory { start, id, ty }));
                 }
             }
         }
@@ -2448,8 +2396,8 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#globals
 #[cfg_attr(test, derive(Debug))]
 enum GlobalAbbrev<'a> {
-    Import(Vec<Export<'a>>, Import<'a>),
-    Global(Vec<Export<'a>>, Global<'a>),
+    Import(Import<'a>),
+    Global(Global<'a>),
 }
 
 impl<'a> Parse<'a> for GlobalAbbrev<'a> {
@@ -2459,7 +2407,6 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
 
         let mut id = parser.maybe_ident("identifier for global section")?;
 
-        let mut exports = vec![];
         loop {
             match parser.peek("argument of global section")?.0 {
                 Token::LParen => {
@@ -2480,7 +2427,7 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
                                 name,
                                 desc: ImportDesc::Global { start, id, ty },
                             };
-                            return Ok(GlobalAbbrev::Import(exports, import));
+                            return Ok(GlobalAbbrev::Import(import));
                         }
                         "export" => {
                             // (global {id}? (export {name}) ...) ==
@@ -2490,7 +2437,7 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
                             parser.closing_paren("export argument in global section")?;
                             let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
                             id = Some(id_dash);
-                            exports.push(Export {
+                            parser.ctx.exports.push(Export {
                                 start,
                                 name,
                                 kind: ExportKind::Global,
@@ -2510,7 +2457,7 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
                                 ty,
                                 init,
                             };
-                            return Ok(GlobalAbbrev::Global(exports, global));
+                            return Ok(GlobalAbbrev::Global(global));
                         }
                         kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
                     }
@@ -2527,7 +2474,7 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
                         ty,
                         init,
                     };
-                    return Ok(GlobalAbbrev::Global(exports, global));
+                    return Ok(GlobalAbbrev::Global(global));
                 }
             }
         }
@@ -2608,7 +2555,7 @@ mod tests {
     }
 
     macro_rules! assert_parse {
-        ($parser:ident => $parser_init:expr, $input:expr, $node:ty, $expect:pat if $cond:expr) => {
+        ($parser:ident => $parser_init:expr, $input:expr, $node:ty, $expect:pat if $cond:expr) => {{
             let input = $input;
             let mut $parser = Parser::new(input);
             $parser_init;
@@ -2625,7 +2572,8 @@ mod tests {
                 ),
             }
             assert!($parser.is_done(), "{:?}", $parser.tokens.collect::<Vec<_>>());
-        };
+            $parser
+        }};
         ($parser:ident => $parser_init:expr, $input:expr, $node:ty, $expect:pat) => {
             assert_parse!($parser => $parser_init, $input, $node, $expect if true);
         };
@@ -4348,137 +4296,117 @@ mod tests {
         assert_parse!(
             r#"(table 0 0 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev{
-                exports,
-                end: TableAbbrevEnd::Table(Table{ id: None, .. })
-            } if exports.is_empty()
+            TableAbbrev::Table(Table { id: None, .. })
         );
         assert_parse!(
             r#"(table $tbl 0 0 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev{
-                exports,
-                end: TableAbbrevEnd::Table(Table{ id: Some("$tbl"), .. })
-            } if exports.is_empty()
+            TableAbbrev::Table(Table {
+                id: Some("$tbl"), ..
+            })
         );
         assert_parse!(
             r#"(table $tbl funcref (elem 0 1))"#,
             TableAbbrev<'_>,
-            TableAbbrev{
-                exports,
-                end: TableAbbrevEnd::Elem(
-                    Table{ id: Some("$tbl"), ty: TableType{ limit: Limits::Range{ min: 2, max: 2 } }, .. },
-                    Elem{ idx: Index::Ident("$tbl"), offset, init, .. }
-                )
-            } if exports.is_empty() && is_match!(offset[0].kind, InsnKind::I32Const(0)) &&
-                 is_match!(init[0], Index::Num(0)) && is_match!(init[1], Index::Num(1))
+            TableAbbrev::Elem(
+                Table{ id: Some("$tbl"), ty: TableType{ limit: Limits::Range{ min: 2, max: 2 } }, .. },
+                Elem{ idx: Index::Ident("$tbl"), offset, init, .. }
+            )
+            if is_match!(offset[0].kind, InsnKind::I32Const(0)) &&
+               is_match!(init[0], Index::Num(0)) && is_match!(init[1], Index::Num(1))
         );
         assert_parse!(
             r#"(table $tbl (import "m" "n") 2 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev{
-                exports,
-                end: TableAbbrevEnd::Import(
-                    Import {
-                        mod_name: Name(m),
-                        name: Name(n),
-                        desc: ImportDesc::Table {
-                            id: Some("$tbl"),
-                            ty: TableType {
-                                limit: Limits::Range{ min: 2, max: 2 },
-                            },
-                            ..
+            TableAbbrev::Import(
+                Import {
+                    mod_name: Name(m),
+                    name: Name(n),
+                    desc: ImportDesc::Table {
+                        id: Some("$tbl"),
+                        ty: TableType {
+                            limit: Limits::Range{ min: 2, max: 2 },
                         },
                         ..
-                    }
-                )
-            } if exports.is_empty() && m == "m" && n == "n"
+                    },
+                    ..
+                }
+            )
+            if m == "m" && n == "n"
         );
-        assert_parse!(
+        let parser = assert_parse!(
             r#"(table $tbl (export "n") 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev{
-                exports,
-                end: TableAbbrevEnd::Table(
-                    Table {
-                        id: Some("$tbl"),
-                        ty: TableType {
-                            limit: Limits::From{ min: 2 }
-                        },
-                        ..
-                    }
-                )
-            } if is_match!(
-                &exports[0],
-                Export {
-                    name: Name(n),
-                    kind: ExportKind::Table,
-                    idx: Index::Ident("$tbl"),
-                    ..
-                } if n == "n"
-            )
+            TableAbbrev::Table(Table {
+                id: Some("$tbl"),
+                ty:
+                    TableType {
+                        limit: Limits::From { min: 2 },
+                    },
+                ..
+            })
         );
-        assert_parse!(
+        match &parser.ctx.exports[0] {
+            Export {
+                name: Name(n),
+                kind: ExportKind::Table,
+                idx: Index::Ident("$tbl"),
+                ..
+            } if n == "n" => { /* OK */ }
+            e => panic!("did not match: {:?}", e),
+        }
+        let parser = assert_parse!(
             r#"(table $tbl (export "n1") (export "n2") 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev{
-                exports,
-                end: TableAbbrevEnd::Table(
-                    Table {
-                        id: Some("$tbl"),
-                        ty: TableType {
-                            limit: Limits::From{ min: 2 }
-                        },
-                        ..
-                    }
-                )
-            } if exports.len() == 2
+            TableAbbrev::Table(Table {
+                id: Some("$tbl"),
+                ty:
+                    TableType {
+                        limit: Limits::From { min: 2 },
+                    },
+                ..
+            })
         );
-        assert_parse!(
+        assert_eq!(parser.ctx.exports.len(), 2);
+        let parser = assert_parse!(
             r#"(table $tbl (export "n1") (import "m" "n2") 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev{
-                exports,
-                end: TableAbbrevEnd::Import(
-                    Import {
-                        mod_name: Name(m),
-                        name: Name(n),
-                        desc: ImportDesc::Table {
-                            id: Some("$tbl"),
-                            ty: TableType {
-                                limit: Limits::From{ min: 2 },
-                            },
-                            ..
-                        },
-                        ..
-                    }
-                )
-            } if m == "m" && n == "n2" &&
-                 is_match!(exports.as_slice(), [
-                     Export {
-                         name: Name(n),
-                         kind: ExportKind::Table,
-                         idx: Index::Ident("$tbl"),
-                         ..
-                     }
-                 ] if n == "n1")
+            TableAbbrev::Import(Import {
+                mod_name: Name(m),
+                name: Name(n),
+                desc: ImportDesc::Table {
+                    id: Some("$tbl"),
+                    ty: TableType {
+                        limit: Limits::From{ min: 2 },
+                    },
+                    ..
+                },
+                ..
+            })
+            if m == "m" && n == "n2"
         );
-        assert_parse!(
+        assert_eq!(parser.ctx.exports.len(), 1);
+        match &parser.ctx.exports[0] {
+            Export {
+                name: Name(n),
+                kind: ExportKind::Table,
+                idx: Index::Ident("$tbl"),
+                ..
+            } if n == "n1" => { /* OK */ }
+            e => panic!("did not match: {:?}", e),
+        }
+        let parser = assert_parse!(
             r#"(table $tbl (export "n1") (export "n2") (import "m" "n3") 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev{
-                exports,
-                end: TableAbbrevEnd::Import(..)
-            } if exports.len() == 2
+            TableAbbrev::Import(..)
         );
-        assert_parse!(
+        assert_eq!(parser.ctx.exports.len(), 2);
+        let parser = assert_parse!(
             r#"(table $tbl (export "n1") funcref (elem 1 2 3))"#,
             TableAbbrev<'_>,
-            TableAbbrev{
-                exports,
-                end: TableAbbrevEnd::Elem(..)
-            } if exports.len() == 1
+            TableAbbrev::Elem(..)
         );
+        assert_eq!(parser.ctx.exports.len(), 1);
 
         assert_error!(
             r#"(table $t (import "m" "n") (export "n2") 2 funcref)"#,
@@ -4558,172 +4486,142 @@ mod tests {
         assert_parse!(
             r#"(memory 3)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev{
-                exports,
-                end: MemoryAbbrevEnd::Memory(
-                    Memory{
-                        id: None,
-                        ty: MemType{ limit: Limits::From{ min: 3 } },
-                        ..
-                    }
-                ),
+            MemoryAbbrev::Memory(Memory {
+                id: None,
+                ty: MemType {
+                    limit: Limits::From { min: 3 },
+                },
                 ..
-            } if exports.is_empty()
+            })
         );
         assert_parse!(
             r#"(memory 1 3)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev{
-                exports,
-                end: MemoryAbbrevEnd::Memory(
-                    Memory{
-                        id: None,
-                        ty: MemType{ limit: Limits::Range{ min: 1, max: 3 } },
-                        ..
-                    }
-                ),
+            MemoryAbbrev::Memory(Memory {
+                id: None,
+                ty:
+                    MemType {
+                        limit: Limits::Range { min: 1, max: 3 },
+                    },
                 ..
-            } if exports.is_empty()
+            })
         );
         assert_parse!(
             r#"(memory $m 1 3)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev{
-                exports,
-                end: MemoryAbbrevEnd::Memory(
-                    Memory{
-                        id: Some("$m"),
-                        ty: MemType{ limit: Limits::Range{ min: 1, max: 3 } },
-                        ..
-                    }
-                ),
+            MemoryAbbrev::Memory(Memory {
+                id: Some("$m"),
+                ty:
+                    MemType {
+                        limit: Limits::Range { min: 1, max: 3 },
+                    },
                 ..
-            } if exports.is_empty()
+            })
         );
         assert_parse!(
             r#"(memory $m (data "foo" "bar"))"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev{
-                exports,
-                end: MemoryAbbrevEnd::Data(
-                    Memory{
-                        ty: MemType{ limit: Limits::Range{ min: 1, max: 1 } },
-                        ..
-                    },
-                    Data {
-                        idx: Index::Ident("$m"),
-                        offset,
-                        data,
-                        ..
-                    },
-                ),
-                ..
-            } if exports.is_empty() &&
-                 is_match!(offset[0].kind, InsnKind::I32Const(0)) &&
-                 data.as_ref() == b"foobar".as_ref()
+            MemoryAbbrev::Data(
+                Memory{
+                    ty: MemType{ limit: Limits::Range{ min: 1, max: 1 } },
+                    ..
+                },
+                Data {
+                    idx: Index::Ident("$m"),
+                    offset,
+                    data,
+                    ..
+                },
+            )
+            if is_match!(offset[0].kind, InsnKind::I32Const(0)) &&
+               data.as_ref() == b"foobar".as_ref()
         );
         assert_parse!(
             r#"(memory $m (import "m" "n") 2)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev{
-                exports,
-                end: MemoryAbbrevEnd::Import(
-                    Import {
-                        mod_name: Name(m),
-                        name: Name(n),
-                        desc: ImportDesc::Memory {
-                            id: Some("$m"),
-                            ty: MemType {
-                                limit: Limits::From{ min: 2 },
-                            },
-                            ..
-                        },
-                        ..
-                    }
-                )
-            } if exports.is_empty() && m == "m" && n == "n"
+            MemoryAbbrev::Import(Import {
+                mod_name: Name(m),
+                name: Name(n),
+                desc: ImportDesc::Memory {
+                    id: Some("$m"),
+                    ty: MemType {
+                        limit: Limits::From{ min: 2 },
+                    },
+                    ..
+                },
+                ..
+            })
+            if m == "m" && n == "n"
         );
-        assert_parse!(
+        let parser = assert_parse!(
             r#"(memory $m (export "n") 0)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev{
-                exports,
-                end: MemoryAbbrevEnd::Memory(
-                    Memory{
-                        ty: MemType{ limit: Limits::From{ min: 0 } },
-                        ..
-                    },
-                ),
+            MemoryAbbrev::Memory(Memory {
+                ty: MemType {
+                    limit: Limits::From { min: 0 },
+                },
                 ..
-            } if is_match!(
-                &exports[0],
-                Export {
-                    name: Name(n),
-                    kind: ExportKind::Memory,
-                    idx: Index::Ident("$m"),
-                    ..
-                } if n == "n"
-            )
+            })
         );
-        assert_parse!(
+        match &parser.ctx.exports[0] {
+            Export {
+                name: Name(n),
+                kind: ExportKind::Memory,
+                idx: Index::Ident("$m"),
+                ..
+            } if n == "n" => { /* OK */ }
+            e => panic!("did not match: {:?}", e),
+        }
+        let parser = assert_parse!(
             r#"(memory $m (export "n") (export "n2") 0)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev{
-                exports,
-                end: MemoryAbbrevEnd::Memory(
-                    Memory{
-                        ty: MemType{ limit: Limits::From{ min: 0 } },
-                        ..
-                    },
-                ),
+            MemoryAbbrev::Memory(Memory {
+                ty: MemType {
+                    limit: Limits::From { min: 0 },
+                },
                 ..
-            } if exports[0].name.0 == "n" && exports[1].name.0 == "n2"
+            })
         );
-        assert_parse!(
+        assert_eq!(parser.ctx.exports[0].name.0, "n");
+        assert_eq!(parser.ctx.exports[1].name.0, "n2");
+        let parser = assert_parse!(
             r#"(memory $m (export "e") (import "m" "n") 2)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev{
-                exports,
-                end: MemoryAbbrevEnd::Import(
-                    Import {
-                        mod_name: Name(m),
-                        name: Name(n),
-                        desc: ImportDesc::Memory {
-                            id: Some("$m"),
-                            ty: MemType {
-                                limit: Limits::From{ min: 2 },
-                            },
-                            ..
-                        },
-                        ..
-                    }
-                )
-            } if m == "m" && n == "n" && is_match!(
-                &exports[0],
-                Export {
-                    name: Name(n),
-                    kind: ExportKind::Memory,
-                    idx: Index::Ident("$m"),
+            MemoryAbbrev::Import(Import {
+                mod_name: Name(m),
+                name: Name(n),
+                desc: ImportDesc::Memory {
+                    id: Some("$m"),
+                    ty: MemType {
+                        limit: Limits::From{ min: 2 },
+                    },
                     ..
-                } if n == "e"
-            )
+                },
+                ..
+            })
+            if m == "m" && n == "n"
         );
-        assert_parse!(
+        match &parser.ctx.exports[0] {
+            Export {
+                name: Name(n),
+                kind: ExportKind::Memory,
+                idx: Index::Ident("$m"),
+                ..
+            } if n == "e" => { /* OK */ }
+            e => panic!("did not match: {:?}", e),
+        }
+        let parser = assert_parse!(
             r#"(memory $m (export "e1") (export "e2") (import "m" "n") 2)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev{
-                exports,
-                end: MemoryAbbrevEnd::Import(_)
-            } if exports.len() == 2
+            MemoryAbbrev::Import(_)
         );
-        assert_parse!(
+        assert_eq!(parser.ctx.exports.len(), 2);
+        let parser = assert_parse!(
             r#"(memory $m (export "e") (data "hello"))"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev{
-                exports,
-                end: MemoryAbbrevEnd::Data(..)
-            } if exports.len() == 1
+            MemoryAbbrev::Data(..)
         );
+        assert_eq!(parser.ctx.exports.len(), 1);
 
         assert_error!(
             r#"(memory $m (import "m" "n") (export "n2") 0)"#,
@@ -4742,85 +4640,73 @@ mod tests {
         assert_parse!(
             r#"(global i32)"#,
             GlobalAbbrev<'_>,
-            GlobalAbbrev::Global(
-                exports,
-                Global {
-                    id: None,
-                    ty: GlobalType {
-                        mutable: false,
-                        ty: ValType::I32,
-                    },
-                    init,
-                    ..
+            GlobalAbbrev::Global(Global {
+                id: None,
+                ty: GlobalType {
+                    mutable: false,
+                    ty: ValType::I32,
                 },
-            ) if exports.is_empty() && init.is_empty()
+                init,
+                ..
+            }) if init.is_empty()
         );
         assert_parse!(
             r#"(global $g i32)"#,
             GlobalAbbrev<'_>,
-            GlobalAbbrev::Global(
-                exports,
-                Global {
-                    id: Some("$g"),
-                    ty: GlobalType {
-                        mutable: false,
-                        ty: ValType::I32,
-                    },
-                    init,
-                    ..
+            GlobalAbbrev::Global(Global {
+                id: Some("$g"),
+                ty: GlobalType {
+                    mutable: false,
+                    ty: ValType::I32,
                 },
-            ) if exports.is_empty() && init.is_empty()
+                init,
+                ..
+            }) if init.is_empty()
         );
         assert_parse!(
             r#"(global (mut i32))"#,
             GlobalAbbrev<'_>,
-            GlobalAbbrev::Global(
-                exports,
-                Global {
-                    ty: GlobalType {
-                        mutable: true,
-                        ty: ValType::I32,
-                    },
-                    init,
-                    ..
+            GlobalAbbrev::Global(Global {
+                ty: GlobalType {
+                    mutable: true,
+                    ty: ValType::I32,
                 },
-            ) if exports.is_empty() && init.is_empty()
+                init,
+                ..
+            }) if init.is_empty()
         );
-        assert_parse!(
+        let parser = assert_parse!(
             r#"(global $g (export "n") i32)"#,
             GlobalAbbrev<'_>,
-            GlobalAbbrev::Global(
-                exports,
-                Global {
-                    ty: GlobalType {
+            GlobalAbbrev::Global(Global {
+                ty:
+                    GlobalType {
                         mutable: false,
                         ty: ValType::I32,
                     },
-                    ..
-                },
-            ) if is_match!(
-                &exports[0],
-                Export {
-                    name: Name(n),
-                    kind: ExportKind::Global,
-                    idx: Index::Ident("$g"),
-                    ..
-                } if n == "n"
-            )
+                ..
+            })
         );
-        assert_parse!(
+        match &parser.ctx.exports[0] {
+            Export {
+                name: Name(n),
+                kind: ExportKind::Global,
+                idx: Index::Ident("$g"),
+                ..
+            } if n == "n" => { /* OK */ }
+            e => panic!("did not match: {:?}", e),
+        }
+        let parser = assert_parse!(
             r#"(global $g (export "n1") (export "n2") i32)"#,
             GlobalAbbrev<'_>,
-            GlobalAbbrev::Global(
-                exports,
-                Global { .. },
-            ) if exports[0].name.0 == "n1" && exports[1].name.0 == "n2"
+            GlobalAbbrev::Global(Global { .. })
         );
+        assert_eq!(parser.ctx.exports[0].name.0, "n1");
+        assert_eq!(parser.ctx.exports[1].name.0, "n2");
         assert_parse!(
             r#"(global $g (import "m" "n") i32)"#,
             GlobalAbbrev<'_>,
             GlobalAbbrev::Import(
-                exports,
                 Import {
                     mod_name: Name(m),
                     name: Name(n),
@@ -4834,27 +4720,25 @@ mod tests {
                     },
                     ..
                 },
-            ) if exports.is_empty() && m == "m" && n == "n"
+            ) if m == "m" && n == "n"
         );
-        assert_parse!(
+        let parser = assert_parse!(
             r#"(global $g (export "e") (import "m" "n") i32)"#,
             GlobalAbbrev<'_>,
-            GlobalAbbrev::Import(
-                exports,
-                Import { ..  },
-            ) if exports.len() == 1
+            GlobalAbbrev::Import(Import { .. })
         );
+        assert_eq!(parser.ctx.exports.len(), 1);
         assert_parse!(
             r#"(global i32 i32.const 32 i32.load align=8)"#,
             GlobalAbbrev<'_>,
-            GlobalAbbrev::Global(_, Global { init, .. })
+            GlobalAbbrev::Global(Global { init, .. })
             if is_match!(&init[0].kind, InsnKind::I32Const(32)) &&
                is_match!(&init[1].kind, InsnKind::I32Load(Mem{ align: Some(8), .. }))
         );
         assert_parse!(
             r#"(global i32 (i32.add (i32.const 4)))"#,
             GlobalAbbrev<'_>,
-            GlobalAbbrev::Global(_, Global { init, .. })
+            GlobalAbbrev::Global(Global { init, .. })
             if is_match!(&init[0].kind, InsnKind::I32Const(4)) &&
                is_match!(&init[1].kind, InsnKind::I32Add)
         );
