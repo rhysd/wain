@@ -38,7 +38,7 @@ pub enum ParseErrorKind<'a> {
         sign: Sign,
     },
     InvalidAlignment(u32),
-    MultipleEntrypoints(Start<'a>, Start<'a>),
+    MultipleEntrypoints(Start, Start),
     ModulesNotComposable {
         mod1_id: Option<&'a str>,
         mod1_offset: usize,
@@ -833,7 +833,7 @@ enum ModuleField<'a> {
     Data(Data<'a>),
     Memory(MemoryAbbrev<'a>),
     Global(Global<'a>),
-    Start(Start<'a>),
+    Start(Start),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
@@ -2238,6 +2238,7 @@ impl<'a> Parse<'a> for Data<'a> {
             Token::Int(..) | Token::Ident(_) => parser.parse()?,
             _ => Index::Num(0),
         };
+        let idx = parser.ctx.mem_indices.resolve(idx, start)?;
 
         let offset = if let Some("offset") = parser.peek_fold_start("offset in data segment")?.0 {
             parser.eat_token(); // Eat '('
@@ -2369,7 +2370,7 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                                 },
                                 Data {
                                     start,
-                                    idx: Index::Num(idx),
+                                    idx,
                                     offset: vec![Instruction {
                                         start,
                                         kind: InsnKind::I32Const(0),
@@ -2477,11 +2478,12 @@ impl<'a> Parse<'a> for Global<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-start
-impl<'a> Parse<'a> for Start<'a> {
+impl<'a> Parse<'a> for Start {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         let start = parser.opening_paren("start")?;
         match_token!(parser, "'start' keyword", Token::Keyword("start"));
         let idx = parser.parse()?;
+        let idx = parser.ctx.func_indices.resolve(idx, start)?;
         parser.closing_paren("start")?;
         Ok(Start { start, idx })
     }
@@ -2581,14 +2583,22 @@ mod tests {
     }
 
     macro_rules! assert_error {
-        ($input:expr, $node:ty, $expect:pat if $cond:expr) => {{
+        ($parser:ident => $parser_init:expr, $input:expr, $node:ty, $expect:pat if $cond:expr) => {{
             use ParseErrorKind::*;
             let input = $input;
-            match Parser::new(input).parse::<$node>().unwrap_err().kind {
+            let mut $parser = Parser::new(input);
+            $parser_init;
+            match $parser.parse::<$node>().unwrap_err().kind {
                 $expect if $cond => { /* OK */ }
                 err => panic!("assertion failed: {:?} did not match to pattern {}", err, stringify!($expect if $cond)),
             }
         }};
+        ($parser:ident => $parser_init:expr, $input:expr, $node:ty, $expect:pat) => {
+            assert_error!($parser => $parser_init, $input, $node, $expect if true);
+        };
+        ($input:expr, $node:ty, $expect:pat if $cond:expr) => {
+            assert_error!(p => (), $input, $node, $expect if $cond);
+        };
         ($input:expr, $node:ty, $expect:pat) => {
             assert_error!($input, $node, $expect if true);
         };
@@ -2627,8 +2637,8 @@ mod tests {
                 (export "n" (func $foo))
                 (elem (offset i32.const 10) $func)
                 (table 0 funcref)
-                (data 0 i32.const 0 "hello")
                 (memory 3)
+                (data 0 i32.const 0 "hello")
                 (global (mut i32) i32.const 0)
                 (func)
             )
@@ -2637,11 +2647,11 @@ mod tests {
                 (export "n" (func $foo))
                 (elem (offset i32.const 10) $func)
                 (table 0 funcref)
-                (data 0 i32.const 0 "hello")
                 (memory 3)
+                (data 0 i32.const 0 "hello")
                 (global (mut i32) i32.const 0)
                 (func (result i32))
-                (start 3)
+                (start 0)
             )
             "#,
             SyntaxTree<'_>,
@@ -2677,9 +2687,8 @@ mod tests {
                 (import "m" "n" (func (type 0)))
                 (export "n" (func $foo))
                 (elem (offset i32.const 10) $func)
-                (data 0 i32.const 0 "hello")
                 (global (mut i32) i32.const 0)
-                (start 3)
+                (start 0)
             )
             (module $m2
                 (type $f1 (func))
@@ -2687,8 +2696,8 @@ mod tests {
                 (export "n" (func $foo))
                 (elem (offset i32.const 10) $func)
                 (table 0 funcref)
-                (data 0 i32.const 0 "hello")
                 (memory 3)
+                (data 0 i32.const 0 "hello")
                 (global (mut i32) i32.const 0)
                 (func)
             )
@@ -2713,7 +2722,7 @@ mod tests {
                && exports.len() == 2
                && elems.len() == 2
                && tables.len() == 1
-               && data.len() == 2
+               && data.len() == 1
                && memories.len() == 1
                && globals.len() == 2
                && funcs.len() == 3 // includes 2 imports
@@ -2722,8 +2731,8 @@ mod tests {
 
         assert_error!(
             r#"
-            (module $m1 (start 0))
-            (module $m2 (start 3))
+            (module $m1 (func) (start 0))
+            (module $m2 (func) (start 0))
             "#,
             SyntaxTree<'_>,
             ModulesNotComposable{ msg: "only one module can have 'start' section", .. }
@@ -2753,11 +2762,11 @@ mod tests {
                 (type $f2 (func)))
         "#, Module<'_>, Module { id: None, types, .. } if types.len() == 2);
         assert_parse!(
-            r#"(module (start $f))"#,
+            r#"(module (func $f) (start $f))"#,
             Module<'_>,
             Module {
                 id: None,
-                entrypoint: Some(Start{ idx: Index::Ident("$f"), .. }),
+                entrypoint: Some(Start{ idx: 0, .. }),
                 ..
             }
         );
@@ -2767,17 +2776,9 @@ mod tests {
         assert_error!(r#"(module"#, Module<'_>, UnexpectedEndOfFile{..});
         assert_error!(r#"(module $foo (type $f (func))"#, Module<'_>, UnexpectedEndOfFile{..});
         assert_error!(
-            r#"(module $foo (start $f) (start 3))"#,
+            r#"(module (func $f) (start $f) (start 0))"#,
             Module<'_>,
-            MultipleEntrypoints(
-                Start {
-                    idx: Index::Ident("$f"),
-                    ..
-                },
-                Start {
-                    idx: Index::Num(3), ..
-                },
-            )
+            MultipleEntrypoints(Start { idx: 0, .. }, Start { idx: 0, .. })
         );
     }
 
@@ -2809,6 +2810,7 @@ mod tests {
             ModuleField::Table(..)
         );
         assert_parse!(
+            p => p.ctx.mem_indices.new_idx(None, 0).unwrap(),
             r#"(data 0 i32.const 0 "hello")"#,
             ModuleField<'_>,
             ModuleField::Data(..)
@@ -2819,7 +2821,12 @@ mod tests {
             ModuleField<'_>,
             ModuleField::Global(..)
         );
-        assert_parse!(r#"(start 3)"#, ModuleField<'_>, ModuleField::Start(..));
+        assert_parse!(
+            p => p.ctx.func_indices.new_idx(None, 0).unwrap(),
+            r#"(start 0)"#,
+            ModuleField<'_>,
+            ModuleField::Start(..)
+        );
         assert_parse!(r#"(func)"#, ModuleField<'_>, ModuleField::Func(..));
 
         assert_error!(r#"(hello!)"#, ModuleField<'_>, UnexpectedKeyword("hello!"));
@@ -4526,50 +4533,57 @@ mod tests {
     #[test]
     fn data_segment() {
         assert_parse!(
+            p => p.ctx.mem_indices.new_idx(None, 0).unwrap(),
             r#"(data 0 i32.const 0)"#,
             Data<'_>,
             Data{
-                idx: Index::Num(0),
+                idx: 0,
                 offset,
                 data,
                 ..
             } if is_match!(offset[0].kind, InsnKind::I32Const(0)) && data.is_empty()
         );
         assert_parse!(
+            p => p.ctx.mem_indices.new_idx(None, 0).unwrap(),
             r#"(data 0 (offset i32.const 0))"#,
             Data<'_>,
             Data{
-                idx: Index::Num(0),
+                idx: 0,
                 offset,
                 data,
                 ..
             } if is_match!(offset[0].kind, InsnKind::I32Const(0)) && data.is_empty()
         );
         assert_parse!(
+            p => p.ctx.mem_indices.new_idx(None, 0).unwrap(),
             r#"(data 0 (offset i32.const 0) "hello")"#,
             Data<'_>,
             Data{ data, ..  } if data.as_ref() == b"hello".as_ref()
         );
         assert_parse!(
+            p => p.ctx.mem_indices.new_idx(None, 0).unwrap(),
             r#"(data 0 (offset i32.const 0) "hello" " dogs!")"#,
             Data<'_>,
             Data{ data, ..  } if data.as_ref() == b"hello dogs!".as_ref()
         );
         assert_parse!(
+            p => p.ctx.mem_indices.new_idx(None, 0).unwrap(),
             r#"(data 0 (offset i32.const 0) "\t\n\r" "\"\'\\" "\u{3042}\41")"#,
             Data<'_>,
             Data{ data, ..  } if data.as_ref() == b"\t\n\r\"'\\\xe3\x81\x82A".as_ref()
         );
         assert_parse!(
+            p => p.ctx.mem_indices.new_idx(None, 0).unwrap(),
             r#"(data 0 (offset i32.const 0) "\01\02\03\ff")"#,
             Data<'_>,
             Data{ data, ..  } if data.as_ref() == &[1, 2, 3, 255]
         );
         assert_parse!(
+            p => p.ctx.mem_indices.new_idx(None, 0).unwrap(),
             r#"(data (i32.const 1024) "Hello, world\n\00")"#,
             Data<'_>,
             Data{
-                idx: Index::Num(0),
+                idx: 0,
                 offset,
                 data,
                 ..
@@ -4578,9 +4592,21 @@ mod tests {
         );
 
         assert_error!(
+            p => p.ctx.mem_indices.new_idx(None, 0).unwrap(),
             r#"(data 0 "hello")"#,
             Data<'_>,
             UnexpectedToken{ .. }
+        );
+        assert_error!(
+            r#"(data 0 "hello")"#,
+            Data<'_>,
+            IndexOutOfBounds{ idx: 0, max: 0, .. }
+        );
+        assert_error!(
+            p => p.ctx.mem_indices.new_idx(Some("$d1"), 0).unwrap(),
+            r#"(data $d2 "hello")"#,
+            Data<'_>,
+            IdNotDefined{ id: "$d2", .. }
         );
     }
 
@@ -4646,7 +4672,7 @@ mod tests {
                     ..
                 },
                 Data {
-                    idx: Index::Num(0),
+                    idx: 0,
                     offset,
                     data,
                     ..
@@ -4890,8 +4916,32 @@ mod tests {
 
     #[test]
     fn start_function() {
-        assert_parse!(r#"(start 3)"#, Start<'_>, Start{ idx: Index::Num(3), .. });
-        assert_parse!(r#"(start $f)"#, Start<'_>, Start{ idx: Index::Ident("$f"), .. });
+        assert_parse!(
+            p => p.ctx.func_indices.new_idx(None, 0).unwrap(),
+            r#"(start 0)"#,
+            Start,
+            Start{ idx: 0, .. }
+        );
+        assert_parse!(
+            p => {
+                p.ctx.func_indices.new_idx(None, 1).unwrap();
+                p.ctx.func_indices.new_idx(Some("$f"), 1).unwrap();
+            },
+            r#"(start $f)"#,
+            Start,
+            Start{ idx: 1, .. }
+        );
+
+        assert_error!(
+            r#"(start 0)"#,
+            Start,
+            IndexOutOfBounds { idx: 0, max: 0, .. }
+        );
+        assert_error!(
+            r#"(start $f)"#,
+            Start,
+            IdNotDefined { id: "$f", .. }
+        );
     }
 
     #[test]

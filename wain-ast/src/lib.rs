@@ -23,7 +23,7 @@ pub struct Module<'a> {
     pub data: Vec<Data<'a>>,
     pub memories: Vec<Memory<'a>>,
     pub globals: Vec<Global<'a>>,
-    pub entrypoint: Option<Start<'a>>,
+    pub entrypoint: Option<Start>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -449,7 +449,7 @@ impl<'a> Table<'a> {
 #[derive(Debug)]
 pub struct Data<'a> {
     pub start: usize,
-    pub idx: Index<'a>,
+    pub idx: u32, // memidx
     pub offset: Vec<Instruction<'a>>,
     pub data: Cow<'a, [u8]>,
 }
@@ -484,9 +484,9 @@ pub struct Global<'a> {
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-start
 #[derive(Debug)]
-pub struct Start<'a> {
+pub struct Start {
     pub start: usize,
-    pub idx: Index<'a>,
+    pub idx: u32, // funcidx
 }
 
 #[cfg(test)]
