@@ -3482,6 +3482,15 @@ mod tests {
                 ..
             } if params.is_empty() && results[0].ty == ValType::I32 && locals.is_empty()
         );
+
+        assert_error!(
+            r#"(module
+              (func $f)
+              (func $f)
+            )"#,
+            Module<'_>,
+            IdAlreadyDefined{ id: "$f", prev_idx: 0, .. }
+        );
     }
 
     macro_rules! assert_insn {
@@ -4504,6 +4513,14 @@ mod tests {
             TableAbbrev<'_>,
             MissingParen{ paren: ')', .. }
         );
+        assert_error!(
+            r#"(module
+              (table $t 10 funcref)
+              (table $t 10 funcref)
+            )"#,
+            Module<'_>,
+            IdAlreadyDefined{ id: "$t", prev_idx: 0, .. }
+        );
     }
 
     #[test]
@@ -4590,6 +4607,18 @@ mod tests {
                     MemType {
                         limit: Limits::Range { min: 1, max: 3 },
                     },
+                import: None,
+                ..
+            })
+        );
+        assert_parse!(
+            r#"(memory $m 1)"#,
+            MemoryAbbrev<'_>,
+            MemoryAbbrev::NoAbbrev(Memory {
+                id: Some("$m"),
+                ty: MemType {
+                    limit: Limits::From { min: 1 },
+                },
                 import: None,
                 ..
             })
@@ -4725,6 +4754,14 @@ mod tests {
             MemoryAbbrev<'_>,
             MissingParen{ paren: ')', .. }
         );
+        assert_error!(
+            r#"(module
+              (memory $m 2)
+              (memory $m 3)
+            )"#,
+            Module<'_>,
+            IdAlreadyDefined{ id: "$m", prev_idx: 0, .. }
+        );
     }
 
     #[test]
@@ -4840,6 +4877,14 @@ mod tests {
             r#"(global $g (mut i32) (export "e"))"#,
             Global<'_>,
             UnexpectedKeyword("export")
+        );
+        assert_error!(
+            r#"(module
+              (global $g i32)
+              (global $g i32)
+            )"#,
+            Module<'_>,
+            IdAlreadyDefined{ id: "$g", prev_idx: 0, .. }
         );
     }
 
