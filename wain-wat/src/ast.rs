@@ -117,13 +117,13 @@ pub enum ImportDesc<'a> {
 #[cfg_attr(test, derive(Debug))]
 pub struct TypeUse<'a> {
     pub start: usize,
-    pub idx: u32,
+    pub idx: Index<'a>,
     pub params: Vec<Param<'a>>,
     pub results: Vec<FuncResult>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#indices
-#[cfg_attr(test, derive(Debug))]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum Index<'a> {
     Num(u32),
     Ident(&'a str),
