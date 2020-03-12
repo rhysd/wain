@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 // Root of the tree
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Parsed<'a> {
     pub module: Module<'a>,
 }
@@ -11,7 +11,7 @@ pub struct Parsed<'a> {
 // to be public. Or we need a factory function like Module::new() for each struct.
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Module<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
@@ -28,7 +28,7 @@ pub struct Module<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct TypeDef<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
@@ -36,7 +36,7 @@ pub struct TypeDef<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-functype
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct FuncType<'a> {
     pub start: usize,
     pub params: Vec<Param<'a>>,
@@ -44,7 +44,8 @@ pub struct FuncType<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-param
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Param<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
@@ -52,14 +53,16 @@ pub struct Param<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-result
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
 pub struct FuncResult {
     pub start: usize,
     pub ty: ValType,
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-valtype
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy)]
+#[cfg_attr(test, derive(Debug))]
 pub enum ValType {
     I32,
     I64,
@@ -68,7 +71,7 @@ pub enum ValType {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-import
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Import<'a> {
     pub start: usize,
     pub mod_name: Name,
@@ -82,11 +85,11 @@ pub struct Import<'a> {
 // In text format, special characters in string literal are escaped. Unescaped string must
 // be allocated in heap. In binary format, it is directly encoded as bytes so borrowing the
 // part of source is enough.
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Name(pub String);
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub enum ImportDesc<'a> {
     Func {
         start: usize,
@@ -111,7 +114,7 @@ pub enum ImportDesc<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#type-uses
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct TypeUse<'a> {
     pub start: usize,
     pub idx: u32,
@@ -120,7 +123,7 @@ pub struct TypeUse<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#indices
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub enum Index<'a> {
     Num(u32),
     Ident(&'a str),
@@ -136,33 +139,33 @@ impl<'a> fmt::Display for Index<'a> {
 
 // https://webassembly.github.io/spec/core/text/types.html#text-tabletype
 // Note: elemtype is currently fixed to 'funcref'
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct TableType {
     pub limit: Limits,
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-limits
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub enum Limits {
     Range { min: u32, max: u32 },
     From { min: u32 },
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-memtype
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct MemType {
     pub limit: Limits,
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-globaltype
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct GlobalType {
     pub mutable: bool,
     pub ty: ValType,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-export
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Export<'a> {
     pub start: usize,
     pub name: Name,
@@ -171,7 +174,7 @@ pub struct Export<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-exportdesc
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub enum ExportKind {
     Func,
     Table,
@@ -180,7 +183,7 @@ pub enum ExportKind {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-func
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Func<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
@@ -190,7 +193,7 @@ pub struct Func<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-local
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Local<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
@@ -198,20 +201,20 @@ pub struct Local<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/instructions.html#instructions
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Instruction<'a> {
     pub start: usize,
     pub kind: InsnKind<'a>,
 }
 
 // https://webassembly.github.io/spec/core/text/instructions.html#text-memarg
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Mem {
     pub align: Option<u32>,
     pub offset: Option<u32>,
 }
 
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub enum InsnKind<'a> {
     // Control instructions
     // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
@@ -436,7 +439,7 @@ impl<'a> InsnKind<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#element-segments
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Elem<'a> {
     pub start: usize,
     pub idx: Index<'a>,
@@ -445,7 +448,7 @@ pub struct Elem<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#tables
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Table<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
@@ -453,7 +456,7 @@ pub struct Table<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-data
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Data<'a> {
     pub start: usize,
     pub idx: Index<'a>,
@@ -462,7 +465,7 @@ pub struct Data<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#memories
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Memory<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
@@ -470,7 +473,7 @@ pub struct Memory<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#globals
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Global<'a> {
     pub start: usize,
     pub id: Option<&'a str>,
@@ -479,7 +482,7 @@ pub struct Global<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-start
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Start<'a> {
     pub start: usize,
     pub idx: Index<'a>,

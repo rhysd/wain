@@ -1,65 +1,51 @@
 use std::borrow::Cow;
-use std::fmt;
 
 // Root of the tree
-#[derive(Debug)]
-pub struct SyntaxTree<'a> {
+pub struct Root<'a> {
     pub module: Module<'a>,
 }
 
 // Note: Since crate for syntax tree data structure is separated, all fields of AST node structs need
 // to be public. Or we need a factory function like Module::new() for each struct.
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-module
-#[derive(Debug)]
+// https://webassembly.github.io/spec/core/syntax/modules.html#indices
+pub type FuncIdx = u32;
+pub type TableIdx = u32;
+pub type MemIdx = u32;
+pub type GlobalIdx = u32;
+pub type TypeIdx = u32;
+pub type LocalIdx = u32;
+pub type LabelIdx = u32;
+
+// https://webassembly.github.io/spec/core/syntax/modules.html
 pub struct Module<'a> {
     pub start: usize,
-    pub id: Option<&'a str>,
-    pub types: Vec<TypeDef<'a>>,
-    pub imports: Vec<Import<'a>>,
+    pub types: Vec<FuncType>,
     pub exports: Vec<Export<'a>>,
     pub funcs: Vec<Func<'a>>,
-    pub elems: Vec<Elem<'a>>,
+    pub elems: Vec<ElemSegment>,
     pub tables: Vec<Table<'a>>,
-    pub data: Vec<Data<'a>>,
+    pub data: Vec<DataSegment<'a>>,
     pub memories: Vec<Memory<'a>>,
     pub globals: Vec<Global<'a>>,
-    pub entrypoint: Option<Start<'a>>,
+    pub entrypoint: Option<StartFunction>,
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-typedef
-#[derive(Debug)]
-pub struct TypeDef<'a> {
+// https://webassembly.github.io/spec/core/syntax/modules.html#syntax-module
+pub struct Import<'a> {
+    pub mod_name: Name<'a>,
+    pub name: Name<'a>,
+}
+
+// https://webassembly.github.io/spec/core/syntax/types.html#function-types
+pub struct FuncType {
     pub start: usize,
-    pub id: Option<&'a str>,
-    pub ty: FuncType<'a>,
+    pub params: Vec<ValType>,
+    pub results: Vec<ValType>,
 }
 
-// https://webassembly.github.io/spec/core/text/types.html#text-functype
-#[derive(Debug)]
-pub struct FuncType<'a> {
-    pub start: usize,
-    pub params: Vec<Param<'a>>,
-    pub results: Vec<FuncResult>,
-}
-
-// https://webassembly.github.io/spec/core/text/types.html#text-param
-#[derive(Debug, Clone)]
-pub struct Param<'a> {
-    pub start: usize,
-    pub id: Option<&'a str>,
-    pub ty: ValType,
-}
-
-// https://webassembly.github.io/spec/core/text/types.html#text-result
-#[derive(Debug, Clone)]
-pub struct FuncResult {
-    pub start: usize,
-    pub ty: ValType,
-}
-
-// https://webassembly.github.io/spec/core/text/types.html#text-valtype
-#[derive(Debug, PartialEq, Clone, Copy)]
+// https://webassembly.github.io/spec/core/syntax/types.html#value-types
+#[derive(PartialEq, Clone, Copy)]
 pub enum ValType {
     I32,
     I64,
@@ -67,198 +53,120 @@ pub enum ValType {
     F64,
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-import
-#[derive(Debug)]
-pub struct Import<'a> {
-    pub start: usize,
-    pub mod_name: Name<'a>,
-    pub name: Name<'a>,
-    pub desc: ImportDesc<'a>,
-}
-
-// https://webassembly.github.io/spec/core/text/values.html#text-name
+// https://webassembly.github.io/spec/core/syntax/values.html#syntax-name
 //
 // Use Cow<'a, str> since it is String on text format and it is &str on binary format.
 // In text format, special characters in string literal are escaped. Unescaped string must
 // be allocated in heap. In binary format, it is directly encoded as bytes so borrowing the
 // part of source is enough.
-#[derive(Debug)]
 pub struct Name<'a>(pub Cow<'a, str>);
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-importdesc
-#[derive(Debug)]
-pub enum ImportDesc<'a> {
-    Func {
-        start: usize,
-        id: Option<&'a str>,
-        ty: TypeUse<'a>,
-    },
-    Table {
-        start: usize,
-        id: Option<&'a str>,
-        ty: TableType,
-    },
-    Memory {
-        start: usize,
-        id: Option<&'a str>,
-        ty: MemType,
-    },
-    Global {
-        start: usize,
-        id: Option<&'a str>,
-        ty: GlobalType,
-    },
-}
-
-// https://webassembly.github.io/spec/core/text/modules.html#type-uses
-#[derive(Debug)]
-pub struct TypeUse<'a> {
-    pub start: usize,
-    pub idx: u32,
-    pub params: Vec<Param<'a>>,
-    pub results: Vec<FuncResult>,
-}
-
-// https://webassembly.github.io/spec/core/text/modules.html#indices
-#[derive(Debug)]
-pub enum Index<'a> {
-    Num(u32),
-    Ident(&'a str),
-}
-impl<'a> fmt::Display for Index<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Index::Num(i) => write!(f, "{}", i),
-            Index::Ident(i) => write!(f, "{}", i),
-        }
-    }
-}
-
-// https://webassembly.github.io/spec/core/text/types.html#text-tabletype
+// https://webassembly.github.io/spec/core/syntax/types.html#table-types
 // Note: elemtype is currently fixed to 'funcref'
-#[derive(Debug)]
 pub struct TableType {
     pub limit: Limits,
 }
 
-// https://webassembly.github.io/spec/core/text/types.html#text-limits
-#[derive(Debug)]
+// https://webassembly.github.io/spec/core/syntax/types.html#limits
 pub enum Limits {
-    Range { min: u32, max: u32 },
-    From { min: u32 },
+    Range(u32, u32),
+    From(u32),
 }
 
-// https://webassembly.github.io/spec/core/text/types.html#text-memtype
-#[derive(Debug)]
+// https://webassembly.github.io/spec/core/syntax/types.html#memory-types
 pub struct MemType {
     pub limit: Limits,
 }
 
-// https://webassembly.github.io/spec/core/text/types.html#text-globaltype
-#[derive(Debug)]
+// https://webassembly.github.io/spec/core/syntax/types.html#global-types
 pub struct GlobalType {
     pub mutable: bool,
     pub ty: ValType,
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-export
-#[derive(Debug)]
+// https://webassembly.github.io/spec/core/syntax/modules.html#exports
+pub enum ExportKind {
+    Func(FuncIdx),
+    Table(TableIdx),
+    Memory(MemIdx),
+    Global(GlobalIdx),
+}
 pub struct Export<'a> {
     pub start: usize,
     pub name: Name<'a>,
     pub kind: ExportKind,
-    pub idx: Index<'a>,
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-exportdesc
-#[derive(Debug)]
-pub enum ExportKind {
-    Func,
-    Table,
-    Memory,
-    Global,
+// https://webassembly.github.io/spec/core/syntax/modules.html#syntax-func
+pub enum FuncKind<'a> {
+    Import(Import<'a>),
+    Body {
+        locals: Vec<ValType>,
+        expr: Vec<Instruction>,
+    },
 }
-
-// https://webassembly.github.io/spec/core/text/modules.html#text-func
-#[derive(Debug)]
 pub struct Func<'a> {
     pub start: usize,
-    pub id: Option<&'a str>,
-    pub ty: TypeUse<'a>,
-    pub locals: Vec<Local<'a>>,
-    pub body: Vec<Instruction<'a>>,
+    pub idx: FuncIdx,
+    pub kind: FuncKind<'a>,
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-local
-#[derive(Debug)]
-pub struct Local<'a> {
+// https://webassembly.github.io/spec/core/syntax/instructions.html#instructions
+pub struct Instruction {
     pub start: usize,
-    pub id: Option<&'a str>,
-    pub ty: ValType,
+    pub kind: InsnKind,
 }
 
-// https://webassembly.github.io/spec/core/text/instructions.html#instructions
-#[derive(Debug)]
-pub struct Instruction<'a> {
-    pub start: usize,
-    pub kind: InsnKind<'a>,
-}
-
-// https://webassembly.github.io/spec/core/text/instructions.html#text-memarg
-#[derive(Debug)]
+// https://webassembly.github.io/spec/core/syntax/instructions.html#syntax-memarg
 pub struct Mem {
     pub align: Option<u32>,
     pub offset: Option<u32>,
 }
 
-#[derive(Debug)]
-pub enum InsnKind<'a> {
+// https://webassembly.github.io/spec/core/syntax/instructions.html#instructions
+pub enum InsnKind {
     // Control instructions
-    // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
+    // https://webassembly.github.io/spec/core/syntax/instructions.html#control-instructions
     Block {
-        label: Option<&'a str>,
-        ty: Option<ValType>,
-        body: Vec<Instruction<'a>>,
-        id: Option<&'a str>,
+        label: LabelIdx,
+        ty: Option<ValType>, // resulttype
+        body: Vec<Instruction>,
     },
     Loop {
-        label: Option<&'a str>,
-        ty: Option<ValType>,
-        body: Vec<Instruction<'a>>,
-        id: Option<&'a str>,
+        label: LabelIdx,
+        ty: Option<ValType>, // resulttype
+        body: Vec<Instruction>,
     },
     If {
-        label: Option<&'a str>,
-        ty: Option<ValType>,
-        then_body: Vec<Instruction<'a>>,
-        else_id: Option<&'a str>,
-        else_body: Vec<Instruction<'a>>,
-        end_id: Option<&'a str>,
+        label: LabelIdx,
+        ty: Option<ValType>, // resulttype
+        then_body: Vec<Instruction>,
+        else_body: Vec<Instruction>,
     },
     Unreachable,
     Nop,
-    Br(Index<'a>),
-    BrIf(Index<'a>),
+    Br(LabelIdx),
+    BrIf(LabelIdx),
     BrTable {
-        labels: Vec<Index<'a>>,
-        default_label: Index<'a>,
+        labels: Vec<LabelIdx>,
+        default_label: LabelIdx,
     },
     Return,
-    Call(Index<'a>),
-    CallIndirect(TypeUse<'a>),
+    Call(FuncIdx),
+    CallIndirect(TypeIdx),
     // Parametric instructions
-    // https://webassembly.github.io/spec/core/text/instructions.html#parametric-instructions
+    // https://webassembly.github.io/spec/core/syntax/instructions.html#parametric-instructions
     Drop,
     Select,
     // Variable instructions
-    // https://webassembly.github.io/spec/core/text/instructions.html#variable-instructions
-    LocalGet(Index<'a>),
-    LocalSet(Index<'a>),
-    LocalTee(Index<'a>),
-    GlobalGet(Index<'a>),
-    GlobalSet(Index<'a>),
+    // https://webassembly.github.io/spec/core/syntax/instructions.html#variable-instructions
+    LocalGet(LocalIdx),
+    LocalSet(LocalIdx),
+    LocalTee(LocalIdx),
+    GlobalGet(GlobalIdx),
+    GlobalSet(GlobalIdx),
     // Memory instructions
-    // https://webassembly.github.io/spec/core/text/instructions.html#memory-instructions
+    // https://webassembly.github.io/spec/core/syntax/instructions.html#memory-instructions
     I32Load(Mem),
     I64Load(Mem),
     F32Load(Mem),
@@ -285,7 +193,7 @@ pub enum InsnKind<'a> {
     MemorySize,
     MemoryGrow,
     // Numeric instructions
-    // https://webassembly.github.io/spec/core/text/instructions.html#numeric-instructions
+    // https://webassembly.github.io/spec/core/syntax/instructions.html#numeric-instructions
     // Constants
     I32Const(i32),
     I64Const(i64),
@@ -425,7 +333,7 @@ pub enum InsnKind<'a> {
     F64ReinterpretI64,
 }
 
-impl<'a> InsnKind<'a> {
+impl InsnKind {
     pub fn is_block(&self) -> bool {
         use InsnKind::*;
         match self {
@@ -435,54 +343,51 @@ impl<'a> InsnKind<'a> {
     }
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#element-segments
-#[derive(Debug)]
-pub struct Elem<'a> {
+// https://webassembly.github.io/spec/core/syntax/modules.html#element-segments
+pub struct ElemSegment {
     pub start: usize,
-    pub idx: Index<'a>,
-    pub offset: Vec<Instruction<'a>>,
-    pub init: Vec<Index<'a>>,
+    pub idx: TableIdx,
+    pub offset: Vec<Instruction>, // expr
+    pub init: Vec<FuncIdx>,
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#tables
-#[derive(Debug)]
+// https://webassembly.github.io/spec/core/syntax/modules.html#tables
 pub struct Table<'a> {
     pub start: usize,
-    pub id: Option<&'a str>,
     pub ty: TableType,
+    pub import: Option<Import<'a>>,
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-data
-#[derive(Debug)]
-pub struct Data<'a> {
+// https://webassembly.github.io/spec/core/syntax/modules.html#data-segments
+pub struct DataSegment<'a> {
     pub start: usize,
-    pub idx: Index<'a>,
-    pub offset: Vec<Instruction<'a>>,
+    pub idx: MemIdx,
+    pub offset: Vec<Instruction>, // expr
     pub data: Cow<'a, [u8]>,
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#memories
-#[derive(Debug)]
+// https://webassembly.github.io/spec/core/syntax/modules.html#memories
 pub struct Memory<'a> {
     pub start: usize,
-    pub id: Option<&'a str>,
     pub ty: MemType,
+    pub import: Option<Import<'a>>,
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#globals
-#[derive(Debug)]
+// https://webassembly.github.io/spec/core/syntax/modules.html#globals
+pub enum GlobalKind<'a> {
+    Import(Import<'a>),
+    Init(Vec<Instruction>), // expr
+}
 pub struct Global<'a> {
     pub start: usize,
-    pub id: Option<&'a str>,
     pub ty: GlobalType,
-    pub init: Vec<Instruction<'a>>,
+    pub kind: GlobalKind<'a>,
 }
 
-// https://webassembly.github.io/spec/core/text/modules.html#text-start
-#[derive(Debug)]
-pub struct Start<'a> {
+// https://webassembly.github.io/spec/core/syntax/modules.html#start-function
+pub struct StartFunction {
     pub start: usize,
-    pub idx: Index<'a>,
+    pub idx: FuncIdx,
 }
 
 #[cfg(test)]
@@ -492,10 +397,9 @@ mod tests {
     #[test]
     fn insn_is_block() {
         let insn = InsnKind::Block {
-            label: None,
+            label: 0,
             ty: None,
             body: vec![],
-            id: None,
         };
         assert!(insn.is_block());
         assert!(!InsnKind::Nop.is_block());
