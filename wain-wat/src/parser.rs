@@ -39,13 +39,6 @@ pub enum ParseErrorKind<'a> {
     },
     InvalidAlignment(u32),
     MultipleEntrypoints(Start<'a>, Start<'a>),
-    ModulesNotComposable {
-        mod1_id: Option<&'a str>,
-        mod1_offset: usize,
-        mod2_id: Option<&'a str>,
-        mod2_offset: usize,
-        msg: &'static str,
-    },
     IdAlreadyDefined {
         id: &'a str,
         prev_idx: u32,
@@ -124,25 +117,6 @@ impl<'a> fmt::Display for ParseError<'a> {
             }
             MultipleEntrypoints(prev, cur) => {
                 write!(f, "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}", cur.idx, prev.idx, prev.start)?
-            }
-            ModulesNotComposable{
-                mod1_id,
-                mod1_offset,
-                mod2_id,
-                mod2_offset,
-                msg,
-            } => {
-                if let Some(id) = mod2_id {
-                    write!(f, "module {} at offset {}", id, mod2_offset)?;
-                } else {
-                    write!(f, "module at offset {}", mod2_offset)?;
-                }
-                if let Some(id) = mod1_id {
-                    write!(f, " cannot be merged into existing module {} at offset {}: ", id, mod1_offset)?;
-                } else {
-                    write!(f, " cannot be merged into existing module at offset {}: ", mod1_offset)?;
-                }
-                f.write_str(msg)?;
             }
             IdAlreadyDefined{id, prev_idx, what, scope} => write!(f, "identifier '{}' for {} is already defined for index {} in the {}", id, what, prev_idx, scope)?,
         };
@@ -258,17 +232,6 @@ impl<'a> Indices<'a> {
         Ok(idx)
     }
 
-    #[allow(dead_code)] // Used in tests
-    fn current_idx(&self) -> u32 {
-        assert!(self.next_idx > 0);
-        self.next_idx - 1
-    }
-
-    fn clear(&mut self) {
-        self.next_idx = 0;
-        self.indices.clear();
-    }
-
     fn into_map(self) -> HashMap<&'a str, u32> {
         self.indices
     }
@@ -300,16 +263,6 @@ impl<'a> ParseContext<'a> {
             mem_indices: Indices::new(source, "memory", "module"),
             global_indices: Indices::new(source, "global", "module"),
         }
-    }
-
-    fn clear(&mut self) {
-        self.types.clear();
-        self.exports.clear();
-        self.type_indices.clear();
-        self.func_indices.clear();
-        self.table_indices.clear();
-        self.mem_indices.clear();
-        self.global_indices.clear();
     }
 }
 
@@ -701,71 +654,17 @@ pub trait Parse<'a>: Sized {
 // https://webassembly.github.io/spec/core/text/modules.html
 impl<'a> Parse<'a> for Parsed<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let mut module: Module<'a> = parser.parse()?;
+        let module: Module<'a> = parser.parse()?;
+        let ctx = mem::replace(&mut parser.ctx, ParseContext::new(parser.source));
 
-        // The following restrictions are imposed on the composition of modules: `m1 ⊕ m2` is
-        // defined if and only if
-        //
-        // - m1.start = ϵ ∨ m2.start = ϵ
-        // - m1.funcs = m1.tables = m1.mems = m1.mems = ϵ ∨ m2.imports = ϵ
-        while !parser.is_done() {
-            // Module have its own scope so all contexts should be cleared before parsing
-            parser.ctx.clear();
-
-            let mut another: Module<'a> = parser.parse()?;
-
-            // XXX: Modules may have the same ID. IDs must be resolved before merging
-            // IDs in AST nodes should be replaced with indices while parsing
-
-            // Check first restriction
-            if module.entrypoint.is_some() && another.entrypoint.is_some() {
-                let offset = another.start;
-                return parser.error(
-                    ParseErrorKind::ModulesNotComposable {
-                        mod1_id: module.id,
-                        mod1_offset: module.start,
-                        mod2_id: another.id,
-                        mod2_offset: another.start,
-                        msg: "only one module can have 'start' section",
-                    },
-                    offset,
-                );
-            }
-
-            // Check second restriction
-            if !(module.funcs.is_empty() && module.tables.is_empty() && module.memories.is_empty()
-                || another.imports.is_empty())
-            {
-                let offset = another.start;
-                return parser.error(
-                    ParseErrorKind::ModulesNotComposable{
-                        mod1_id: module.id,
-                        mod1_offset: module.start,
-                        mod2_id: another.id,
-                        mod2_offset: another.start,
-                        msg: "when module M1 is merged into module M2, one of (1) or (2) must be met. \
-                        (1) M1 has no 'import' section. \
-                        (2) M2 has no 'func', 'table', 'memory' sections",
-                    },
-                    offset,
-                );
-            }
-
-            module.types.append(&mut another.types);
-            module.imports.append(&mut another.imports);
-            module.exports.append(&mut another.exports);
-            module.funcs.append(&mut another.funcs);
-            module.elems.append(&mut another.elems);
-            module.tables.append(&mut another.tables);
-            module.data.append(&mut another.data);
-            module.memories.append(&mut another.memories);
-            module.globals.append(&mut another.globals);
-            if another.entrypoint.is_some() {
-                module.entrypoint = another.entrypoint;
-            }
-        }
-
-        Ok(Parsed { module })
+        Ok(Parsed {
+            module,
+            type_indices: ctx.type_indices.into_map(),
+            func_indices: ctx.func_indices.into_map(),
+            table_indices: ctx.table_indices.into_map(),
+            mem_indices: ctx.mem_indices.into_map(),
+            global_indices: ctx.global_indices.into_map(),
+        })
     }
 }
 
@@ -2552,40 +2451,20 @@ mod tests {
 
     #[test]
     fn root() {
-        assert_parse!(r#"
-            (module $m1)
-            (module $m2)
-            (module $m3)
-        "#, Parsed<'_>, Parsed{ module: Module { id: Some("$m1"), types, .. } } if types.is_empty());
-        assert_parse!(r#"
-            (module $m1 (type $f1 (func)))
-            (module $m2 (type $f1 (func)))
-            (module $m3 (type $f1 (func)))
-        "#, Parsed<'_>, Parsed{ module: Module { id: Some("$m1"), types, .. } } if types.len() == 3);
-        // Composing multiple modules
         assert_parse!(
             r#"
             (module $m1
-                (type $f1 (func))
-                (import "m" "n" (func (type 0)))
-                (export "n" (func $foo))
-                (elem (offset i32.const 10) $func)
-                (table 0 funcref)
-                (data 0 i32.const 0 "hello")
-                (memory 3)
-                (global (mut i32) i32.const 0)
-                (func)
-            )
-            (module $m2
-                (type $f1 (func))
-                (export "n" (func $foo))
-                (elem (offset i32.const 10) $func)
-                (table 0 funcref)
-                (data 0 i32.const 0 "hello")
-                (memory 3)
-                (global (mut i32) i32.const 0)
-                (func (result i32))
-                (start 3)
+                (type $t1 (func))
+                (type $t2 (func))
+                (func $f1)
+                (import "m" "n" (func $f2 (type 0)))
+                (table $tb1 0 funcref)
+                (import "m" "n" (table $tb2 0 funcref))
+                (memory $m1 3)
+                (import "m" "n" (memory $m2 3))
+                (global $g1 i32 i32.const 0)
+                (import "m" "n" (global $g2 i32))
+                (start $f1)
             )
             "#,
             Parsed<'_>,
@@ -2603,91 +2482,39 @@ mod tests {
                     funcs,
                     entrypoint,
                     ..
-                }
-            }
-            if types.len() == 3 // One type is added by abbreviation of typeuse
-               && imports.len() == 1
-               && exports.len() == 2
-               && elems.len() == 2
-               && tables.len() == 2
-               && data.len() == 2
-               && memories.len() == 2
-               && globals.len() == 2
-               && funcs.len() == 2
-               && entrypoint.is_some()
-        );
-        assert_parse!(
-            r#"
-            (module $m1
-                (type $f1 (func))
-                (import "m" "n" (func (type 0)))
-                (export "n" (func $foo))
-                (elem (offset i32.const 10) $func)
-                (data 0 i32.const 0 "hello")
-                (global (mut i32) i32.const 0)
-                (start 3)
-            )
-            (module $m2
-                (type $f1 (func))
-                (import "m" "n" (func (type 0)))
-                (export "n" (func $foo))
-                (elem (offset i32.const 10) $func)
-                (table 0 funcref)
-                (data 0 i32.const 0 "hello")
-                (memory 3)
-                (global (mut i32) i32.const 0)
-                (func)
-            )
-            "#,
-            Parsed<'_>,
-            Parsed {
-                module: Module {
-                    id: Some("$m1"),
-                    types,
-                    imports,
-                    exports,
-                    elems,
-                    tables,
-                    data,
-                    memories,
-                    globals,
-                    entrypoint,
-                    funcs,
-                    ..
-                }
+                },
+                type_indices,
+                func_indices,
+                table_indices,
+                mem_indices,
+                global_indices,
             }
             if types.len() == 2
-               && imports.len() == 2
-               && exports.len() == 2
-               && elems.len() == 2
+               && imports.len() == 4
+               && elems.is_empty()
                && tables.len() == 1
-               && data.len() == 2
+               && data.is_empty()
                && memories.len() == 1
-               && globals.len() == 2
+               && globals.len() == 1
                && funcs.len() == 1
+               && exports.is_empty()
                && entrypoint.is_some()
+               && type_indices.contains_key("$t1")
+               && type_indices.contains_key("$t2")
+               && type_indices.len() == 2
+               && func_indices.contains_key("$f1")
+               && func_indices.contains_key("$f2")
+               && func_indices.len() == 2
+               && table_indices.contains_key("$tb1")
+               && table_indices.contains_key("$tb2")
+               && table_indices.len() == 2
+               && mem_indices.contains_key("$m1")
+               && mem_indices.contains_key("$m2")
+               && mem_indices.len() == 2
+               && global_indices.contains_key("$g1")
+               && global_indices.contains_key("$g2")
+               && global_indices.len() == 2
         );
-
-        assert_error!(
-            r#"
-            (module $m1 (start 0))
-            (module $m2 (start 3))
-            "#,
-            Parsed<'_>,
-            ModulesNotComposable{ msg: "only one module can have 'start' section", .. }
-        );
-        for field in &["(func)", "(table 0 funcref)", "(memory 0)"] {
-            let source = format!(
-                r#"(module $m1 {}) (module $m2 (import "m" "n" (func)))"#,
-                field
-            );
-            assert_error!(
-                &source,
-                Parsed<'_>,
-                ModulesNotComposable{ msg, .. }
-                if msg.contains("when module M1 is merged into module M2, one of (1) or (2) must be met.")
-            );
-        }
     }
 
     #[test]

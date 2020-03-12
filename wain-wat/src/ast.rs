@@ -1,10 +1,18 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt;
+
+type Indices<'a> = HashMap<&'a str, u32>;
 
 // Root of the tree
 #[cfg_attr(test, derive(Debug))]
 pub struct Parsed<'a> {
     pub module: Module<'a>,
+    pub type_indices: Indices<'a>,
+    pub func_indices: Indices<'a>,
+    pub table_indices: Indices<'a>,
+    pub mem_indices: Indices<'a>,
+    pub global_indices: Indices<'a>,
 }
 
 // Note: Since crate for syntax tree data structure is separated, all fields of AST node structs need
