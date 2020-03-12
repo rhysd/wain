@@ -2,6 +2,10 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 
+// TODO: Remove duplication between text format AST and binary format AST.
+// For example, wat::ValType and wasm::TableType has the same structure. So we can use
+// wasm::TableType directly in parsing WAT.
+
 type Indices<'a> = HashMap<&'a str, u32>;
 
 // Root of the tree

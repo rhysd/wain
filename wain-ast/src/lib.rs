@@ -107,7 +107,7 @@ pub enum FuncKind<'a> {
 }
 pub struct Func<'a> {
     pub start: usize,
-    pub idx: FuncIdx,
+    pub idx: TypeIdx,
     pub kind: FuncKind<'a>,
 }
 
@@ -128,17 +128,14 @@ pub enum InsnKind {
     // Control instructions
     // https://webassembly.github.io/spec/core/syntax/instructions.html#control-instructions
     Block {
-        label: LabelIdx,
         ty: Option<ValType>, // resulttype
         body: Vec<Instruction>,
     },
     Loop {
-        label: LabelIdx,
         ty: Option<ValType>, // resulttype
         body: Vec<Instruction>,
     },
     If {
-        label: LabelIdx,
         ty: Option<ValType>, // resulttype
         then_body: Vec<Instruction>,
         else_body: Vec<Instruction>,
@@ -333,16 +330,6 @@ pub enum InsnKind {
     F64ReinterpretI64,
 }
 
-impl InsnKind {
-    pub fn is_block(&self) -> bool {
-        use InsnKind::*;
-        match self {
-            Block { .. } | Loop { .. } | If { .. } => true,
-            _ => false,
-        }
-    }
-}
-
 // https://webassembly.github.io/spec/core/syntax/modules.html#element-segments
 pub struct ElemSegment {
     pub start: usize,
@@ -388,20 +375,4 @@ pub struct Global<'a> {
 pub struct StartFunction {
     pub start: usize,
     pub idx: FuncIdx,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn insn_is_block() {
-        let insn = InsnKind::Block {
-            label: 0,
-            ty: None,
-            body: vec![],
-        };
-        assert!(insn.is_block());
-        assert!(!InsnKind::Nop.is_block());
-    }
 }
