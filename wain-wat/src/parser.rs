@@ -1,4 +1,5 @@
 use crate::lexer::{Float, LexError, Lexer, NumBase, Sign, Token};
+use crate::wat::*;
 use std::borrow::Cow;
 use std::char;
 use std::collections::HashMap;
@@ -6,7 +7,6 @@ use std::f32;
 use std::f64;
 use std::fmt;
 use std::mem;
-use wain_ast::*;
 
 #[cfg_attr(test, derive(Debug))]
 pub enum ParseErrorKind<'a> {
@@ -379,7 +379,7 @@ impl<'a> Parser<'a> {
         self.tokens.peek().is_none()
     }
 
-    pub fn parse_wat(mut self) -> Result<'a, SyntaxTree<'a>> {
+    pub fn parse_wat(mut self) -> Result<'a, Parsed<'a>> {
         self.parse()
     }
 
@@ -754,7 +754,7 @@ pub trait Parse<'a>: Sized {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html
-impl<'a> Parse<'a> for SyntaxTree<'a> {
+impl<'a> Parse<'a> for Parsed<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         let mut module: Module<'a> = parser.parse()?;
 
@@ -820,7 +820,7 @@ impl<'a> Parse<'a> for SyntaxTree<'a> {
             }
         }
 
-        Ok(SyntaxTree { module })
+        Ok(Parsed { module })
     }
 }
 
@@ -1021,7 +1021,7 @@ impl<'a> Parse<'a> for FuncResult {
 }
 
 // https://webassembly.github.io/spec/core/text/values.html#text-name
-impl<'a> Parse<'a> for Name<'a> {
+impl<'a> Parse<'a> for Name {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
         let (src, offset) = match_token!(parser, "string literal for name", Token::String(s) => s);
 
@@ -1077,7 +1077,7 @@ impl<'a> Parse<'a> for Name<'a> {
                 }
             }
         }
-        Ok(Name(Cow::Owned(name)))
+        Ok(Name(name))
     }
 }
 
@@ -2617,12 +2617,12 @@ mod tests {
             (module $m1)
             (module $m2)
             (module $m3)
-        "#, SyntaxTree<'_>, SyntaxTree{ module: Module { id: Some("$m1"), types, .. } } if types.is_empty());
+        "#, Parsed<'_>, Parsed{ module: Module { id: Some("$m1"), types, .. } } if types.is_empty());
         assert_parse!(r#"
             (module $m1 (type $f1 (func)))
             (module $m2 (type $f1 (func)))
             (module $m3 (type $f1 (func)))
-        "#, SyntaxTree<'_>, SyntaxTree{ module: Module { id: Some("$m1"), types, .. } } if types.len() == 3);
+        "#, Parsed<'_>, Parsed{ module: Module { id: Some("$m1"), types, .. } } if types.len() == 3);
         // Composing multiple modules
         assert_parse!(
             r#"
@@ -2649,8 +2649,8 @@ mod tests {
                 (start 3)
             )
             "#,
-            SyntaxTree<'_>,
-            SyntaxTree {
+            Parsed<'_>,
+            Parsed {
                 module: Module {
                     id: Some("$m1"),
                     types,
@@ -2700,8 +2700,8 @@ mod tests {
                 (func)
             )
             "#,
-            SyntaxTree<'_>,
-            SyntaxTree {
+            Parsed<'_>,
+            Parsed {
                 module: Module {
                     id: Some("$m1"),
                     types,
@@ -2734,7 +2734,7 @@ mod tests {
             (module $m1 (start 0))
             (module $m2 (start 3))
             "#,
-            SyntaxTree<'_>,
+            Parsed<'_>,
             ModulesNotComposable{ msg: "only one module can have 'start' section", .. }
         );
         for field in &["(func)", "(table 0 funcref)", "(memory 0)"] {
@@ -2744,7 +2744,7 @@ mod tests {
             );
             assert_error!(
                 &source,
-                SyntaxTree<'_>,
+                Parsed<'_>,
                 ModulesNotComposable{ msg, .. }
                 if msg.contains("when module M1 is merged into module M2, one of (1) or (2) must be met.")
             );
@@ -2900,20 +2900,20 @@ mod tests {
 
     #[test]
     fn name() {
-        assert_parse!(r#""n""#, Name<'_>, Name(n) if n == "n");
-        assert_parse!(r#""name""#, Name<'_>, Name(n) if n == "name");
-        assert_parse!(r#""a\tb\nc""#, Name<'_>, Name(n) if n == "a\tb\nc");
-        assert_parse!(r#""""#, Name<'_>, Name(n) if n.is_empty());
-        assert_parse!(r#""\t\n\r\"\'\\\u{3042}\41""#, Name<'_>, Name(n) if n == "\t\n\r\"'\\あA");
+        assert_parse!(r#""n""#, Name, Name(n) if n == "n");
+        assert_parse!(r#""name""#, Name, Name(n) if n == "name");
+        assert_parse!(r#""a\tb\nc""#, Name, Name(n) if n == "a\tb\nc");
+        assert_parse!(r#""""#, Name, Name(n) if n.is_empty());
+        assert_parse!(r#""\t\n\r\"\'\\\u{3042}\41""#, Name, Name(n) if n == "\t\n\r\"'\\あA");
 
-        assert_error!(r#""\x""#, Name<'_>, InvalidStringFormat(..));
-        assert_error!(r#""\0""#, Name<'_>, InvalidStringFormat(..));
-        assert_error!(r#""\0x""#, Name<'_>, InvalidStringFormat(..));
-        assert_error!(r#""\u""#, Name<'_>, InvalidStringFormat(..));
-        assert_error!(r#""\u{""#, Name<'_>, InvalidStringFormat(..));
-        assert_error!(r#""\u{41""#, Name<'_>, InvalidStringFormat(..));
-        assert_error!(r#""\u{}""#, Name<'_>, InvalidStringFormat(..));
-        assert_error!(r#""\u{hello!}""#, Name<'_>, InvalidStringFormat(..));
+        assert_error!(r#""\x""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\0""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\0x""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\u""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\u{""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\u{41""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\u{}""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\u{hello!}""#, Name, InvalidStringFormat(..));
     }
 
     #[test]
