@@ -287,8 +287,6 @@ struct ParseContext<'a> {
     table_indices: Indices<'a>,
     mem_indices: Indices<'a>,
     global_indices: Indices<'a>,
-    local_indices: Indices<'a>,
-    label_indices: Indices<'a>,
 }
 
 impl<'a> ParseContext<'a> {
@@ -301,8 +299,6 @@ impl<'a> ParseContext<'a> {
             table_indices: Indices::new(source, "table", "module"),
             mem_indices: Indices::new(source, "memory", "module"),
             global_indices: Indices::new(source, "global", "module"),
-            local_indices: Indices::new(source, "local variable", "function"),
-            label_indices: Indices::new(source, "label", "instructions sequence"),
         }
     }
 
@@ -314,8 +310,6 @@ impl<'a> ParseContext<'a> {
         self.table_indices.clear();
         self.mem_indices.clear();
         self.global_indices.clear();
-        self.local_indices.clear();
-        self.label_indices.clear();
     }
 }
 
@@ -570,16 +564,6 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(buf)
-    }
-
-    fn fresh_id(&mut self) -> &'a str {
-        // For some syntax sugars, text format requires fresh IDs. They are unique IDs not conflicting
-        // with existing IDs.
-        // https://webassembly.github.io/spec/core/text/values.html#text-id-fresh
-        //
-        // This method returns 'new' unowned string so there should be a trick. For example, having
-        // &'a Vec<String> in Parser and generate a new ID in the vector and return it's slice.
-        unimplemented!("generating fresh ID is not implemented yet")
     }
 }
 
@@ -1067,26 +1051,38 @@ impl<'a> Parse<'a> for ImportDesc<'a> {
         let (keyword, offset) = match_token!(parser, "one of 'func', 'table', 'memory', 'global'", Token::Keyword(kw) => kw);
         let id = parser.maybe_ident("identifier for import item")?;
         let desc = match keyword {
-            "func" => ImportDesc::Func {
-                start,
-                id,
-                ty: parser.parse()?,
-            },
-            "table" => ImportDesc::Table {
-                start,
-                id,
-                ty: parser.parse()?,
-            },
-            "memory" => ImportDesc::Memory {
-                start,
-                id,
-                ty: parser.parse()?,
-            },
-            "global" => ImportDesc::Global {
-                start,
-                id,
-                ty: parser.parse()?,
-            },
+            "func" => {
+                parser.ctx.func_indices.new_idx(id, start)?;
+                ImportDesc::Func {
+                    start,
+                    id,
+                    ty: parser.parse()?,
+                }
+            }
+            "table" => {
+                parser.ctx.table_indices.new_idx(id, start)?;
+                ImportDesc::Table {
+                    start,
+                    id,
+                    ty: parser.parse()?,
+                }
+            }
+            "memory" => {
+                parser.ctx.mem_indices.new_idx(id, start)?;
+                ImportDesc::Memory {
+                    start,
+                    id,
+                    ty: parser.parse()?,
+                }
+            }
+            "global" => {
+                parser.ctx.global_indices.new_idx(id, start)?;
+                ImportDesc::Global {
+                    start,
+                    id,
+                    ty: parser.parse()?,
+                }
+            }
             kw => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), offset),
         };
         parser.closing_paren("import item")?;
@@ -1329,6 +1325,7 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
         );
 
         let id = parser.maybe_ident("identifier for func field")?;
+        let idx = parser.ctx.func_indices.new_idx(id, start)?;
         let abbrev = match parser
             .peek_fold_start("'import', 'export' or typeuse in func field")?
             .0
@@ -1360,17 +1357,16 @@ impl<'a> Parse<'a> for FuncAbbrev<'a> {
                 let ty = parser.parse()?;
                 let locals = parser.parse()?;
                 let body = parser.parse()?;
-                let id = id.unwrap_or_else(|| parser.fresh_id());
                 FuncAbbrev::Export(
                     Export {
                         start: export_start,
                         name,
                         kind: ExportKind::Func,
-                        idx: Index::Ident(id),
+                        idx: Index::Num(idx),
                     },
                     Func {
                         start,
-                        id: Some(id),
+                        id,
                         ty,
                         locals,
                         body,
@@ -2091,7 +2087,8 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
         let start = parser.opening_paren("table")?;
         match_token!(parser, "'table' keyword", Token::Keyword("table"));
 
-        let mut id = parser.maybe_ident("identifier for table section")?;
+        let id = parser.maybe_ident("identifier for table section")?;
+        let idx = parser.ctx.table_indices.new_idx(id, start)?;
 
         loop {
             match parser.peek("argument of table section")?.0 {
@@ -2120,13 +2117,11 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
                             //   note that this occurs repeatedly
                             let name = parser.parse()?;
                             parser.closing_paren("export argument in table section")?;
-                            let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
-                            id = Some(id_dash);
                             parser.ctx.exports.push(Export {
                                 start,
                                 name,
                                 kind: ExportKind::Table,
-                                idx: Index::Ident(id_dash),
+                                idx: Index::Num(idx),
                             });
                             // 'export' can be chained by'import', 'export', 'elem' and tabletype
                         }
@@ -2154,18 +2149,17 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
 
                     parser.closing_paren("elem argument in table section")?;
                     parser.closing_paren("table")?;
-                    let id = id.unwrap_or_else(|| parser.fresh_id()); // id'
                     let n = init.len() as u32; // TODO: Check length <= 2^32
                     let table = Table {
                         start,
-                        id: Some(id),
+                        id,
                         ty: TableType {
                             limit: Limits::Range { min: n, max: n },
                         },
                     };
                     let elem = Elem {
                         start: elem_start,
-                        idx: Index::Ident(id),
+                        idx: Index::Num(idx),
                         offset: vec![Instruction {
                             start: elem_start,
                             kind: InsnKind::I32Const(0),
@@ -2249,7 +2243,8 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
         let start = parser.opening_paren("memory")?;
         match_token!(parser, "'memory' keyword", Token::Keyword("memory"));
 
-        let mut id = parser.maybe_ident("identifier for memory section")?;
+        let id = parser.maybe_ident("identifier for memory section")?;
+        let idx = parser.ctx.mem_indices.new_idx(id, start)?;
 
         loop {
             match parser.peek("argument of memory section")?.0 {
@@ -2278,13 +2273,11 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             //   note that this occurs repeatedly
                             let name = parser.parse()?;
                             parser.closing_paren("export argument in memory section")?;
-                            let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
-                            id = Some(id_dash);
                             parser.ctx.exports.push(Export {
                                 start,
                                 name,
                                 kind: ExportKind::Memory,
-                                idx: Index::Ident(id_dash),
+                                idx: Index::Num(idx),
                             });
                             // 'export' can be chained by'import', 'export', 'data' and tabletype
                         }
@@ -2315,22 +2308,20 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
                             }
                             parser.closing_paren("memory")?;
 
-                            let id = id.unwrap_or_else(|| parser.fresh_id()); // id'
-
                             // Infer memory limits from page size (64 * 1024 = 65536)
                             let n = (data.len() as f64 / 65536.0).ceil() as u32;
 
                             return Ok(MemoryAbbrev::Data(
                                 Memory {
                                     start,
-                                    id: Some(id),
+                                    id,
                                     ty: MemType {
                                         limit: Limits::Range { min: n, max: n },
                                     },
                                 },
                                 Data {
                                     start,
-                                    idx: Index::Ident(id),
+                                    idx: Index::Num(idx),
                                     offset: vec![Instruction {
                                         start,
                                         kind: InsnKind::I32Const(0),
@@ -2366,7 +2357,8 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
         let start = parser.opening_paren("global")?;
         match_token!(parser, "'global' keyword", Token::Keyword("global"));
 
-        let mut id = parser.maybe_ident("identifier for global section")?;
+        let id = parser.maybe_ident("identifier for global section")?;
+        let idx = parser.ctx.global_indices.new_idx(id, start)?;
 
         loop {
             match parser.peek("argument of global section")?.0 {
@@ -2396,13 +2388,11 @@ impl<'a> Parse<'a> for GlobalAbbrev<'a> {
                             //   note that this occurs repeatedly
                             let name = parser.parse()?;
                             parser.closing_paren("export argument in global section")?;
-                            let id_dash = id.unwrap_or_else(|| parser.fresh_id()); // id'
-                            id = Some(id_dash);
                             parser.ctx.exports.push(Export {
                                 start,
                                 name,
                                 kind: ExportKind::Global,
-                                idx: Index::Ident(id_dash),
+                                idx: Index::Num(idx),
                             });
                         }
                         "mut" => {
@@ -2511,11 +2501,10 @@ mod tests {
     }
 
     macro_rules! assert_parse {
-        ($parser:ident => $parser_init:expr, $input:expr, $node:ty, $expect:pat if $cond:expr) => {{
+        ($input:expr, $node:ty, $expect:pat if $cond:expr) => {{
             let input = $input;
-            let mut $parser = Parser::new(input);
-            $parser_init;
-            let node: $node = match $parser.parse() {
+            let mut parser = Parser::new(input);
+            let node: $node = match parser.parse() {
                 Ok(n) => n,
                 Err(e) => panic!("parse failed!: {}\n{:?}", e, e),
             };
@@ -2527,15 +2516,9 @@ mod tests {
                     stringify!($expect if $cond)
                 ),
             }
-            assert!($parser.is_done(), "{:?}", $parser.tokens.collect::<Vec<_>>());
-            $parser
+            assert!(parser.is_done(), "token is remaining: {:?}", parser.tokens.collect::<Vec<_>>());
+            parser
         }};
-        ($parser:ident => $parser_init:expr, $input:expr, $node:ty, $expect:pat) => {
-            assert_parse!($parser => $parser_init, $input, $node, $expect if true);
-        };
-        ($input:expr, $node:ty, $expect:pat if $cond:expr) => {
-            assert_parse!(p => (), $input, $node, $expect if $cond);
-        };
         ($input:expr, $node:ty, $expect:pat) => {
             assert_parse!($input, $node, $expect if true);
         };
@@ -2875,7 +2858,6 @@ mod tests {
     #[test]
     fn import() {
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(import "mod" "name" (func (type 0)))"#,
             Import<'_>,
             Import {
@@ -2907,6 +2889,20 @@ mod tests {
         assert_parse!(r#"(memory $foo 0)"#, ImportDesc<'_>, ImportDesc::Memory{ id: Some("$foo"), .. });
         assert_parse!(r#"(global i32)"#, ImportDesc<'_>, ImportDesc::Global{ id: None, .. });
         assert_parse!(r#"(global $foo i32)"#, ImportDesc<'_>, ImportDesc::Global{ id: Some("$foo"), .. });
+        let parser = assert_parse!(
+            r#"(module
+              (import "m" "f" (func $x))
+              (import "m" "t" (table $x 0 funcref))
+              (import "m" "m" (memory $x 1))
+              (import "m" "g" (global $x i32))
+            )"#,
+            Module<'_>,
+            Module{ imports, .. } if imports.len() == 4
+        );
+        assert_eq!(parser.ctx.func_indices.indices.len(), 1);
+        assert_eq!(parser.ctx.table_indices.indices.len(), 1);
+        assert_eq!(parser.ctx.mem_indices.indices.len(), 1);
+        assert_eq!(parser.ctx.global_indices.indices.len(), 1);
 
         assert_error!(r#"func"#, ImportDesc<'_>, MissingParen{ paren: '(', .. });
         assert_error!(r#"(func"#, ImportDesc<'_>, UnexpectedEndOfFile{ .. });
@@ -3161,7 +3157,6 @@ mod tests {
     #[test]
     fn func_field() {
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(func $f (import "m" "n") (type 0))"#,
             FuncAbbrev<'_>,
             FuncAbbrev::Import(Import {
@@ -3172,14 +3167,13 @@ mod tests {
             }) if m == "m" && n == "n"
         );
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(func $f (export "n") (type 0))"#,
             FuncAbbrev<'_>,
             FuncAbbrev::Export(
                 Export {
                     name: Name(n),
                     kind: ExportKind::Func,
-                    idx: Index::Ident("$f"),
+                    idx: Index::Num(0),
                     ..
                 },
                 Func {
@@ -3194,7 +3188,6 @@ mod tests {
             ) if n == "n" && locals.is_empty() && body.is_empty()
         );
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(func (type 0))"#,
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
@@ -3209,12 +3202,13 @@ mod tests {
             }) if locals.is_empty() && body.is_empty()
         );
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(func $f (type 0))"#,
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
                 id: Some("$f"),
-                ty: TypeUse { idx: Index::Num(0), .. },
+                ty: TypeUse {
+                    idx: Index::Num(0), ..
+                },
                 ..
             })
         );
@@ -3230,7 +3224,6 @@ mod tests {
             })
         );
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(func $f (type 0) (local))"#,
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
@@ -3244,7 +3237,6 @@ mod tests {
             }) if locals.is_empty()
         );
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(func $f (type 0) (local i32))"#,
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
@@ -3258,7 +3250,6 @@ mod tests {
             }) if locals[0].ty == ValType::I32 && locals[0].id == None
         );
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(func $f (type 0) (local $l i32))"#,
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
@@ -3272,7 +3263,6 @@ mod tests {
             }) if locals[0].ty == ValType::I32 && locals[0].id == Some("$l")
         );
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(func $f (type 0) (local i32 f64))"#,
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
@@ -3287,7 +3277,6 @@ mod tests {
                 locals.iter().map(|l| l.id).collect::<Vec<_>>() == vec![None, None]
         );
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(func $f (type 0) (local i32) (local f64))"#,
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
@@ -3302,7 +3291,6 @@ mod tests {
                 locals.iter().map(|l| l.id).collect::<Vec<_>>() == vec![None, None]
         );
         assert_parse!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"(func $f (type 0) (local $l1 i32) (local $l2 f64))"#,
             FuncAbbrev<'_>,
             FuncAbbrev::NoAbbrev(Func {
@@ -3690,7 +3678,6 @@ mod tests {
         assert_insn!(r#"call 0"#, [Call(Index::Num(0))]);
         assert_insn!(r#"call $f"#, [Call(Index::Ident("$f"))]);
         assert_insn!(
-            p => p.ctx.type_indices.new_idx(None, 0).unwrap(),
             r#"call_indirect (type 0)"#,
             [CallIndirect(TypeUse{ idx: Index::Num(0), .. })]
         );
@@ -4234,7 +4221,7 @@ mod tests {
             TableAbbrev<'_>,
             TableAbbrev::Elem(
                 Table{ id: Some("$tbl"), ty: TableType{ limit: Limits::Range{ min: 2, max: 2 } }, .. },
-                Elem{ idx: Index::Ident("$tbl"), offset, init, .. }
+                Elem{ idx: Index::Num(0), offset, init, .. }
             )
             if is_match!(offset[0].kind, InsnKind::I32Const(0)) &&
                is_match!(init[0], Index::Num(0)) && is_match!(init[1], Index::Num(1))
@@ -4274,7 +4261,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Table,
-                idx: Index::Ident("$tbl"),
+                idx: Index::Num(0),
                 ..
             } if n == "n" => { /* OK */ }
             e => panic!("did not match: {:?}", e),
@@ -4314,7 +4301,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Table,
-                idx: Index::Ident("$tbl"),
+                idx: Index::Num(0),
                 ..
             } if n == "n1" => { /* OK */ }
             e => panic!("did not match: {:?}", e),
@@ -4451,7 +4438,7 @@ mod tests {
                     ..
                 },
                 Data {
-                    idx: Index::Ident("$m"),
+                    idx: Index::Num(0),
                     offset,
                     data,
                     ..
@@ -4491,7 +4478,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Memory,
-                idx: Index::Ident("$m"),
+                idx: Index::Num(0),
                 ..
             } if n == "n" => { /* OK */ }
             e => panic!("did not match: {:?}", e),
@@ -4529,7 +4516,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Memory,
-                idx: Index::Ident("$m"),
+                idx: Index::Num(0),
                 ..
             } if n == "e" => { /* OK */ }
             e => panic!("did not match: {:?}", e),
@@ -4615,7 +4602,7 @@ mod tests {
             Export {
                 name: Name(n),
                 kind: ExportKind::Global,
-                idx: Index::Ident("$g"),
+                idx: Index::Num(0),
                 ..
             } if n == "n" => { /* OK */ }
             e => panic!("did not match: {:?}", e),
