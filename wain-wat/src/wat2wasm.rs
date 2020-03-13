@@ -126,7 +126,10 @@ impl<'a> LabelStack<'a> {
             }
             (Some(label), None) => label,
             (None, Some(id)) => id,
-            (None, None) => return Ok(self.stack.push(None)),
+            (None, None) => {
+                self.stack.push(None);
+                return Ok(());
+            }
         };
 
         if let Some(idx) = self.find(label) {

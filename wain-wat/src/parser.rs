@@ -45,6 +45,10 @@ pub enum ParseErrorKind<'a> {
         what: &'static str,
         scope: &'static str,
     },
+    ExpectEndOfFile {
+        token: Token<'a>,
+        after: &'static str,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -119,6 +123,7 @@ impl<'a> fmt::Display for ParseError<'a> {
                 write!(f, "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}", cur.idx, prev.idx, prev.start)?
             }
             IdAlreadyDefined{id, prev_idx, what, scope} => write!(f, "identifier '{}' for {} is already defined for index {} in the {}", id, what, prev_idx, scope)?,
+            ExpectEndOfFile{after, token} => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
         };
 
         let start = self.offset;
@@ -288,6 +293,7 @@ impl<'a> Parser<'a> {
         self.source
     }
 
+    #[allow(dead_code)] // for test
     fn is_done(&self) -> bool {
         self.tokens.peek().is_none()
     }
@@ -686,12 +692,19 @@ enum ModuleField<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
 impl<'a> Parse<'a> for Module<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        // TODO: Abbreviation
+        // Note: Abbreviation
         // In a source file, the toplevel (module ...) surrounding the module body may be omitted.
         // {modulefield}* == (module {modulefield}*)
 
-        let start = parser.opening_paren("module")?;
-        match_token!(parser, "'module' keyword", Token::Keyword("module"));
+        // XXX: By this, at least 2 tokens are necessary to parse module but empty string should be
+        // valid for module with abbreviation.
+        let (keyword, start) = parser.peek_fold_start("module")?;
+        let abbreviated = keyword != Some("module");
+        if !abbreviated {
+            parser.eat_token(); // eat '('
+            parser.eat_token(); // eat 'module
+        }
+
         let id = parser.maybe_ident("identifier for module")?;
 
         let mut funcs = vec![];
@@ -707,7 +720,15 @@ impl<'a> Parse<'a> for Module<'a> {
         parser.ctx.types.clear();
         parser.ctx.exports.clear();
 
-        while let (Token::LParen, _) = parser.peek("opening paren for starting module field")? {
+        loop {
+            match parser.tokens.peek() {
+                Some(Ok((Token::LParen, _))) => {} // fallthrough
+                Some(Ok(_)) => break,
+                Some(Err(err)) => return Err(err.clone().into()),
+                None if abbreviated => break, // with abbreviation, it may reach EOF
+                None => return parser.unexpected_eof("opening paren for starting module field"),
+            }
+
             match parser.parse()? {
                 ModuleField::Type(ty) => parser.ctx.types.push(ty),
                 ModuleField::Import(ImportItem::Func(func)) => funcs.push(func),
@@ -741,7 +762,20 @@ impl<'a> Parse<'a> for Module<'a> {
             }
         }
 
-        parser.closing_paren("module")?;
+        if abbreviated {
+            if let Some(Ok((token, offset))) = parser.tokens.peek() {
+                return parser.error(
+                    ParseErrorKind::ExpectEndOfFile {
+                        token: token.clone(),
+                        after: "abbreviated module",
+                    },
+                    *offset,
+                );
+            }
+        } else {
+            parser.closing_paren("module")?;
+        }
+
         Ok(Module {
             start,
             id,
@@ -2519,11 +2553,15 @@ mod tests {
         assert_parse!(r#"(module)"#, Module<'_>, Module { id: None, types, .. } if types.is_empty());
         assert_parse!(r#"(module $foo)"#, Module<'_>, Module { id: Some("$foo"), types, .. } if types.is_empty());
         assert_parse!(r#"(module $foo (type $f1 (func)))"#, Module<'_>, Module { id: Some("$foo"), types, .. } if types.len() == 1);
-        assert_parse!(r#"
+        assert_parse!(
+            r#"
             (module
-                (type $f1 (func))
-                (type $f2 (func)))
-        "#, Module<'_>, Module { id: None, types, .. } if types.len() == 2);
+              (type $f1 (func))
+              (type $f2 (func)))
+            "#,
+            Module<'_>,
+            Module { id: None, types, .. } if types.len() == 2
+        );
         assert_parse!(
             r#"(module (start $f))"#,
             Module<'_>,
@@ -2534,8 +2572,22 @@ mod tests {
             }
         );
         assert_parse!(r#"(module (func))"#, Module<'_>, Module { funcs, .. } if funcs.len() == 1);
+        assert_parse!(
+            r#"(module (start $f))"#,
+            Module<'_>,
+            Module {
+                id: None,
+                entrypoint: Some(Start{ idx: Index::Ident("$f"), .. }),
+                ..
+            }
+        );
+        // abbreviation
+        assert_parse!(
+            r#"(type $f1 (func)) (type $f2 (func))"#,
+            Module<'_>,
+            Module { id: None, types, .. } if types.len() == 2
+        );
 
-        assert_error!(r#"module"#, Module<'_>, MissingParen{ paren: '(', ..});
         assert_error!(r#"(module"#, Module<'_>, UnexpectedEndOfFile{..});
         assert_error!(r#"(module $foo (type $f (func))"#, Module<'_>, UnexpectedEndOfFile{..});
         assert_error!(
@@ -2550,6 +2602,12 @@ mod tests {
                     idx: Index::Num(3), ..
                 },
             )
+        );
+        // abbreviation
+        assert_error!(
+            r#"(type $f1 (func)) )"#,
+            Module<'_>,
+            ExpectEndOfFile { token: Token::RParen, .. }
         );
     }
 
