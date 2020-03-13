@@ -232,8 +232,9 @@ impl<'a> Indices<'a> {
         Ok(idx)
     }
 
-    fn into_map(self) -> HashMap<&'a str, u32> {
-        self.indices
+    fn move_out(&mut self) -> HashMap<&'a str, u32> {
+        self.next_idx = 0; // Clear next index for parsing next module
+        mem::replace(&mut self.indices, HashMap::new())
     }
 }
 
@@ -654,16 +655,13 @@ pub trait Parse<'a>: Sized {
 // https://webassembly.github.io/spec/core/text/modules.html
 impl<'a> Parse<'a> for Parsed<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let module: Module<'a> = parser.parse()?;
-        let ctx = mem::replace(&mut parser.ctx, ParseContext::new(parser.source));
-
         Ok(Parsed {
-            module,
-            type_indices: ctx.type_indices.into_map(),
-            func_indices: ctx.func_indices.into_map(),
-            table_indices: ctx.table_indices.into_map(),
-            mem_indices: ctx.mem_indices.into_map(),
-            global_indices: ctx.global_indices.into_map(),
+            module: parser.parse()?,
+            type_indices: parser.ctx.type_indices.move_out(),
+            func_indices: parser.ctx.func_indices.move_out(),
+            table_indices: parser.ctx.table_indices.move_out(),
+            mem_indices: parser.ctx.mem_indices.move_out(),
+            global_indices: parser.ctx.global_indices.move_out(),
         })
     }
 }
@@ -688,7 +686,10 @@ enum ModuleField<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
 impl<'a> Parse<'a> for Module<'a> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        // https://webassembly.github.io/spec/core/text/modules.html#text-module
+        // TODO: Abbreviation
+        // In a source file, the toplevel (module ...) surrounding the module body may be omitted.
+        // {modulefield}* == (module {modulefield}*)
+
         let start = parser.opening_paren("module")?;
         match_token!(parser, "'module' keyword", Token::Keyword("module"));
         let id = parser.maybe_ident("identifier for module")?;
@@ -2389,10 +2390,15 @@ mod tests {
         i.new_idx(Some("hi"), 0).unwrap();
         i.new_idx(None, 0).unwrap();
         i.new_idx(Some("bye"), 0).unwrap();
-        let map = i.into_map();
-        assert_eq!(map.get("hi"), Some(&1));
-        assert_eq!(map.get("bye"), Some(&3));
-        assert_eq!(map.get("hey"), None);
+        let m = i.move_out();
+        assert_eq!(m.get("hi"), Some(&1));
+        assert_eq!(m.get("bye"), Some(&3));
+        assert_eq!(m.get("hey"), None);
+
+        // Index is reset after move_out
+        i.new_idx("hi", 0).unwrap();
+        let m = i.move_out();
+        assert_eq!(m.get("hi"), Some(&0));
 
         let mut i = Indices::new("source", "what", "scope");
         i.new_idx(Some("hi"), 0).unwrap();
