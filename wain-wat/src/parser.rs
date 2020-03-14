@@ -297,8 +297,7 @@ impl<'a> Parser<'a> {
         self.source
     }
 
-    #[allow(dead_code)] // for test
-    fn is_done(&self) -> bool {
+    pub fn is_done(&self) -> bool {
         self.tokens.peek().is_none()
     }
 
@@ -306,7 +305,7 @@ impl<'a> Parser<'a> {
         self.parse()
     }
 
-    fn parse<P: Parse<'a>>(&mut self) -> Result<'a, P> {
+    pub fn parse<P: Parse<'a>>(&mut self) -> Result<'a, P> {
         Parse::<'a>::parse(self)
     }
 

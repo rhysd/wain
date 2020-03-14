@@ -20,6 +20,7 @@ pub type LabelIdx = u32;
 // https://webassembly.github.io/spec/core/syntax/modules.html
 pub struct Module<'a> {
     pub start: usize,
+    pub id: Option<&'a str>,
     pub types: Vec<FuncType>,
     pub exports: Vec<Export<'a>>,
     pub funcs: Vec<Func<'a>>,

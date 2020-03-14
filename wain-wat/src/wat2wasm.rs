@@ -295,6 +295,7 @@ impl<'a> Transform<'a> for wat::Module<'a> {
     fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
         Ok(wasm::Module {
             start: self.start,
+            id: self.id,
             types: self.types.transform(ctx)?,
             exports: self.exports.transform(ctx)?,
             funcs: self.funcs.transform(ctx)?,
