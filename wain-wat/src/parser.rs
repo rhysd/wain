@@ -49,6 +49,9 @@ pub enum ParseErrorKind<'a> {
         token: Token<'a>,
         after: &'static str,
     },
+    ImportMustPrecedeOtherDefs {
+        what: &'static str,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -124,6 +127,7 @@ impl<'a> fmt::Display for ParseError<'a> {
             }
             IdAlreadyDefined{id, prev_idx, what, scope} => write!(f, "identifier '{}' for {} is already defined for index {} in the {}", id, what, prev_idx, scope)?,
             ExpectEndOfFile{after, token} => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
+            ImportMustPrecedeOtherDefs{what} => write!(f, "import {} must be put before other {} definitions", what, what)?,
         };
 
         let start = self.offset;
@@ -715,6 +719,19 @@ impl<'a> Parse<'a> for Module<'a> {
         let mut globals = vec![];
         let mut entrypoint = None;
 
+        // Any import must be put before other definitions because indices of imports must precede
+        // indices of other definitions
+        //
+        // https://webassembly.github.io/spec/core/syntax/modules.html#indices
+        //
+        // > The index space for functions, tables, memories and globals includes respective imports
+        // > declared in the same module. The indices of these imports precede the indices of other
+        // > definitions in the same index space.
+        let mut can_import_func = true;
+        let mut can_import_table = true;
+        let mut can_import_mem = true;
+        let mut can_import_global = true;
+
         // Note: types are put in Parser struct field due to abbreviation of typeuse
         // https://webassembly.github.io/spec/core/text/modules.html#abbreviations
         parser.ctx.types.clear();
@@ -731,25 +748,75 @@ impl<'a> Parse<'a> for Module<'a> {
 
             match parser.parse()? {
                 ModuleField::Type(ty) => parser.ctx.types.push(ty),
+                ModuleField::Import(ImportItem::Func(func)) if !can_import_func => {
+                    return parser.error(
+                        ParseErrorKind::ImportMustPrecedeOtherDefs { what: "function" },
+                        func.start,
+                    );
+                }
                 ModuleField::Import(ImportItem::Func(func)) => funcs.push(func),
+                ModuleField::Import(ImportItem::Table(table)) if !can_import_table => {
+                    return parser.error(
+                        ParseErrorKind::ImportMustPrecedeOtherDefs { what: "table" },
+                        table.start,
+                    );
+                }
                 ModuleField::Import(ImportItem::Table(table)) => tables.push(table),
+                ModuleField::Import(ImportItem::Memory(memory)) if !can_import_mem => {
+                    return parser.error(
+                        ParseErrorKind::ImportMustPrecedeOtherDefs { what: "memory" },
+                        memory.start,
+                    );
+                }
                 ModuleField::Import(ImportItem::Memory(memory)) => memories.push(memory),
+                ModuleField::Import(ImportItem::Global(global)) if !can_import_global => {
+                    return parser.error(
+                        ParseErrorKind::ImportMustPrecedeOtherDefs { what: "global" },
+                        global.start,
+                    );
+                }
                 ModuleField::Import(ImportItem::Global(global)) => globals.push(global),
                 ModuleField::Export(export) => parser.ctx.exports.push(export),
-                ModuleField::Func(func) => funcs.push(func),
+                ModuleField::Func(func) => {
+                    if let FuncKind::Body { .. } = func.kind {
+                        can_import_func = false;
+                    }
+                    funcs.push(func);
+                }
                 ModuleField::Elem(elem) => elems.push(elem),
-                ModuleField::Table(TableAbbrev::Table(table)) => tables.push(table),
+                ModuleField::Table(TableAbbrev::Table(table)) => {
+                    if table.import.is_none() {
+                        can_import_table = false;
+                    }
+                    tables.push(table);
+                }
                 ModuleField::Table(TableAbbrev::Elem(table, elem)) => {
+                    if table.import.is_none() {
+                        can_import_table = false;
+                    }
                     tables.push(table);
                     elems.push(elem);
                 }
                 ModuleField::Data(d) => data.push(d),
-                ModuleField::Memory(MemoryAbbrev::Memory(m)) => memories.push(m),
+                ModuleField::Memory(MemoryAbbrev::Memory(m)) => {
+                    if m.import.is_none() {
+                        can_import_mem = false;
+                    }
+                    memories.push(m);
+                }
                 ModuleField::Memory(MemoryAbbrev::Data(m, d)) => {
+                    if m.import.is_none() {
+                        can_import_mem = false;
+                    }
                     memories.push(m);
                     data.push(d);
                 }
-                ModuleField::Global(global) => globals.push(global),
+                ModuleField::Global(global) => {
+                    if let GlobalKind::Init(_) = global.kind {
+                        can_import_global = false;
+                    }
+                    globals.push(global);
+                }
                 ModuleField::Start(start) => {
                     if let Some(prev) = entrypoint {
                         let offset = start.start;
@@ -2489,14 +2556,14 @@ mod tests {
             (module $m1
                 (type $t1 (func))
                 (type $t2 (func))
-                (func $f1)
                 (import "m" "n" (func $f2 (type 0)))
-                (table $tb1 0 funcref)
+                (func $f1)
                 (import "m" "n" (table $tb2 0 funcref))
-                (memory $m1 3)
+                (table $tb1 0 funcref)
                 (import "m" "n" (memory $m2 3))
-                (global $g1 i32 i32.const 0)
+                (memory $m1 3)
                 (import "m" "n" (global $g2 i32))
+                (global $g1 i32 i32.const 0)
                 (start $f1)
             )
             "#,
@@ -2608,6 +2675,48 @@ mod tests {
             r#"(type $f1 (func)) )"#,
             Module<'_>,
             ExpectEndOfFile { token: Token::RParen, .. }
+        );
+        // imports must be put before other definitions
+        assert_error!(
+            r#"
+            (module
+              (type $t1 (func))
+              (func $f1)
+              (import "m" "n" (func $f2 (type 0)))
+            )
+            "#,
+            Module<'_>,
+            ImportMustPrecedeOtherDefs { .. }
+        );
+        assert_error!(
+            r#"
+            (module
+              (table $tb1 0 funcref)
+              (import "m" "n" (table $tb2 0 funcref))
+            )
+            "#,
+            Module<'_>,
+            ImportMustPrecedeOtherDefs { .. }
+        );
+        assert_error!(
+            r#"
+            (module
+              (memory $m1 3)
+              (import "m" "n" (memory $m2 3))
+            )
+            "#,
+            Module<'_>,
+            ImportMustPrecedeOtherDefs { .. }
+        );
+        assert_error!(
+            r#"
+            (module
+              (global $g1 i32 i32.const 0)
+              (import "m" "n" (global $g2 i32))
+            )
+            "#,
+            Module<'_>,
+            ImportMustPrecedeOtherDefs { .. }
         );
     }
 
