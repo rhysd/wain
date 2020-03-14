@@ -37,7 +37,7 @@ impl<'a> fmt::Display for ComposeError<'a> {
 
         let start = self.offset;
         if start == self.source.len() {
-            write!(f, " at byte offset {} (end of input)", self.offset,)
+            write!(f, "caused at byte offset {} (end of input)", self.offset,)
         } else {
             let source = &self.source[start..];
             let end = source
@@ -45,7 +45,7 @@ impl<'a> fmt::Display for ComposeError<'a> {
                 .unwrap_or_else(|| source.len());
             write!(
                 f,
-                " at byte offset {}\n\n ... {}\n     ^\n     start from here",
+                "caused at byte offset {}\n\n ... {}\n     ^\n     start from here",
                 self.offset,
                 &source[..end],
             )
