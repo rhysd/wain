@@ -77,7 +77,9 @@ impl<'a> fmt::Display for ParseError<'a> {
         use ParseErrorKind::*;
         match &self.kind {
             LexError(err) => return err.fmt(f),
-            UnexpectedToken { got, expected } => write!(f, "expected {} but got {}", expected, got)?,
+            UnexpectedToken { got, expected } => {
+                write!(f, "expected {} but got {}", expected, got)?
+            }
             UnexpectedEndOfFile { expected } => write!(f, "expected {} but reached EOF", expected)?,
             UnexpectedKeyword(kw) => write!(f, "unexpected keyword '{}'", kw)?,
             InvalidValType(ty) => write!(
@@ -85,17 +87,25 @@ impl<'a> fmt::Display for ParseError<'a> {
                 "value type must be one of 'i32', 'i64', 'f32', 'f64' but got '{}'",
                 ty
             )?,
-            InvalidStringFormat(reason) => write!(f, "could not decode string literal: {}", reason)?,
-            NumberMustBePositive(base, s) => write!(f, "number must be positive but got -{}{}", base.prefix(), s)?,
+            InvalidStringFormat(reason) => {
+                write!(f, "could not decode string literal: {}", reason)?
+            }
+            NumberMustBePositive(base, s) => {
+                write!(f, "number must be positive but got -{}{}", base.prefix(), s)?
+            }
             MissingParen {
                 paren,
                 got: Some(tok),
                 what,
             } => write!(f, "expected paren '{}' for {} but got {}", paren, what, tok)?,
-            MissingParen { paren, got: None, what } => {
-                write!(f, "expected paren '{}' for {} but reached EOF", paren, what)?
+            MissingParen {
+                paren,
+                got: None,
+                what,
+            } => write!(f, "expected paren '{}' for {} but reached EOF", paren, what)?,
+            InvalidOperand { insn, msg } => {
+                write!(f, "invalid operand for '{}' instruction: {}", insn, msg)?
             }
-            InvalidOperand { insn, msg } => write!(f, "invalid operand for '{}' instruction: {}", insn, msg)?,
             CannotParseNum {
                 digits,
                 reason,
@@ -104,28 +114,21 @@ impl<'a> fmt::Display for ParseError<'a> {
             } => {
                 let base = if *base == NumBase::Hex { "0x" } else { "" };
                 let sign = if *sign == Sign::Minus { "-" } else { "" };
-                write!(f, "cannot parse integer {}{}{}: {}", sign, base, digits, reason)?
+                write!(
+                    f,
+                    "cannot parse integer {}{}{}: {}",
+                    sign, base, digits, reason
+                )?
             }
-            InvalidAlignment(align) => write!(f, "alignment value must be 2^N but got {:x}", align)?,
-            MultipleEntrypoints(prev, cur) => write!(
-                f,
-                "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}",
-                cur.idx, prev.idx, prev.start
-            )?,
-            IdAlreadyDefined {
-                id,
-                prev_idx,
-                what,
-                scope,
-            } => write!(
-                f,
-                "identifier '{}' for {} is already defined for index {} in the {}",
-                id, what, prev_idx, scope
-            )?,
-            ExpectEndOfFile { after, token } => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
-            ImportMustPrecedeOtherDefs { what } => {
-                write!(f, "import {} must be put before other {} definitions", what, what)?
+            InvalidAlignment(align) => {
+                write!(f, "alignment value must be 2^N but got {:x}", align)?
             }
+            MultipleEntrypoints(prev, cur) => {
+                write!(f, "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}", cur.idx, prev.idx, prev.start)?
+            }
+            IdAlreadyDefined{id, prev_idx, what, scope} => write!(f, "identifier '{}' for {} is already defined for index {} in the {}", id, what, prev_idx, scope)?,
+            ExpectEndOfFile{after, token} => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
+            ImportMustPrecedeOtherDefs{what} => write!(f, "import {} must be put before other {} definitions", what, what)?,
         };
 
         describe_position(f, self.source, self.offset)

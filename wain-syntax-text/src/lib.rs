@@ -2,19 +2,23 @@
 
 extern crate wain_ast;
 
+mod compose;
+mod util;
+
 pub mod ast;
 pub mod lexer;
 pub mod parser;
-mod util;
 pub mod wat2wasm;
 
+use compose::{ComposeError, Composer};
 use parser::{ParseError, Parser};
 use std::fmt;
-use wat2wasm::TransformError;
+use wat2wasm::{wat2wasm, TransformError};
 
 pub enum Error<'a> {
     Parse(Box<ParseError<'a>>),
     Transform(Box<TransformError<'a>>),
+    Compose(Box<ComposeError<'a>>),
 }
 
 macro_rules! from_errors {
@@ -41,17 +45,20 @@ macro_rules! from_errors {
 from_errors! {
     ParseError<'a> => Parse,
     TransformError<'a> => Transform,
+    ComposeError<'a> => Compose,
 }
 
 pub fn parse(source: &'_ str) -> Result<wain_ast::Root<'_>, Error<'_>> {
     let mut parser = Parser::new(source);
     let parsed = parser.parse()?;
-    let mut tree = wat2wasm::from_wat(parsed, source)?;
+    let mut tree = wat2wasm(parsed, source)?;
 
     // Compose multiple modules: https://webassembly.github.io/spec/core/text/modules.html#text-module
     while !parser.is_done() {
         let parsed = parser.parse()?;
-        wat2wasm::compose(&mut tree.module, parsed, source)?;
+        let module = wat2wasm(parsed, source)?.module;
+        let composer = Composer::new(tree.module, source);
+        tree.module = composer.compose(module)?;
     }
 
     Ok(tree)

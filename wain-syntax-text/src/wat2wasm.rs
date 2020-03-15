@@ -20,13 +20,6 @@ pub enum TransformErrorKind<'a> {
         label: &'a str,
         id: &'a str,
     },
-    ModulesNotComposable {
-        dest_mod_id: Option<&'a str>,
-        dest_mod_offset: usize,
-        src_mod_id: Option<&'a str>,
-        src_mod_offset: usize,
-        msg: String,
-    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -51,11 +44,11 @@ impl<'a> fmt::Display for TransformError<'a> {
         use TransformErrorKind::*;
         match &self.kind {
             IdIsNotDefined { id, what } => {
-                write!(f, "no identifier '{}' for {} is found", id, what)?
+                write!(f, "No identifier '{}' for {} is found", id, what)?
             }
             IdAlreadyDefined { id, idx, what } => write!(
                 f,
-                "identifier '{}' is already defined to be mapped to index {} for {}",
+                "Identifier '{}' is already defined to be mapped to index {} for {}",
                 id, idx, what
             )?,
             LabelAndIdMismatch { label, id } => write!(
@@ -63,28 +56,6 @@ impl<'a> fmt::Display for TransformError<'a> {
                 "in control instruction, label '{}' and identifier '{}' must be the same",
                 label, id
             )?,
-            ModulesNotComposable {
-                dest_mod_id,
-                dest_mod_offset,
-                src_mod_id,
-                src_mod_offset,
-                msg,
-            } => {
-                f.write_str("module ")?;
-                if let Some(id) = src_mod_id {
-                    write!(f, "'{}' ", id)?;
-                }
-                write!(
-                    f,
-                    "at offset {} cannot be merged into existing module ",
-                    src_mod_offset
-                )?;
-
-                if let Some(id) = dest_mod_id {
-                    write!(f, "'{}' ", id)?;
-                }
-                write!(f, "at offset {}: {}", dest_mod_offset, msg)?;
-            }
         }
 
         describe_position(f, self.source, self.offset)
@@ -93,42 +64,7 @@ impl<'a> fmt::Display for TransformError<'a> {
 
 type Result<'a, T> = ::std::result::Result<T, Box<TransformError<'a>>>;
 
-struct Indices<'a> {
-    map: HashMap<&'a str, u32>,
-    base: u32,
-    what: &'static str,
-    source: &'a str,
-}
-impl<'a> Indices<'a> {
-    fn new(map: HashMap<&'a str, u32>, base: usize, what: &'static str, source: &'a str) -> Self {
-        Indices {
-            map,
-            base: base as u32, // pass usize for length of Vec
-            what,
-            source,
-        }
-    }
-
-    fn resolve(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
-        match idx {
-            wat::Index::Num(i) => Ok(i + self.base),
-            wat::Index::Ident(id) => {
-                if let Some(idx) = self.map.get(id) {
-                    Ok(*idx + self.base)
-                } else {
-                    Err(TransformError::new(
-                        TransformErrorKind::IdIsNotDefined {
-                            id,
-                            what: self.what,
-                        },
-                        offset,
-                        self.source,
-                    ))
-                }
-            }
-        }
-    }
-}
+type Indices<'a> = HashMap<&'a str, u32>;
 
 struct LabelStack<'a> {
     source: &'a str,
@@ -234,15 +170,58 @@ struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
+    fn resolve_index(
+        &self,
+        indices: &Indices,
+        idx: wat::Index<'a>,
+        offset: usize,
+        what: &'static str,
+    ) -> Result<'a, u32> {
+        match idx {
+            wat::Index::Num(i) => Ok(i),
+            wat::Index::Ident(id) => {
+                if let Some(idx) = indices.get(id) {
+                    Ok(*idx)
+                } else {
+                    Err(TransformError::new(
+                        TransformErrorKind::IdIsNotDefined { id, what },
+                        offset,
+                        self.source,
+                    ))
+                }
+            }
+        }
+    }
+
+    fn resolve_type_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+        self.resolve_index(&self.type_indices, idx, offset, "type")
+    }
+
+    fn resolve_func_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+        self.resolve_index(&self.func_indices, idx, offset, "function")
+    }
+
+    fn resolve_table_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+        self.resolve_index(&self.table_indices, idx, offset, "table")
+    }
+
+    fn resolve_mem_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+        self.resolve_index(&self.mem_indices, idx, offset, "memory")
+    }
+
+    fn resolve_global_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+        self.resolve_index(&self.global_indices, idx, offset, "global")
+    }
+
     fn start_func_scope(&mut self) {
         self.next_local_idx = 0;
-        self.local_indices.map.clear();
+        self.local_indices.clear();
     }
 
     fn new_local_idx(&mut self, id: Option<&'a str>, offset: usize) -> Result<'a, u32> {
         let idx = self.next_local_idx;
         if let Some(id) = id {
-            if let Some(idx) = self.local_indices.map.insert(id, idx) {
+            if let Some(idx) = self.local_indices.insert(id, idx) {
                 return Err(TransformError::new(
                     TransformErrorKind::IdAlreadyDefined {
                         id,
@@ -257,131 +236,26 @@ impl<'a> Context<'a> {
         self.next_local_idx += 1;
         Ok(idx)
     }
+
+    fn resolve_local_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+        self.resolve_index(&self.local_indices, idx, offset, "local variable")
+    }
 }
 
-pub fn from_wat<'a>(parsed: wat::Parsed<'a>, source: &'a str) -> Result<'a, wasm::Root<'a>> {
+pub fn wat2wasm<'a>(parsed: wat::Parsed<'a>, source: &'a str) -> Result<'a, wasm::Root<'a>> {
     let mut ctx = Context {
         source,
-        type_indices: Indices::new(parsed.type_indices, 0, "type", source),
-        func_indices: Indices::new(parsed.func_indices, 0, "function", source),
-        table_indices: Indices::new(parsed.table_indices, 0, "table", source),
-        mem_indices: Indices::new(parsed.mem_indices, 0, "memory", source),
-        global_indices: Indices::new(parsed.global_indices, 0, "global", source),
-        local_indices: Indices::new(HashMap::new(), 0, "local variable", source),
+        type_indices: parsed.type_indices,
+        func_indices: parsed.func_indices,
+        table_indices: parsed.table_indices,
+        mem_indices: parsed.mem_indices,
+        global_indices: parsed.global_indices,
+        local_indices: Indices::new(),
         next_local_idx: 0,
         label_stack: LabelStack::new(source),
     };
     let module = parsed.module.transform(&mut ctx)?;
     Ok(wasm::Root { module })
-}
-
-// Compose a new module into existing one with transform
-pub fn compose<'a>(
-    dest: &mut wasm::Module<'a>,
-    parsed: wat::Parsed<'a>,
-    source: &'a str,
-) -> Result<'a, ()> {
-    // https://webassembly.github.io/spec/core/text/modules.html#text-module
-    //
-    // The following restrictions are imposed on the composition of modules: `m1 ⊕ m2` is
-    // defined if and only if
-    //
-    // - m1.start = ϵ ∨ m2.start = ϵ
-    // - m1.funcs = m1.tables = m1.mems = m1.globals = ϵ ∨ m2.imports = ϵ
-    //
-
-    // Check m1.start = ϵ ∨ m2.start = ϵ
-    if let (Some(s1), Some(s2)) = (&dest.entrypoint, &parsed.module.entrypoint) {
-        let msg = format!(
-            "start function can appear only once across modules: previous start function was defined at offset {}",
-            s1.start
-        );
-        return Err(TransformError::new(
-            TransformErrorKind::ModulesNotComposable {
-                dest_mod_id: dest.id,
-                dest_mod_offset: dest.start,
-                src_mod_id: parsed.module.id,
-                src_mod_offset: parsed.module.start,
-                msg,
-            },
-            s2.start,
-            source,
-        ));
-    }
-
-    // Check m1.funcs = m1.tables = m1.mems = m1.globals = ϵ ∨ m2.imports = ϵ
-    let module = parsed.module;
-    let no_func_import =
-        module.funcs.is_empty() || matches!(module.funcs[0].kind, wat::FuncKind::Body{..});
-    let no_table_import = module.tables.is_empty() || module.tables[0].import.is_none();
-    let no_mem_import = module.memories.is_empty() || module.memories[0].import.is_none();
-    let no_global_import =
-        module.globals.is_empty() || matches!(module.globals[0].kind, wat::GlobalKind::Init(_));
-    let no_import = no_func_import && no_table_import && no_mem_import && no_global_import;
-    if !(dest.funcs.is_empty()
-        && dest.tables.is_empty()
-        && dest.memories.is_empty()
-        && dest.globals.is_empty()
-        || no_import)
-    {
-        let msg = "when module M1 is merged into module M2, one of (1) or (2) must be met. \
-                        (1) M1 has no 'import' section. \
-                        (2) M2 has no 'func', 'table', 'memory' sections"
-            .to_string();
-        return Err(TransformError::new(
-            TransformErrorKind::ModulesNotComposable {
-                dest_mod_id: dest.id,
-                dest_mod_offset: dest.start,
-                src_mod_id: module.id,
-                src_mod_offset: module.start,
-                msg,
-            },
-            dest.start,
-            source,
-        ));
-    }
-
-    // Adjust fields of AST nodes for composing one module into another.
-    // Indices of functions, tables, memories, globals and types are module local things. When two
-    // modules are composed, these indices in the merged module need to be updated.
-    // This visitor also checks the condition of composing two modules.
-    let ctx = &mut Context {
-        source,
-        type_indices: Indices::new(parsed.type_indices, dest.types.len(), "type", source),
-        func_indices: Indices::new(parsed.func_indices, dest.funcs.len(), "function", source),
-        table_indices: Indices::new(parsed.table_indices, dest.tables.len(), "table", source),
-        mem_indices: Indices::new(parsed.mem_indices, dest.memories.len(), "memory", source),
-        global_indices: Indices::new(parsed.global_indices, dest.globals.len(), "global", source),
-        local_indices: Indices::new(HashMap::new(), 0, "local variable", source),
-        next_local_idx: 0,
-        label_stack: LabelStack::new(source),
-    };
-
-    fn transform_append<'a, T: Transform<'a>>(
-        dest: &mut Vec<T::Target>,
-        src: Vec<T>,
-        ctx: &mut Context<'a>,
-    ) -> Result<'a, ()> {
-        for item in src.into_iter() {
-            dest.push(item.transform(ctx)?);
-        }
-        Ok(())
-    }
-
-    // Compose all module fields
-    transform_append(&mut dest.types, module.types, ctx)?;
-    transform_append(&mut dest.exports, module.exports, ctx)?;
-    transform_append(&mut dest.funcs, module.funcs, ctx)?;
-    transform_append(&mut dest.elems, module.elems, ctx)?;
-    transform_append(&mut dest.tables, module.tables, ctx)?;
-    transform_append(&mut dest.data, module.data, ctx)?;
-    transform_append(&mut dest.memories, module.memories, ctx)?;
-    transform_append(&mut dest.globals, module.globals, ctx)?;
-    if let Some(start) = module.entrypoint.transform(ctx)? {
-        dest.entrypoint = Some(start);
-    }
-
-    Ok(())
 }
 
 trait Transform<'a>: Sized {
@@ -471,19 +345,19 @@ impl<'a> Transform<'a> for wat::Export<'a> {
             name: self.name.transform(ctx)?,
             kind: match self.kind {
                 wat::ExportKind::Func => {
-                    let idx = ctx.func_indices.resolve(self.idx, start)?;
+                    let idx = ctx.resolve_func_idx(self.idx, start)?;
                     wasm::ExportKind::Func(idx)
                 }
                 wat::ExportKind::Table => {
-                    let idx = ctx.table_indices.resolve(self.idx, start)?;
+                    let idx = ctx.resolve_table_idx(self.idx, start)?;
                     wasm::ExportKind::Table(idx)
                 }
                 wat::ExportKind::Memory => {
-                    let idx = ctx.mem_indices.resolve(self.idx, start)?;
+                    let idx = ctx.resolve_mem_idx(self.idx, start)?;
                     wasm::ExportKind::Memory(idx)
                 }
                 wat::ExportKind::Global => {
-                    let idx = ctx.global_indices.resolve(self.idx, start)?;
+                    let idx = ctx.resolve_global_idx(self.idx, start)?;
                     wasm::ExportKind::Global(idx)
                 }
             },
@@ -579,28 +453,28 @@ impl<'a> Transform<'a> for wat::Instruction<'a> {
                 default_label: ctx.label_stack.resolve(default_label, start)?,
             },
             wat::InsnKind::Return => wasm::InsnKind::Return,
-            wat::InsnKind::Call(idx) => wasm::InsnKind::Call(ctx.func_indices.resolve(idx, start)?),
+            wat::InsnKind::Call(idx) => wasm::InsnKind::Call(ctx.resolve_func_idx(idx, start)?),
             wat::InsnKind::CallIndirect(ty) => {
-                wasm::InsnKind::CallIndirect(ctx.type_indices.resolve(ty.idx, start)?)
+                wasm::InsnKind::CallIndirect(ctx.resolve_type_idx(ty.idx, start)?)
             }
             // Parametric instructions
             wat::InsnKind::Drop => wasm::InsnKind::Drop,
             wat::InsnKind::Select => wasm::InsnKind::Select,
             // Variable instructions
             wat::InsnKind::LocalGet(idx) => {
-                wasm::InsnKind::LocalGet(ctx.local_indices.resolve(idx, start)?)
+                wasm::InsnKind::LocalGet(ctx.resolve_local_idx(idx, start)?)
             }
             wat::InsnKind::LocalSet(idx) => {
-                wasm::InsnKind::LocalSet(ctx.local_indices.resolve(idx, start)?)
+                wasm::InsnKind::LocalSet(ctx.resolve_local_idx(idx, start)?)
             }
             wat::InsnKind::LocalTee(idx) => {
-                wasm::InsnKind::LocalTee(ctx.local_indices.resolve(idx, start)?)
+                wasm::InsnKind::LocalTee(ctx.resolve_local_idx(idx, start)?)
             }
             wat::InsnKind::GlobalGet(idx) => {
-                wasm::InsnKind::GlobalGet(ctx.global_indices.resolve(idx, start)?)
+                wasm::InsnKind::GlobalGet(ctx.resolve_global_idx(idx, start)?)
             }
             wat::InsnKind::GlobalSet(idx) => {
-                wasm::InsnKind::GlobalSet(ctx.global_indices.resolve(idx, start)?)
+                wasm::InsnKind::GlobalSet(ctx.resolve_global_idx(idx, start)?)
             }
             // Memory instructions
             wat::InsnKind::I32Load(mem) => wasm::InsnKind::I32Load(mem.transform(ctx)?),
@@ -777,7 +651,7 @@ impl<'a> Transform<'a> for wat::Func<'a> {
     fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
         Ok(wasm::Func {
             start: self.start,
-            idx: ctx.type_indices.resolve(self.ty.idx, self.start)?,
+            idx: ctx.resolve_type_idx(self.ty.idx, self.start)?,
             kind: match self.kind {
                 wat::FuncKind::Import(import) => wasm::FuncKind::Import(import.transform(ctx)?),
                 wat::FuncKind::Body { locals, body } => {
@@ -808,12 +682,12 @@ impl<'a> Transform<'a> for wat::Elem<'a> {
         let start = self.start;
         Ok(wasm::ElemSegment {
             start,
-            idx: ctx.table_indices.resolve(self.idx, start)?,
+            idx: ctx.resolve_table_idx(self.idx, start)?,
             offset: self.offset.transform(ctx)?,
             init: self
                 .init
                 .into_iter()
-                .map(|idx| ctx.func_indices.resolve(idx, start))
+                .map(|idx| ctx.resolve_func_idx(idx, start))
                 .collect::<Result<'_, _>>()?,
         })
     }
@@ -847,7 +721,7 @@ impl<'a> Transform<'a> for wat::Data<'a> {
     fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
         Ok(wasm::DataSegment {
             start: self.start,
-            idx: ctx.mem_indices.resolve(self.idx, self.start)?,
+            idx: ctx.resolve_mem_idx(self.idx, self.start)?,
             offset: self.offset.transform(ctx)?,
             data: self.data,
         })
@@ -896,7 +770,7 @@ impl<'a> Transform<'a> for wat::Start<'a> {
     fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
         Ok(wasm::StartFunction {
             start: self.start,
-            idx: ctx.func_indices.resolve(self.idx, self.start)?,
+            idx: ctx.resolve_func_idx(self.idx, self.start)?,
         })
     }
 }
