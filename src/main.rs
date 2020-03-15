@@ -8,7 +8,7 @@ fn main() {
         eprintln!("{}", e);
         exit(1);
     }
-    let _ast = match wain_wat::parse(&stdin) {
+    let _ast = match wain_syntax_text::parse(&stdin) {
         Ok(ast) => ast,
         Err(e) => {
             eprintln!("{}", e);

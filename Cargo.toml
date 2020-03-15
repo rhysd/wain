@@ -13,11 +13,11 @@ name = "wain"
 
 [dependencies]
 wain-ast = { path = "./wain-ast" }
-wain-wat = { path = "./wain-wat" }
+wain-syntax-text = { path = "./wain-syntax-text" }
 
 [workspace]
 members = [
     ".",
     "wain-ast",
-    "wain-wat",
+    "wain-syntax-text",
 ]
