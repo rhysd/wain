@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::lexer::{Float, LexError, Lexer, NumBase, Sign, Token};
+use crate::util::describe_position;
 use std::borrow::Cow;
 use std::char;
 use std::collections::HashMap;
@@ -130,21 +131,7 @@ impl<'a> fmt::Display for ParseError<'a> {
             ImportMustPrecedeOtherDefs{what} => write!(f, "import {} must be put before other {} definitions", what, what)?,
         };
 
-        let start = self.offset;
-        if start == self.source.len() {
-            write!(f, " at byte offset {} (end of input)", self.offset,)
-        } else {
-            let source = &self.source[start..];
-            let end = source
-                .find(['\n', '\r'].as_ref())
-                .unwrap_or_else(|| source.len());
-            write!(
-                f,
-                " at byte offset {}\n\n ... {}\n     ^\n     start from here",
-                self.offset,
-                &source[..end],
-            )
-        }
+        describe_position(f, self.source, self.offset)
     }
 }
 

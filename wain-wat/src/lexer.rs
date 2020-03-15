@@ -1,3 +1,4 @@
+use crate::util::describe_position;
 use std::char;
 use std::fmt;
 use std::iter;
@@ -48,17 +49,7 @@ impl<'a> fmt::Display for LexError<'a> {
             }
             UnexpectedCharacter(c) => write!(f, "unexpected character '{}'", c)?,
         }
-
-        let start = self.offset;
-        let end = self.source[start..]
-            .find(['\n', '\r'].as_ref())
-            .unwrap_or_else(|| self.source.len());
-        write!(
-            f,
-            " at byte offset {}\n\n ... {}\n     ^",
-            self.offset,
-            &self.source[start..end]
-        )
+        describe_position(f, self.source, self.offset)
     }
 }
 

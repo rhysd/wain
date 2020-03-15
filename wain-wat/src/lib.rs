@@ -2,8 +2,10 @@
 
 extern crate wain_ast;
 
-pub mod ast;
 mod compose;
+mod util;
+
+pub mod ast;
 pub mod lexer;
 pub mod parser;
 pub mod wat2wasm;
@@ -51,6 +53,7 @@ pub fn parse(source: &'_ str) -> Result<wain_ast::Root<'_>, Error<'_>> {
     let parsed = parser.parse()?;
     let mut tree = wat2wasm(parsed, source)?;
 
+    // Compose multiple modules: https://webassembly.github.io/spec/core/text/modules.html#text-module
     while !parser.is_done() {
         let parsed = parser.parse()?;
         let module = wat2wasm(parsed, source)?.module;

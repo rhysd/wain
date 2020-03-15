@@ -5,6 +5,8 @@
 //
 // - m1.start = ϵ ∨ m2.start = ϵ
 // - m1.funcs = m1.tables = m1.mems = m1.globals = ϵ ∨ m2.imports = ϵ
+//
+use crate::util::describe_position;
 use std::fmt;
 use wain_ast::*;
 
@@ -35,21 +37,7 @@ impl<'a> fmt::Display for ComposeError<'a> {
         }
         write!(f, "at offset {}: {}", self.dest_mod_offset, self.msg)?;
 
-        let start = self.offset;
-        if start == self.source.len() {
-            write!(f, "caused at byte offset {} (end of input)", self.offset,)
-        } else {
-            let source = &self.source[start..];
-            let end = source
-                .find(['\n', '\r'].as_ref())
-                .unwrap_or_else(|| source.len());
-            write!(
-                f,
-                "caused at byte offset {}\n\n ... {}\n     ^\n     start from here",
-                self.offset,
-                &source[..end],
-            )
-        }
+        describe_position(f, self.source, self.offset)
     }
 }
 
