@@ -741,22 +741,13 @@ impl<'a> Transform<'a> for wat::Memory<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::GlobalType {
-    type Target = wasm::GlobalType;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
-        Ok(wasm::GlobalType {
-            mutable: self.mutable,
-            ty: self.ty.transform(ctx)?,
-        })
-    }
-}
-
 impl<'a> Transform<'a> for wat::Global<'a> {
     type Target = wasm::Global<'a>;
     fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
         Ok(wasm::Global {
             start: self.start,
-            ty: self.ty.transform(ctx)?,
+            mutable: self.ty.mutable,
+            ty: self.ty.ty.transform(ctx)?,
             kind: match self.kind {
                 wat::GlobalKind::Import(import) => wasm::GlobalKind::Import(import.transform(ctx)?),
                 wat::GlobalKind::Init(init) => wasm::GlobalKind::Init(init.transform(ctx)?),

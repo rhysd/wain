@@ -35,6 +35,14 @@ pub enum ErrorKind {
     LabelStackEmpty {
         op: &'static str,
     },
+    SetImmutableGlobal {
+        ty: ValType,
+        idx: u32,
+    },
+    TooLargeAlign {
+        align: u32,
+        bits: u8,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -121,6 +129,8 @@ impl<'a> fmt::Display for Error<'a> {
                 "empty control frame cannot be empty at '{}' instruction. the frame started at byte offset {} and top of \
                  control frame is op_stack[{}]", op, frame_start, idx_in_op_stack)?,
             LabelStackEmpty { op } => write!(f, "label stack for control instructions is unexpectedly empty at '{}' instruction", op)?,
+            SetImmutableGlobal{ ty, idx } => write!(f, "{} value cannot be set to immutable global variable {}", ty, idx)?,
+            TooLargeAlign { align, bits } => write!(f, "align {} must not be larger than {}bits / 8", align, bits)?,
         }
 
         if self.offset == self.source.len() {
