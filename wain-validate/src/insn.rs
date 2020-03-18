@@ -16,6 +16,20 @@ enum Type {
     Known(ValType),
     Unknown,
 }
+impl Type {
+    fn i32() -> Type {
+        Type::Known(ValType::I32)
+    }
+    fn i64() -> Type {
+        Type::Known(ValType::I64)
+    }
+    fn f32() -> Type {
+        Type::Known(ValType::F32)
+    }
+    fn f64() -> Type {
+        Type::Known(ValType::F64)
+    }
+}
 
 struct CtrlFrame {
     idx: usize,
@@ -169,7 +183,7 @@ impl<'outer, 'm, 'a> Context<'outer, 'm, 'a> {
 
     fn validate_load(&mut self, mem: &Mem, bits: u8, ty: ValType) -> Result<'a, ()> {
         self.validate_memarg(mem, bits)?;
-        self.pop_op_stack(Type::Known(ValType::I32))?; // load address
+        self.pop_op_stack(Type::i32())?; // load address
         self.op_stack.push(Type::Known(ty));
         Ok(())
     }
@@ -177,7 +191,7 @@ impl<'outer, 'm, 'a> Context<'outer, 'm, 'a> {
     fn validate_store(&mut self, mem: &Mem, bits: u8, ty: ValType) -> Result<'a, ()> {
         self.validate_memarg(mem, bits)?;
         self.pop_op_stack(Type::Known(ty))?; // value to store
-        self.pop_op_stack(Type::Known(ValType::I32))?; // store address
+        self.pop_op_stack(Type::i32())?; // store address
         Ok(())
     }
 
@@ -268,7 +282,7 @@ impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
                 else_body,
             } => {
                 // Condition
-                ctx.pop_op_stack(Type::Known(ValType::I32))?;
+                ctx.pop_op_stack(Type::i32())?;
                 ctx.label_stack.push(*ty);
 
                 let saved = ctx.push_control_frame(start);
@@ -302,7 +316,7 @@ impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-if
             BrIf(labelidx) => {
                 // Condition
-                ctx.pop_op_stack(Type::Known(ValType::I32))?;
+                ctx.pop_op_stack(Type::i32())?;
                 ctx.validate_label_idx(*labelidx)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-table
@@ -347,7 +361,7 @@ impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
             CallIndirect(typeidx) => {
                 ctx.outer.table_from_idx(0, start)?;
                 // Check table index
-                ctx.pop_op_stack(Type::Known(ValType::I32))?;
+                ctx.pop_op_stack(Type::i32())?;
                 let fty = ctx.outer.type_from_idx(*typeidx, start)?;
                 for ty in fty.params.iter() {
                     ctx.pop_op_stack(Type::Known(*ty))?;
@@ -364,7 +378,7 @@ impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
             Select => {
                 ctx.pop_op_stack(Type::Unknown)?;
                 ctx.pop_op_stack(Type::Unknown)?;
-                ctx.pop_op_stack(Type::Known(ValType::I32))?;
+                ctx.pop_op_stack(Type::i32())?;
                 // 'select' instruction is value-polymorphic. The value pushed here is
                 // one of the first or second value. The value is checked dynamically
                 ctx.op_stack.push(Type::Unknown);
@@ -432,91 +446,91 @@ impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-memory-size
             MemorySize => {
                 // module.memories[0] was already verified.
-                ctx.op_stack.push(Type::Known(ValType::I32));
+                ctx.op_stack.push(Type::i32());
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-memory-grow
             MemoryGrow => {
                 // module.memories[0] was already verified.
                 // pop i32 and push i32
-                ctx.ensure_op_stack_top(Type::Known(ValType::I32))?;
+                ctx.ensure_op_stack_top(Type::i32())?;
             }
             I32Const(_) => {
-                ctx.op_stack.push(Type::Known(ValType::I32));
+                ctx.op_stack.push(Type::i32());
             }
             I64Const(_) => {
-                ctx.op_stack.push(Type::Known(ValType::I64));
+                ctx.op_stack.push(Type::i64());
             }
             F32Const(_) => {
-                ctx.op_stack.push(Type::Known(ValType::F32));
+                ctx.op_stack.push(Type::f32());
             }
             F64Const(_) => {
-                ctx.op_stack.push(Type::Known(ValType::F64));
+                ctx.op_stack.push(Type::f64());
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-unop
             // [t] -> [t]
             I32Clz | I32Ctz | I32Popcnt => {
-                ctx.ensure_op_stack_top(Type::Known(ValType::I32))?;
+                ctx.ensure_op_stack_top(Type::i32())?;
             }
             I64Clz | I64Ctz | I64Popcnt => {
-                ctx.ensure_op_stack_top(Type::Known(ValType::I64))?;
+                ctx.ensure_op_stack_top(Type::i64())?;
             }
             F32Abs | F32Neg | F32Ceil | F32Floor | F32Trunc | F32Nearest | F32Sqrt => {
-                ctx.ensure_op_stack_top(Type::Known(ValType::F32))?;
+                ctx.ensure_op_stack_top(Type::f32())?;
             }
             F64Abs | F64Neg | F64Ceil | F64Floor | F64Trunc | F64Nearest | F64Sqrt => {
-                ctx.ensure_op_stack_top(Type::Known(ValType::F64))?;
+                ctx.ensure_op_stack_top(Type::f64())?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-binop
             // [t t] -> [t]
             I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or
             | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr => {
-                ctx.pop_op_stack(Type::Known(ValType::I32))?;
-                ctx.ensure_op_stack_top(Type::Known(ValType::I32))?;
+                ctx.pop_op_stack(Type::i32())?;
+                ctx.ensure_op_stack_top(Type::i32())?;
             }
             I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or
             | I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr => {
-                ctx.pop_op_stack(Type::Known(ValType::I64))?;
-                ctx.ensure_op_stack_top(Type::Known(ValType::I64))?;
+                ctx.pop_op_stack(Type::i64())?;
+                ctx.ensure_op_stack_top(Type::i64())?;
             }
             F32Add | F32Sub | F32Mul | F32Div | F32Min | F32Max | F32Copysign => {
-                ctx.pop_op_stack(Type::Known(ValType::F32))?;
-                ctx.ensure_op_stack_top(Type::Known(ValType::F32))?;
+                ctx.pop_op_stack(Type::f32())?;
+                ctx.ensure_op_stack_top(Type::f32())?;
             }
             F64Add | F64Sub | F64Mul | F64Div | F64Min | F64Max | F64Copysign => {
-                ctx.pop_op_stack(Type::Known(ValType::F64))?;
-                ctx.ensure_op_stack_top(Type::Known(ValType::F64))?;
+                ctx.pop_op_stack(Type::f64())?;
+                ctx.ensure_op_stack_top(Type::f64())?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-testop
             // [t] -> [i32]
             I32Eqz => {
-                ctx.ensure_op_stack_top(Type::Known(ValType::I32))?;
+                ctx.ensure_op_stack_top(Type::i32())?;
             }
             I64Eqz => {
-                ctx.pop_op_stack(Type::Known(ValType::I64))?;
-                ctx.op_stack.push(Type::Known(ValType::I32));
+                ctx.pop_op_stack(Type::i64())?;
+                ctx.op_stack.push(Type::i32());
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-relop
             // [t t] -> [i32]
             I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS
             | I32GeU => {
-                ctx.pop_op_stack(Type::Known(ValType::I32))?;
-                ctx.ensure_op_stack_top(Type::Known(ValType::I32))?;
+                ctx.pop_op_stack(Type::i32())?;
+                ctx.ensure_op_stack_top(Type::i32())?;
             }
             I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU | I64GeS
             | I64GeU => {
-                ctx.pop_op_stack(Type::Known(ValType::I64))?;
-                ctx.pop_op_stack(Type::Known(ValType::I64))?;
-                ctx.op_stack.push(Type::Known(ValType::I32));
+                ctx.pop_op_stack(Type::i64())?;
+                ctx.pop_op_stack(Type::i64())?;
+                ctx.op_stack.push(Type::i32());
             }
             F32Eq | F32Ne | F32Lt | F32Gt | F32Le | F32Ge => {
-                ctx.pop_op_stack(Type::Known(ValType::F32))?;
-                ctx.pop_op_stack(Type::Known(ValType::F32))?;
-                ctx.op_stack.push(Type::Known(ValType::I32));
+                ctx.pop_op_stack(Type::f32())?;
+                ctx.pop_op_stack(Type::f32())?;
+                ctx.op_stack.push(Type::i32());
             }
             F64Eq | F64Ne | F64Lt | F64Gt | F64Le | F64Ge => {
-                ctx.pop_op_stack(Type::Known(ValType::F64))?;
-                ctx.pop_op_stack(Type::Known(ValType::F64))?;
-                ctx.op_stack.push(Type::Known(ValType::I32));
+                ctx.pop_op_stack(Type::f64())?;
+                ctx.pop_op_stack(Type::f64())?;
+                ctx.op_stack.push(Type::i32());
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-cvtop
             // [t1] -> [t2]
