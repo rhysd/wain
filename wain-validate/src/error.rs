@@ -22,6 +22,12 @@ pub enum ErrorKind {
         mod_name: String,
         name: String,
     },
+    ImportKindMismatch {
+        mod_name: String,
+        name: String,
+        expected: &'static str,
+        actual: &'static str,
+    },
     TypeMismatch {
         op: &'static str,
         expected: ValType,
@@ -43,6 +49,14 @@ pub enum ErrorKind {
         align: u32,
         bits: u8,
     },
+    LimitsOutOfRange {
+        value: u32,
+        min: u32,
+        max: u32,
+        what: &'static str,
+    },
+    NotConstantInstruction(&'static str),
+    NoInstructionForConstant,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -91,21 +105,24 @@ impl<'a> fmt::Display for Error<'a> {
                 Ordinal(*idx),
                 local
             )?,
-            UnknownImport { mod_name, name } => {
-                if *mod_name != "env" {
-                    write!(
-                        f,
-                        "unknown module name '{}'. valid module name is currently only 'env'",
-                        mod_name
-                    )?
-                } else {
-                    write!(
-                        f,
-                        "no exported name '{}' in module 'env'. currently only 'print' is exported",
-                        name
-                    )?
-                }
-            }
+            UnknownImport { mod_name, name } if *mod_name == "env" => write!(
+                f,
+                "no exported name '{}' in module 'env'. currently only 'print' is exported",
+                name,
+            )?,
+            UnknownImport { mod_name, name: _ } => write!(
+                f,
+                "unknown module name '{}'. valid module name is currently only 'env'",
+                mod_name
+            )?,
+            ImportKindMismatch { mod_name, name, expected, actual } => write!(
+                f,
+                "expected {} for import item {}::{}, but got {}",
+                expected,
+                mod_name,
+                name,
+                actual,
+            )?,
             TypeMismatch {
                 op,
                 expected,
@@ -131,6 +148,9 @@ impl<'a> fmt::Display for Error<'a> {
             LabelStackEmpty { op } => write!(f, "label stack for control instructions is unexpectedly empty at '{}' instruction", op)?,
             SetImmutableGlobal{ ty, idx } => write!(f, "{} value cannot be set to immutable global variable {}", ty, idx)?,
             TooLargeAlign { align, bits } => write!(f, "align {} must not be larger than {}bits / 8", align, bits)?,
+            LimitsOutOfRange { value, min, max, what } => write!(f, "limit {} is out of range {}..{} at {}", value, min, max, what)?,
+            NotConstantInstruction(op) => write!(f, "instruction '{}' is not valid for constant. only 'global.get' or '*.const' are valid in constant expressions", op)?,
+            NoInstructionForConstant => write!(f, "at least one instruction is necessary for constant expressions")?,
         }
 
         if self.offset == self.source.len() {

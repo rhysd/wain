@@ -38,7 +38,6 @@ pub enum ParseErrorKind<'a> {
         base: NumBase,
         sign: Sign,
     },
-    InvalidAlignment(u32),
     MultipleEntrypoints(Start<'a>, Start<'a>),
     IdAlreadyDefined {
         id: &'a str,
@@ -119,9 +118,6 @@ impl<'a> fmt::Display for ParseError<'a> {
                     "cannot parse integer {}{}{}: {}",
                     sign, base, digits, reason
                 )?
-            }
-            InvalidAlignment(align) => {
-                write!(f, "alignment value must be 2^N but got {:x}", align)?
             }
             MultipleEntrypoints(prev, cur) => {
                 write!(f, "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}", cur.idx, prev.idx, prev.start)?
@@ -1436,9 +1432,6 @@ impl<'a> Parse<'a> for Mem {
             (Token::Keyword(kw), offset) if kw.starts_with("align=") => {
                 let u = parse_u32(&kw[6..], parser, offset)?;
                 parser.eat_token(); // Eat 'align' keyword
-                if u.count_ones() != 1 {
-                    return parser.error(ParseErrorKind::InvalidAlignment(u), offset);
-                }
                 Some(u)
             }
             _ => None,
@@ -3848,11 +3841,6 @@ mod tests {
         assert_insn!(r#"memory.size"#, [MemorySize]);
         assert_insn!(r#"memory.grow"#, [MemoryGrow]);
 
-        assert_error!(
-            r#"i32.load align=11"#,
-            Vec<Instruction<'_>>,
-            InvalidAlignment(11)
-        );
         assert_error!(
             r#"i32.load align=32 offset=10"#,
             Vec<Instruction<'_>>,

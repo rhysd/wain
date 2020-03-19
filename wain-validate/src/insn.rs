@@ -6,7 +6,7 @@
 // Algorithm for validating instructions:
 //   https://webassembly.github.io/spec/core/appendix/algorithm.html#algo-valid
 
-use crate::error::{ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::Context as OuterContext;
 use std::mem;
 use wain_ast::*;
@@ -171,7 +171,7 @@ impl<'outer, 'm, 'a> Context<'outer, 'm, 'a> {
     }
 
     fn validate_memarg(&self, mem: &Mem, bits: u8) -> Result<'a, ()> {
-        // module.memories[0] was already verified.
+        self.outer.memory_from_idx(0, self.current_offset)?;
         // The alignment 2^align must not be larger than the bit width of t divided by 8.
         if let Some(align) = mem.align {
             if (1 << align) > bits / 8 {
@@ -561,5 +561,69 @@ impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
             F64ReinterpretI64 => ctx.validate_convert(ValType::I64, ValType::F64)?,
         }
         Ok(())
+    }
+}
+
+// https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions
+pub(crate) fn validate_constant<'a>(
+    insns: &[Instruction],
+    globals: &[Global<'a>],
+    expr_ty: ValType,
+    source: &'a str,
+    start: usize,
+) -> Result<'a, ()> {
+    let mut last_ty = None;
+    for insn in insns {
+        use InsnKind::*;
+        match &insn.kind {
+            GlobalGet(globalidx) => {
+                if let Some(global) = globals.get(*globalidx as usize) {
+                    last_ty = Some(global.ty);
+                } else {
+                    return Err(Error::new(
+                        ErrorKind::IndexOutOfBounds {
+                            idx: *globalidx,
+                            upper: globals.len(),
+                            what: "global variable",
+                        },
+                        insn.start,
+                        source,
+                    ));
+                }
+            }
+            I32Const(_) => last_ty = Some(ValType::I32),
+            I64Const(_) => last_ty = Some(ValType::I64),
+            F32Const(_) => last_ty = Some(ValType::F32),
+            F64Const(_) => last_ty = Some(ValType::F64),
+            kind => {
+                return Err(Error::new(
+                    ErrorKind::NotConstantInstruction(kind.name()),
+                    insn.start,
+                    source,
+                ))
+            }
+        }
+    }
+
+    if let Some(ty) = last_ty {
+        if ty != expr_ty {
+            Err(Error::new(
+                ErrorKind::TypeMismatch {
+                    op: "constant expression",
+                    expected: expr_ty,
+                    actual: ty,
+                },
+                start,
+                source,
+            ))
+        } else {
+            Ok(())
+        }
+    } else {
+        Err(Error::new(
+            ErrorKind::NoInstructionForConstant,
+            start,
+            source,
+        ))
     }
 }

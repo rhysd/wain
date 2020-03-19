@@ -57,6 +57,10 @@ impl<'module, 'a> Context<'module, 'a> {
     fn global_from_idx(&self, idx: u32, offset: usize) -> Result<'a, &'module Global> {
         self.validate_idx(&self.module.globals, idx, "global variable", offset)
     }
+
+    fn memory_from_idx(&self, idx: u32, offset: usize) -> Result<'a, &'module Memory> {
+        self.validate_idx(&self.module.memories, idx, "memory", offset)
+    }
 }
 
 pub fn validate<'module, 'a>(module: &'module Module<'a>, source: &'a str) -> Result<'a, ()> {
@@ -90,9 +94,14 @@ impl<'a, V: Validate<'a>> Validate<'a> for Option<V> {
 impl<'a> Validate<'a> for Module<'a> {
     fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
         self.types.validate(ctx)?;
-        // TODO: Check tables[0]
-        // TODO: Check memories[0]
+        self.tables.validate(ctx)?;
+        self.memories.validate(ctx)?;
+        self.globals.validate(ctx)?;
+        // TODO self.elems
+        // TODO self.exports
+        // TODO self.data
         self.funcs.validate(ctx)?;
+        // TODO self.entrypoint
         Ok(())
     }
 }
@@ -113,8 +122,26 @@ impl<'a> Validate<'a> for FuncType {
 
 // https://webassembly.github.io/spec/core/valid/modules.html#imports
 // Not implement Validate<'a> since the offset parameter is necessary for better error message
+#[derive(PartialEq, Eq)]
+enum ImportKind {
+    Func,
+    Table,
+    Memory,
+    Global,
+}
+impl ImportKind {
+    fn name(self) -> &'static str {
+        match self {
+            ImportKind::Func => "function",
+            ImportKind::Table => "table",
+            ImportKind::Memory => "memory",
+            ImportKind::Global => "global variable",
+        }
+    }
+}
 fn validate_import<'module, 'a>(
     import: &Import<'a>,
+    kind: ImportKind,
     ctx: &mut Context<'module, 'a>,
     offset: usize,
 ) -> Result<'a, ()> {
@@ -122,8 +149,88 @@ fn validate_import<'module, 'a>(
         let mod_name = import.mod_name.0.to_string();
         let name = import.name.0.to_string();
         ctx.error(ErrorKind::UnknownImport { mod_name, name }, offset)
+    } else if kind != ImportKind::Func {
+        let mod_name = import.mod_name.0.to_string();
+        let name = import.name.0.to_string();
+        ctx.error(
+            ErrorKind::ImportKindMismatch {
+                mod_name,
+                name,
+                expected: ImportKind::Func.name(),
+                actual: kind.name(),
+            },
+            offset,
+        )
     } else {
         Ok(())
+    }
+}
+
+// https://webassembly.github.io/spec/core/valid/modules.html#tables
+impl<'a> Validate<'a> for Table<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+        // Validation for table type is unnecessary here
+        // https://webassembly.github.io/spec/core/syntax/types.html#syntax-tabletype
+        // Limits should be within 2**32 but the values are already u32. It should be validated by parser
+
+        if let Some(import) = &self.import {
+            validate_import(import, ImportKind::Table, ctx, self.start)?;
+        }
+
+        Ok(())
+    }
+}
+
+// https://webassembly.github.io/spec/core/valid/modules.html#memories
+impl<'a> Validate<'a> for Memory<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+        // https://webassembly.github.io/spec/core/valid/types.html#valid-memtype
+        let limit = 1 << 16;
+        let invalid = match self.ty.limit {
+            Limits::From(min) if min > limit => Some(min),
+            Limits::Range(min, _) if min > limit => Some(min),
+            Limits::Range(_, max) if max > limit => Some(max),
+            _ => None,
+        };
+
+        if let Some(value) = invalid {
+            return ctx.error(
+                ErrorKind::LimitsOutOfRange {
+                    value,
+                    min: 0,
+                    max: limit,
+                    what: "memory type",
+                },
+                self.start,
+            );
+        }
+
+        if let Some(import) = &self.import {
+            validate_import(import, ImportKind::Memory, ctx, self.start)?;
+        }
+
+        Ok(())
+    }
+}
+
+// https://webassembly.github.io/spec/core/valid/modules.html#globals
+impl<'a> Validate<'a> for Global<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+        // https://webassembly.github.io/spec/core/valid/types.html#valid-globaltype
+        // Nothing to do for validating GlobalType
+
+        match &self.kind {
+            GlobalKind::Import(import) => {
+                validate_import(import, ImportKind::Global, ctx, self.start)
+            }
+            GlobalKind::Init(init) => crate::insn::validate_constant(
+                init,
+                &ctx.module.globals,
+                self.ty,
+                ctx.source,
+                self.start,
+            ),
+        }
     }
 }
 
@@ -132,7 +239,7 @@ impl<'a> Validate<'a> for Func<'a> {
     fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
         let func_ty = ctx.type_from_idx(self.idx, self.start)?;
         match &self.kind {
-            FuncKind::Import(import) => validate_import(import, ctx, self.start),
+            FuncKind::Import(import) => validate_import(import, ImportKind::Func, ctx, self.start),
             FuncKind::Body { locals, expr } => {
                 if locals.len() < func_ty.params.len() {
                     return ctx.error(
