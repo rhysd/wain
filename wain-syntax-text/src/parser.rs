@@ -443,19 +443,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_multiple<P: Parse<'a>>(&mut self, expected: &'static str) -> Result<'a, Vec<P>> {
-        let mut parsed = vec![];
-        loop {
-            match self.tokens.peek() {
-                Some(Ok((Token::LParen, _))) => parsed.push(self.parse()?),
-                Some(Ok(_)) => break,
-                Some(Err(err)) => return Err(err.clone().into()),
-                None => return self.missing_paren('(', None, expected, self.source.len()),
-            }
-        }
-        Ok(parsed)
-    }
-
     fn parse_bytes_encoded_in_string(&self, src: &str, offset: usize) -> Result<'a, Vec<u8>> {
         let mut buf: Vec<u8> = vec![];
         let mut chars = src.char_indices();
@@ -886,12 +873,9 @@ impl<'a> Parse<'a> for FuncType<'a> {
         let start = parser.opening_paren("function type")?;
         match_token!(parser, "'func' keyword", Token::Keyword("func"));
 
-        let mut params = vec![];
-        while let Some("param") = parser.peek_fold_start("parameter in functype")?.0 {
-            params.push(parser.parse()?);
-        }
+        let params = parser.parse()?;
+        let results = parser.parse()?;
 
-        let results = parser.parse_multiple("result in function type")?;
         parser.closing_paren("function type")?;
         Ok(FuncType {
             start,
@@ -902,14 +886,39 @@ impl<'a> Parse<'a> for FuncType<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-param
-impl<'a> Parse<'a> for Param<'a> {
+// Not impl for Param<'a> considering abbreviation
+impl<'a> Parse<'a> for Vec<Param<'a>> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let start = parser.opening_paren("parameter")?;
-        match_token!(parser, "'param' keyword", Token::Keyword("param"));
-        let id = parser.maybe_ident("identifier for param")?;
-        let ty = parser.parse()?;
-        parser.closing_paren("parameter")?;
-        Ok(Param { start, id, ty })
+        let mut params = vec![];
+        while let (Some("param"), start) = parser.peek_fold_start("parameter")? {
+            parser.eat_token(); // eat '('
+            parser.eat_token(); // eat 'param'
+
+            let id = parser.maybe_ident("identifier for param")?;
+            if id.is_some() {
+                // ID is not available for abbreviation
+                let ty = parser.parse()?;
+                parser.closing_paren("parameter")?;
+                params.push(Param { start, id, ty });
+                continue;
+            }
+
+            // Abbreviation:
+            //   (param {valtype}*) == (param {valtype})*
+            loop {
+                match parser.peek("value type for param or closing ')'")? {
+                    (Token::RParen, _) => {
+                        parser.eat_token(); // eat ')'
+                        break;
+                    }
+                    (_, start) => {
+                        let ty = parser.parse()?;
+                        params.push(Param { start, id, ty });
+                    }
+                }
+            }
+        }
+        Ok(params)
     }
 }
 
@@ -931,13 +940,30 @@ impl<'a> Parse<'a> for ValType {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-result
-impl<'a> Parse<'a> for FuncResult {
+// Not impl for FuncResult considering abbreviation
+impl<'a> Parse<'a> for Vec<FuncResult> {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        let start = parser.opening_paren("function result")?;
-        match_token!(parser, "'result' keyword", Token::Keyword("result"));
-        let ty = parser.parse()?;
-        parser.closing_paren("function result")?;
-        Ok(FuncResult { start, ty })
+        let mut results = vec![];
+        while let Some("result") = parser.peek_fold_start("result type")?.0 {
+            parser.eat_token(); // eat '('
+            parser.eat_token(); // eat 'result'
+
+            // Abbreviation:
+            //   (result {valtype}*) == (result {valtype})*
+            loop {
+                match parser.peek("value type for result or closing ')'")? {
+                    (Token::RParen, _) => {
+                        parser.eat_token(); // eat ')'
+                        break;
+                    }
+                    (_, start) => {
+                        let ty = parser.parse()?;
+                        results.push(FuncResult { start, ty });
+                    }
+                }
+            }
+        }
+        Ok(results)
     }
 }
 
@@ -1092,15 +1118,8 @@ impl<'a> Parse<'a> for TypeUse<'a> {
             None
         };
 
-        let mut params: Vec<Param<'a>> = vec![];
-        while let Some("param") = parser.peek_fold_start("param or result in typeuse")?.0 {
-            params.push(parser.parse()?);
-        }
-
-        let mut results: Vec<FuncResult> = vec![];
-        while let Some("result") = parser.peek_fold_start("result in typeuse")?.0 {
-            results.push(parser.parse()?);
-        }
+        let params = parser.parse()?;
+        let results = parser.parse()?;
 
         if let Some(idx) = idx {
             return Ok(TypeUse {
@@ -2789,21 +2808,116 @@ mod tests {
 
         assert_error!(r#"func"#, FuncType<'_>, MissingParen{ paren: '(', .. });
         assert_error!(r#"(type"#, FuncType<'_>, UnexpectedToken{ expected: "'func' keyword", .. });
-        assert_error!(r#"(func "#, FuncType<'_>, UnexpectedEndOfFile{ expected: "parameter in functype", .. });
-        assert_error!(r#"(func (result i32)"#, FuncType<'_>, MissingParen{ paren: '(', got: None, .. });
+        assert_error!(r#"(func "#, FuncType<'_>, UnexpectedEndOfFile{ expected: "parameter", .. });
         assert_error!(r#"(func (result i32) foo"#, FuncType<'_>, MissingParen{ paren: ')', .. });
     }
 
     #[test]
-    fn param() {
-        assert_parse!(r#"(param $a i32)"#, Param<'_>, Param { id: Some("$a"), .. });
-        assert_parse!(r#"(param i32)"#, Param<'_>, Param { id: None, .. });
+    fn params() {
+        macro_rules! assert_params {
+            ($input:expr, $expect:pat) => {
+                let input = concat!($input, ')'); // ) is necessary to avoid unexpected EOF
+                let mut parser = Parser::new(input);
+                let params: Vec<Param<'_>> = parser.parse().unwrap();
+                match params.as_slice() {
+                    $expect => { /* OK */ }
+                    params => panic!(
+                        "assertion failed: {:?} did not match to {}",
+                        params,
+                        stringify!($expect)
+                    ),
+                }
+                assert!(matches!(parser.tokens.next(), Some(Ok((Token::RParen, _)))));
+            };
+        }
 
-        assert_error!(r#"param"#, Param<'_>, MissingParen{ paren: '(', .. });
-        assert_error!(r#"(module i32)"#, Param<'_>, UnexpectedToken{ expected: "'param' keyword", .. });
-        assert_error!(r#"(param)"#, Param<'_>, UnexpectedToken{ .. });
-        assert_error!(r#"(param i32 i64)"#, Param<'_>, MissingParen { paren: ')', .. });
-        assert_error!(r#"(param i32"#, Param<'_>, MissingParen{ paren: ')', .. });
+        assert_params!(
+            "(param $a i32)",
+            [Param {
+                id: Some("$a"),
+                ty: ValType::I32,
+                ..
+            }]
+        );
+        assert_params!(
+            "(param i32)",
+            [Param {
+                id: None,
+                ty: ValType::I32,
+                ..
+            }]
+        );
+        assert_params!(
+            "(param $a i32) (param i64) (param f32) (param $b f64)",
+            [Param {
+                id: Some("$a"),
+                ty: ValType::I32,
+                ..
+            }, Param {
+                id: None,
+                ty: ValType::I64,
+                ..
+            }, Param {
+                id: None,
+                ty: ValType::F32,
+                ..
+            }, Param {
+                id: Some("$b"),
+                ty: ValType::F64,
+                ..
+            }]
+        );
+
+        assert_params!("", []);
+        assert_params!("(param)", []);
+        assert_params!(
+            "(param i32 i64 f32 f64)",
+            [Param {
+                id: None,
+                ty: ValType::I32,
+                ..
+            }, Param {
+                id: None,
+                ty: ValType::I64,
+                ..
+            }, Param {
+                id: None,
+                ty: ValType::F32,
+                ..
+            }, Param {
+                id: None,
+                ty: ValType::F64,
+                ..
+            }]
+        );
+        assert_params!(
+            "(param i32 i64) (param $a i32) (param) (param f32 f64) (param $b i64)",
+            [Param {
+                id: None,
+                ty: ValType::I32,
+                ..
+            }, Param {
+                id: None,
+                ty: ValType::I64,
+                ..
+            }, Param {
+                id: Some("$a"),
+                ty: ValType::I32,
+                ..
+            }, Param {
+                id: None,
+                ty: ValType::F32,
+                ..
+            }, Param {
+                id: None,
+                ty: ValType::F64,
+                ..
+            }, Param {
+                id: Some("$b"),
+                ty: ValType::I64,
+                ..
+            }]
+        );
     }
 
     #[test]
@@ -2818,13 +2932,72 @@ mod tests {
     }
 
     #[test]
-    fn func_result() {
-        assert_parse!(r#"(result i32)"#, FuncResult, FuncResult { .. });
+    fn func_results() {
+        macro_rules! assert_results {
+            ($input:expr, $expect:pat) => {
+                let input = concat!($input, ')'); // ) is necessary to avoid unexpected EOF
+                let mut parser = Parser::new(input);
+                let results: Vec<FuncResult> = parser.parse().unwrap();
+                match results.as_slice() {
+                    $expect => { /* OK */ }
+                    results => panic!(
+                        "assertion failed: {:?} did not match to {}",
+                        results,
+                        stringify!($expect)
+                    ),
+                }
+                assert!(matches!(parser.tokens.next(), Some(Ok((Token::RParen, _)))));
+            };
+        }
 
-        assert_error!(r#"result"#, FuncResult, MissingParen { paren: '(', .. });
-        assert_error!(r#"(hello"#, FuncResult, UnexpectedToken { expected: "'result' keyword", .. });
-        assert_error!(r#"(result)"#, FuncResult, UnexpectedToken { .. });
-        assert_error!(r#"(result i32"#, FuncResult, MissingParen { paren: ')', .. });
+        assert_results!("", []);
+        assert_results!("(result)", []);
+        assert_results!(
+            "(result i32)",
+            [FuncResult {
+                ty: ValType::I32, ..
+            }]
+        );
+        assert_results!(
+            "(result i32) (result i64) (result f32) (result f64) ",
+            [FuncResult {
+                ty: ValType::I32, ..
+            }, FuncResult {
+                ty: ValType::I64, ..
+            }, FuncResult {
+                ty: ValType::F32, ..
+            }, FuncResult {
+                ty: ValType::F64, ..
+            }]
+        );
+        assert_results!(
+            "(result i32 i64 f32 f64) ",
+            [FuncResult {
+                ty: ValType::I32, ..
+            }, FuncResult {
+                ty: ValType::I64, ..
+            }, FuncResult {
+                ty: ValType::F32, ..
+            }, FuncResult {
+                ty: ValType::F64, ..
+            }]
+        );
+        assert_results!(
+            "(result i32 i64) (result f32) (result) (result f64 i32) (result i64)",
+            [FuncResult {
+                ty: ValType::I32, ..
+            }, FuncResult {
+                ty: ValType::I64, ..
+            }, FuncResult {
+                ty: ValType::F32, ..
+            }, FuncResult {
+                ty: ValType::F64, ..
+            }, FuncResult {
+                ty: ValType::I32, ..
+            }, FuncResult {
+                ty: ValType::I64, ..
+            }]
+        );
     }
 
     #[test]
