@@ -57,6 +57,17 @@ pub enum ErrorKind {
     },
     NotConstantInstruction(&'static str),
     NoInstructionForConstant,
+    StartFunctionSignature {
+        idx: u32,
+        params: Vec<ValType>,
+        results: Vec<ValType>,
+    },
+    MultipleTables(usize),
+    MultipleMemories(usize),
+    AlreadyExported {
+        name: String,
+        prev_offset: usize,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -151,6 +162,16 @@ impl<'a> fmt::Display for Error<'a> {
             LimitsOutOfRange { value, min, max, what } => write!(f, "limit {} is out of range {}..{} at {}", value, min, max, what)?,
             NotConstantInstruction(op) => write!(f, "instruction '{}' is not valid for constant. only 'global.get' or '*.const' are valid in constant expressions", op)?,
             NoInstructionForConstant => write!(f, "at least one instruction is necessary for constant expressions")?,
+            StartFunctionSignature{ idx, params, results } => write!(
+                f,
+                "start function should have no parameter and no result [] -> [] but found function {} [{}] -> [{}]",
+                idx,
+                params.into_iter().map(AsRef::<str>::as_ref).collect::<Vec<_>>().join(" "),
+                results.into_iter().map(AsRef::<str>::as_ref).collect::<Vec<_>>().join(" "),
+            )?,
+            MultipleTables(size) => write!(f, "number of tables must not be larger than 1 but got {}", size)?,
+            MultipleMemories(size) => write!(f, "number of memories must not be larger than 1 but got {}", size)?,
+            AlreadyExported{ name, prev_offset } => write!(f, "'{}' was already exported at offset {}", name, prev_offset)?,
         }
 
         if self.offset == self.source.len() {

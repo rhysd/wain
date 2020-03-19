@@ -7,6 +7,7 @@ mod error;
 mod insn;
 
 use error::{Error, ErrorKind, Result};
+use std::collections::HashMap;
 use wain_ast::*;
 
 // Validation context
@@ -94,14 +95,36 @@ impl<'a, V: Validate<'a>> Validate<'a> for Option<V> {
 impl<'a> Validate<'a> for Module<'a> {
     fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
         self.types.validate(ctx)?;
+        self.funcs.validate(ctx)?;
         self.tables.validate(ctx)?;
         self.memories.validate(ctx)?;
         self.globals.validate(ctx)?;
-        // TODO self.elems
-        // TODO self.exports
-        // TODO self.data
-        self.funcs.validate(ctx)?;
-        // TODO self.entrypoint
+        self.elems.validate(ctx)?;
+        self.data.validate(ctx)?;
+        self.entrypoint.validate(ctx)?;
+        self.exports.validate(ctx)?;
+
+        if self.tables.len() > 1 {
+            return ctx.error(ErrorKind::MultipleTables(self.tables.len()), self.start);
+        }
+        if self.memories.len() > 1 {
+            return ctx.error(ErrorKind::MultipleMemories(self.memories.len()), self.start);
+        }
+
+        // Export name in module must be unique
+        let mut seen = HashMap::new();
+        for (name, offset) in self.exports.iter().map(|e| (e.name.0.as_ref(), e.start)) {
+            if let Some(prev_offset) = seen.insert(name, offset) {
+                return ctx.error(
+                    ErrorKind::AlreadyExported {
+                        name: name.to_string(),
+                        prev_offset,
+                    },
+                    offset,
+                );
+            }
+        }
+
         Ok(())
     }
 }
@@ -231,6 +254,79 @@ impl<'a> Validate<'a> for Global<'a> {
                 self.start,
             ),
         }
+    }
+}
+
+// https://webassembly.github.io/spec/core/valid/modules.html#element-segments
+impl<'a> Validate<'a> for ElemSegment {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+        ctx.table_from_idx(self.idx, self.start)?;
+        crate::insn::validate_constant(
+            &self.offset,
+            &ctx.module.globals,
+            ValType::I32,
+            ctx.source,
+            self.start,
+        )?;
+        for funcidx in self.init.iter() {
+            ctx.func_from_idx(*funcidx, self.start)?;
+        }
+        Ok(())
+    }
+}
+
+// https://webassembly.github.io/spec/core/valid/modules.html#data-segments
+impl<'a> Validate<'a> for DataSegment<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+        ctx.memory_from_idx(self.idx, self.start)?;
+        crate::insn::validate_constant(
+            &self.offset,
+            &ctx.module.globals,
+            ValType::I32,
+            ctx.source,
+            self.start,
+        )?;
+        Ok(())
+    }
+}
+
+// https://webassembly.github.io/spec/core/valid/modules.html#start-function
+impl<'a> Validate<'a> for StartFunction {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+        let func = ctx.func_from_idx(self.idx, self.start)?;
+        let fty = ctx.type_from_idx(func.idx, self.start)?;
+        if !fty.params.is_empty() || !fty.results.is_empty() {
+            return ctx.error(
+                ErrorKind::StartFunctionSignature {
+                    idx: self.idx,
+                    params: fty.params.clone(),
+                    results: fty.results.clone(),
+                },
+                self.start,
+            );
+        }
+        Ok(())
+    }
+}
+
+// https://webassembly.github.io/spec/core/valid/modules.html#exports
+impl<'a> Validate<'a> for Export<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+        match self.kind {
+            ExportKind::Func(idx) => {
+                ctx.func_from_idx(idx, self.start)?;
+            }
+            ExportKind::Table(idx) => {
+                ctx.table_from_idx(idx, self.start)?;
+            }
+            ExportKind::Memory(idx) => {
+                ctx.memory_from_idx(idx, self.start)?;
+            }
+            ExportKind::Global(idx) => {
+                ctx.global_from_idx(idx, self.start)?;
+            }
+        }
+        Ok(())
     }
 }
 
