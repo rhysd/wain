@@ -9,15 +9,6 @@ pub enum ErrorKind {
         what: &'static str,
     },
     MultipleReturnTypes(Vec<ValType>),
-    TooFewFuncLocalsForParams {
-        locals: usize,
-        params: usize,
-    },
-    ParamTypeMismatchWithLocal {
-        idx: usize,
-        param: ValType,
-        local: ValType,
-    },
     UnknownImport {
         mod_name: String,
         name: String,
@@ -106,16 +97,6 @@ impl<'a> fmt::Display for Error<'a> {
                     ss.join(", ")
                 )?
             }
-            TooFewFuncLocalsForParams { locals, params } => {
-                write!(f, "function has {} params > {} locals", params, locals)?
-            }
-            ParamTypeMismatchWithLocal { idx, param, local } => write!(
-                f,
-                "type {} parameter {} does not match to type of respective local {}",
-                param,
-                Ordinal(*idx),
-                local
-            )?,
             UnknownImport { mod_name, name } if *mod_name == "env" => write!(
                 f,
                 "no exported name '{}' in module 'env'. currently only 'print' is exported",

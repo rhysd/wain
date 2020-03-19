@@ -337,32 +337,7 @@ impl<'a> Validate<'a> for Func<'a> {
         match &self.kind {
             FuncKind::Import(import) => validate_import(import, ImportKind::Func, ctx, self.start),
             FuncKind::Body { locals, expr } => {
-                if locals.len() < func_ty.params.len() {
-                    return ctx.error(
-                        ErrorKind::TooFewFuncLocalsForParams {
-                            params: func_ty.params.len(),
-                            locals: locals.len(),
-                        },
-                        self.start,
-                    );
-                }
-                for (i, param) in func_ty.params.iter().enumerate() {
-                    let local = locals[i];
-                    if local != *param {
-                        return ctx.error(
-                            ErrorKind::ParamTypeMismatchWithLocal {
-                                idx: i,
-                                param: *param,
-                                local,
-                            },
-                            self.start,
-                        );
-                    }
-                }
-
-                // FuncType validated func_ty has at most one result type
-                let ret = func_ty.results.get(0).copied();
-                crate::insn::validate_func_body(expr, locals, ret, ctx, self.start)
+                crate::insn::validate_func_body(expr, func_ty, locals, ctx, self.start)
             }
         }
     }

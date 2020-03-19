@@ -37,7 +37,7 @@ struct CtrlFrame {
 }
 
 // https://webassembly.github.io/spec/core/valid/conventions.html#context
-struct Context<'outer, 'm: 'outer, 'a: 'm> {
+struct FuncBodyContext<'outer, 'm: 'outer, 'a: 'm> {
     current_op: &'static str,
     current_offset: usize,
     outer: &'outer OuterContext<'m, 'a>,
@@ -49,6 +49,7 @@ struct Context<'outer, 'm: 'outer, 'a: 'm> {
     label_stack: Vec<Option<ValType>>,
     // The list of locals declared in the current function (including parameters), represented by their value type.
     // It's empty when validating outside function.
+    params: &'outer [ValType],
     locals: &'outer [ValType],
     // Return type of the current function if exists
     ret_ty: Option<ValType>,
@@ -56,7 +57,7 @@ struct Context<'outer, 'm: 'outer, 'a: 'm> {
     unreachable: bool,
 }
 
-impl<'outer, 'm, 'a> Context<'outer, 'm, 'a> {
+impl<'outer, 'm, 'a> FuncBodyContext<'outer, 'm, 'a> {
     fn error<T>(&self, kind: ErrorKind) -> Result<'a, T> {
         self.outer.error(kind, self.current_offset)
     }
@@ -159,7 +160,12 @@ impl<'outer, 'm, 'a> Context<'outer, 'm, 'a> {
     }
 
     fn validate_local_idx(&self, idx: u32) -> Result<'a, ValType> {
-        if let Some(ty) = self.locals.get(idx as usize) {
+        let uidx = idx as usize;
+        if let Some(ty) = self.params.get(uidx) {
+            return Ok(*ty);
+        }
+
+        if let Some(ty) = self.locals.get(uidx - self.params.len()) {
             Ok(*ty)
         } else {
             self.error(ErrorKind::IndexOutOfBounds {
@@ -204,12 +210,14 @@ impl<'outer, 'm, 'a> Context<'outer, 'm, 'a> {
 
 pub(crate) fn validate_func_body<'outer, 'm, 'a>(
     body: &'outer [Instruction],
+    func_ty: &'outer FuncType,
     locals: &'outer [ValType],
-    ret_ty: Option<ValType>,
     outer: &'outer OuterContext<'m, 'a>,
     start: usize,
 ) -> Result<'a, ()> {
-    let mut ctx = Context {
+    // FuncType validated func_ty has at most one result type
+    let ret_ty = func_ty.results.get(0).copied();
+    let mut ctx = FuncBodyContext {
         current_op: "",
         current_offset: start,
         outer,
@@ -219,6 +227,7 @@ pub(crate) fn validate_func_body<'outer, 'm, 'a>(
             idx: 0,
             offset: start,
         },
+        params: &func_ty.params,
         locals,
         ret_ty,
         unreachable: false,
@@ -233,11 +242,11 @@ pub(crate) fn validate_func_body<'outer, 'm, 'a>(
 }
 
 trait ValidateInsnSeq<'outer, 'm, 'a> {
-    fn validate(&self, ctx: &mut Context<'outer, 'm, 'a>) -> Result<'a, ()>;
+    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a>) -> Result<'a, ()>;
 }
 
 impl<'a, 'm, 'outer, V: ValidateInsnSeq<'outer, 'm, 'a>> ValidateInsnSeq<'outer, 'm, 'a> for [V] {
-    fn validate(&self, ctx: &mut Context<'outer, 'm, 'a>) -> Result<'a, ()> {
+    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a>) -> Result<'a, ()> {
         self.iter()
             .map(|insn| insn.validate(ctx))
             .collect::<Result<_>>()?;
@@ -248,7 +257,7 @@ impl<'a, 'm, 'outer, V: ValidateInsnSeq<'outer, 'm, 'a>> ValidateInsnSeq<'outer,
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#instruction-sequences
 impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
-    fn validate(&self, ctx: &mut Context<'outer, 'm, 'a>) -> Result<'a, ()> {
+    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a>) -> Result<'a, ()> {
         ctx.current_op = self.kind.name();
         ctx.current_offset = self.start;
         let start = self.start;
