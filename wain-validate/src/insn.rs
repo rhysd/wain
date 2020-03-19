@@ -197,7 +197,8 @@ impl<'outer, 'm, 'a> Context<'outer, 'm, 'a> {
 
     fn validate_convert(&mut self, from: ValType, to: ValType) -> Result<'a, ()> {
         self.pop_op_stack(Type::Known(from))?;
-        Ok(self.op_stack.push(Type::Known(to)))
+        self.op_stack.push(Type::Known(to));
+        Ok(())
     }
 }
 

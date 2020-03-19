@@ -8,11 +8,16 @@ fn main() {
         eprintln!("Error: {}", e);
         exit(1);
     }
-    let _ast = match wain_syntax_text::parse(&stdin) {
+    let ast = match wain_syntax_text::parse(&stdin) {
         Ok(ast) => ast,
         Err(e) => {
             eprintln!("Error: {}", e);
             exit(1);
         }
     };
+    if let Err(e) = wain_validate::validate(&ast.module, &stdin) {
+        eprintln!("Error: {}", e);
+        exit(1);
+    }
+    // TODO
 }

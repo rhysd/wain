@@ -121,7 +121,7 @@ impl<'a> fmt::Display for Error<'a> {
                 "no exported name '{}' in module 'env'. currently only 'print' is exported",
                 name,
             )?,
-            UnknownImport { mod_name, name: _ } => write!(
+            UnknownImport { mod_name, .. } => write!(
                 f,
                 "unknown module name '{}'. valid module name is currently only 'env'",
                 mod_name
@@ -166,8 +166,8 @@ impl<'a> fmt::Display for Error<'a> {
                 f,
                 "start function should have no parameter and no result [] -> [] but found function {} [{}] -> [{}]",
                 idx,
-                params.into_iter().map(AsRef::<str>::as_ref).collect::<Vec<_>>().join(" "),
-                results.into_iter().map(AsRef::<str>::as_ref).collect::<Vec<_>>().join(" "),
+                params.iter().map(AsRef::<str>::as_ref).collect::<Vec<_>>().join(" "),
+                results.iter().map(AsRef::<str>::as_ref).collect::<Vec<_>>().join(" "),
             )?,
             MultipleTables(size) => write!(f, "number of tables must not be larger than 1 but got {}", size)?,
             MultipleMemories(size) => write!(f, "number of memories must not be larger than 1 but got {}", size)?,
