@@ -1673,135 +1673,155 @@ fn parse_naked_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instru
             }
         }
         "f32.const" => {
-            let ((sign, float), offset) =
-                match_token!(parser, "float number for f32.const", Token::Float(s, f) => (s, f));
-            let val = match float {
-                Float::Inf => match sign {
-                    Sign::Plus => f32::INFINITY,
-                    Sign::Minus => f32::NEG_INFINITY,
-                },
-                Float::Nan(None) => sign.apply(f32::NAN),
-                Float::Nan(Some(payload)) => {
-                    // Encode  f32 NaN value via u32 assuming IEEE-754 format for NaN boxing.
-                    // Palyload must be
-                    //   - within 23bits (fraction of f32 is 23bits)
-                    //   - >= 2^(23-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
-                    // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
-                    let payload_u =
-                        parse_u32_str(parser, payload, NumBase::Hex, Sign::Plus, offset)?;
-                    if payload_u < 0x40_0000 || 0x80_0000 <= payload_u {
-                        return parser.cannot_parse_num(
-                            "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23",
-                            payload,
-                            NumBase::Hex,
-                            Sign::Plus,
-                            offset,
-                        );
-                    }
-                    // NaN boxing. 2^22 <= payload_u < 2^23 and floating point number is in IEEE754 format.
-                    // This will encode the payload into fraction of NaN.
-                    //   0x{sign}11111111{payload}
-                    let sign = match sign {
-                        Sign::Plus => 0,
-                        Sign::Minus => 1u32 << 31, // most significant bit is 1 for negative number
-                    };
-                    let exp = 0b1111_1111u32 << (31 - 8);
-                    f32::from_bits(sign | exp | payload_u)
-                }
-                Float::Val { base, frac, exp } => {
-                    // Note: Better algorithm should be considered
-                    // https://github.com/rust-lang/rust/blob/3982d3514efbb65b3efac6bb006b3fa496d16663/src/libcore/num/dec2flt/algorithm.rs
-                    let mut frac = sign.apply(parse_f32_str(parser, frac, base, sign, offset)?);
-                    // In IEEE754, exp part is actually 8bits
-                    if let Some((exp_sign, exp)) = exp {
-                        let exp = parse_u32_str(parser, exp, NumBase::Dec, exp_sign, offset)?;
-                        let step = match base {
-                            NumBase::Hex => 2.0,
-                            NumBase::Dec => 10.0,
-                        };
-                        // powi is not available because an error gets larger
-                        match exp_sign {
-                            Sign::Plus => {
-                                for _ in 0..exp {
-                                    frac *= step;
-                                }
-                            }
-                            Sign::Minus => {
-                                for _ in 0..exp {
-                                    frac /= step;
-                                }
-                            }
+            let val = match parser.next_token("float number or integer for f32.const")? {
+                (Token::Float(sign, float), offset) => match float {
+                    Float::Inf => match sign {
+                        Sign::Plus => f32::INFINITY,
+                        Sign::Minus => f32::NEG_INFINITY,
+                    },
+                    Float::Nan(None) => sign.apply(f32::NAN),
+                    Float::Nan(Some(payload)) => {
+                        // Encode  f32 NaN value via u32 assuming IEEE-754 format for NaN boxing.
+                        // Palyload must be
+                        //   - within 23bits (fraction of f32 is 23bits)
+                        //   - >= 2^(23-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
+                        // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
+                        let payload_u =
+                            parse_u32_str(parser, payload, NumBase::Hex, Sign::Plus, offset)?;
+                        if payload_u < 0x40_0000 || 0x80_0000 <= payload_u {
+                            return parser.cannot_parse_num(
+                                "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23",
+                                payload,
+                                NumBase::Hex,
+                                Sign::Plus,
+                                offset,
+                            );
                         }
-                        frac
-                    } else {
-                        frac
+                        // NaN boxing. 2^22 <= payload_u < 2^23 and floating point number is in IEEE754 format.
+                        // This will encode the payload into fraction of NaN.
+                        //   0x{sign}11111111{payload}
+                        let sign = match sign {
+                            Sign::Plus => 0,
+                            Sign::Minus => 1u32 << 31, // most significant bit is 1 for negative number
+                        };
+                        let exp = 0b1111_1111u32 << (31 - 8);
+                        f32::from_bits(sign | exp | payload_u)
                     }
+                    Float::Val { base, frac, exp } => {
+                        // Note: Better algorithm should be considered
+                        // https://github.com/rust-lang/rust/blob/3982d3514efbb65b3efac6bb006b3fa496d16663/src/libcore/num/dec2flt/algorithm.rs
+                        let mut frac = sign.apply(parse_f32_str(parser, frac, base, sign, offset)?);
+                        // In IEEE754, exp part is actually 8bits
+                        if let Some((exp_sign, exp)) = exp {
+                            let exp = parse_u32_str(parser, exp, NumBase::Dec, exp_sign, offset)?;
+                            let step = match base {
+                                NumBase::Hex => 2.0,
+                                NumBase::Dec => 10.0,
+                            };
+                            // powi is not available because an error gets larger
+                            match exp_sign {
+                                Sign::Plus => {
+                                    for _ in 0..exp {
+                                        frac *= step;
+                                    }
+                                }
+                                Sign::Minus => {
+                                    for _ in 0..exp {
+                                        frac /= step;
+                                    }
+                                }
+                            }
+                            frac
+                        } else {
+                            frac
+                        }
+                    }
+                },
+                (Token::Int(sign, base, digits), offset) => {
+                    parse_f32_str(parser, digits, base, sign, offset)?
+                }
+                (tok, offset) => {
+                    return parser.unexpected_token(
+                        tok,
+                        "float number or integer for f32.const",
+                        offset,
+                    )
                 }
             };
             InsnKind::F32Const(val)
         }
         "f64.const" => {
-            let ((sign, float), offset) =
-                match_token!(parser, "float number for f64.const", Token::Float(s, f) => (s, f));
-            let val = match float {
-                Float::Inf => match sign {
-                    Sign::Plus => f64::INFINITY,
-                    Sign::Minus => f64::NEG_INFINITY,
-                },
-                Float::Nan(None) => sign.apply(f64::NAN),
-                Float::Nan(Some(payload)) => {
-                    // Encode f64 NaN value via u64 assuming IEEE-754 format for NaN boxing.
-                    // Palyload must be
-                    //   - within 52bits (since fraction of f64 is 52bits)
-                    //   - >= 2^(52-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
-                    // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
-                    let payload_u =
-                        parse_u64_str(parser, payload, NumBase::Hex, Sign::Plus, offset)?;
-                    if payload_u < 0x8_0000_0000_0000 || 0x10_0000_0000_0000 <= payload_u {
-                        return parser.cannot_parse_num(
-                            "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52",
-                            payload,
-                            NumBase::Hex,
-                            Sign::Plus,
-                            offset,
-                        );
-                    }
-                    // NaN boxing. 2^51 <= payload_u < 2^52 and floating point number is in IEEE754 format.
-                    // This will encode the payload into fraction of NaN.
-                    //   0x{sign}11111111111{payload}
-                    let sign = match sign {
-                        Sign::Plus => 0,
-                        Sign::Minus => 1u64 << 63, // most significant bit is 1 for negative number
-                    };
-                    let exp = 0b111_1111_1111u64 << (63 - 11);
-                    f64::from_bits(sign | exp | payload_u)
-                }
-                Float::Val { base, frac, exp } => {
-                    let mut frac = sign.apply(parse_f64_str(parser, frac, base, sign, offset)?);
-                    // In IEEE754, exp part is actually 11bits
-                    if let Some((exp_sign, exp)) = exp {
-                        let exp = parse_u32_str(parser, exp, base, exp_sign, offset)?;
-                        let step = match base {
-                            NumBase::Hex => 2.0,
-                            NumBase::Dec => 10.0,
-                        };
-                        // powi is not available because an error gets larger
-                        match exp_sign {
-                            Sign::Plus => {
-                                for _ in 0..exp {
-                                    frac *= step;
-                                }
-                            }
-                            Sign::Minus => {
-                                for _ in 0..exp {
-                                    frac /= step;
-                                }
-                            }
+            let val = match parser.next_token("float number or integer for f64.const")? {
+                (Token::Float(sign, float), offset) => match float {
+                    Float::Inf => match sign {
+                        Sign::Plus => f64::INFINITY,
+                        Sign::Minus => f64::NEG_INFINITY,
+                    },
+                    Float::Nan(None) => sign.apply(f64::NAN),
+                    Float::Nan(Some(payload)) => {
+                        // Encode f64 NaN value via u64 assuming IEEE-754 format for NaN boxing.
+                        // Palyload must be
+                        //   - within 52bits (since fraction of f64 is 52bits)
+                        //   - >= 2^(52-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
+                        // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
+                        let payload_u =
+                            parse_u64_str(parser, payload, NumBase::Hex, Sign::Plus, offset)?;
+                        if payload_u < 0x8_0000_0000_0000 || 0x10_0000_0000_0000 <= payload_u {
+                            return parser.cannot_parse_num(
+                                "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52",
+                                payload,
+                                NumBase::Hex,
+                                Sign::Plus,
+                                offset,
+                            );
                         }
-                        frac
-                    } else {
-                        frac
+                        // NaN boxing. 2^51 <= payload_u < 2^52 and floating point number is in IEEE754 format.
+                        // This will encode the payload into fraction of NaN.
+                        //   0x{sign}11111111111{payload}
+                        let sign = match sign {
+                            Sign::Plus => 0,
+                            Sign::Minus => 1u64 << 63, // most significant bit is 1 for negative number
+                        };
+                        let exp = 0b111_1111_1111u64 << (63 - 11);
+                        f64::from_bits(sign | exp | payload_u)
                     }
+                    Float::Val { base, frac, exp } => {
+                        let mut frac = sign.apply(parse_f64_str(parser, frac, base, sign, offset)?);
+                        // In IEEE754, exp part is actually 11bits
+                        if let Some((exp_sign, exp)) = exp {
+                            let exp = parse_u32_str(parser, exp, base, exp_sign, offset)?;
+                            let step = match base {
+                                NumBase::Hex => 2.0,
+                                NumBase::Dec => 10.0,
+                            };
+                            // powi is not available because an error gets larger
+                            match exp_sign {
+                                Sign::Plus => {
+                                    for _ in 0..exp {
+                                        frac *= step;
+                                    }
+                                }
+                                Sign::Minus => {
+                                    for _ in 0..exp {
+                                        frac /= step;
+                                    }
+                                }
+                            }
+                            frac
+                        } else {
+                            frac
+                        }
+                    }
+                },
+                (Token::Int(sign, base, digits), offset) => {
+                    parse_f64_str(parser, digits, base, sign, offset)?
+                }
+                (tok, offset) => {
+                    return parser.unexpected_token(
+                        tok,
+                        "float number or integer for f64.const",
+                        offset,
+                    )
                 }
             };
             InsnKind::F64Const(val)
@@ -3944,6 +3964,9 @@ mod tests {
             CannotParseNum{ reason: "too large or small integer for i64", .. }
         );
 
+        assert_insn!(r#"f32.const 42"#, [F32Const(f)] if *f == 42.0);
+        assert_insn!(r#"f32.const 0x42"#, [F32Const(f)] if *f == 66.0);
+        assert_insn!(r#"f32.const 8589934592"#, [F32Const(f)] if *f > 85899e5 && *f < 85900e5);
         assert_insn!(r#"f32.const 42."#, [F32Const(f)] if *f == 42.0);
         assert_insn!(r#"f32.const 42.0"#, [F32Const(f)] if *f == 42.0);
         assert_insn!(r#"f32.const 4_2."#, [F32Const(f)] if *f == 42.0);
@@ -3971,11 +3994,6 @@ mod tests {
         assert_insn!(r#"f32.const -nan:0x401234"#, [F32Const(f)] if f.is_nan());
 
         assert_error!(
-            r#"f32.const 12"#,
-            Vec<Instruction<'_>>,
-            UnexpectedToken{ expected: "float number for f32.const", .. }
-        );
-        assert_error!(
             r#"f32.const nan:0x1234"#,
             Vec<Instruction<'_>>,
             CannotParseNum{ reason: "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23", .. }
@@ -3986,6 +4004,9 @@ mod tests {
             CannotParseNum{ reason: "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23", .. }
         );
 
+        assert_insn!(r#"f64.const 42"#, [F64Const(f)] if *f == 42.0);
+        assert_insn!(r#"f64.const 0x42"#, [F64Const(f)] if *f == 66.0);
+        assert_insn!(r#"f64.const 36893488147419103232"#, [F64Const(f)] if *f == 36893488147419103232.0);
         assert_insn!(r#"f64.const 42."#, [F64Const(f)] if *f == 42.0);
         assert_insn!(r#"f64.const 42.0"#, [F64Const(f)] if *f == 42.0);
         assert_insn!(r#"f64.const 4_2."#, [F64Const(f)] if *f == 42.0);
@@ -4009,11 +4030,6 @@ mod tests {
         assert_insn!(r#"f64.const -nan"#, [F64Const(f)] if f.is_nan());
         assert_insn!(r#"f64.const -nan:0x8_0000_0000_1245"#, [F64Const(f)] if f.is_nan());
 
-        assert_error!(
-            r#"f64.const 12"#,
-            Vec<Instruction<'_>>,
-            UnexpectedToken{ expected: "float number for f64.const", .. }
-        );
         assert_error!(
             r#"f64.const nan:0x1234"#,
             Vec<Instruction<'_>>,
