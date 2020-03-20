@@ -130,7 +130,7 @@ pub struct Instruction {
 
 // https://webassembly.github.io/spec/core/syntax/instructions.html#syntax-memarg
 pub struct Mem {
-    pub align: Option<u32>,
+    pub align: Option<u8>,
     pub offset: Option<u32>,
 }
 

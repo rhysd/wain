@@ -26,8 +26,9 @@ pub enum ErrorKind {
         ty: ValType,
         idx: u32,
     },
+    AlignNotPowerOf2(u8),
     TooLargeAlign {
-        align: u32,
+        align: u8,
         bits: u8,
     },
     LimitsOutOfRange {
@@ -111,6 +112,7 @@ impl<'a> fmt::Display for Error<'a> {
                  control frame is op_stack[{}]", op, frame_start, idx_in_op_stack)?,
             LabelStackEmpty { op } => write!(f, "label stack for control instructions is unexpectedly empty at '{}' instruction", op)?,
             SetImmutableGlobal{ ty, idx } => write!(f, "{} value cannot be set to immutable global variable {}", ty, idx)?,
+            AlignNotPowerOf2(align) => write!(f, "align must be the exponent of a power of 2 but got {}", align)?,
             TooLargeAlign { align, bits } => write!(f, "align {} must not be larger than {}bits / 8", align, bits)?,
             LimitsOutOfRange { value, min, max, what } => write!(f, "limit {} is out of range {}..{} at {}", value, min, max, what)?,
             NotConstantInstruction(op) => write!(f, "instruction '{}' is not valid for constant. only 'global.get' or '*.const' are valid in constant expressions", op)?,

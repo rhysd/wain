@@ -547,6 +547,7 @@ macro_rules! parse_integer_function {
     };
 }
 
+parse_integer_function!(parse_u8_str, u8);
 parse_integer_function!(parse_u32_str, u32);
 parse_integer_function!(parse_u64_str, u64);
 
@@ -1429,18 +1430,18 @@ impl<'a> Parse<'a> for Vec<Local<'a>> {
 
 impl<'a> Parse<'a> for Mem {
     fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
-        fn parse_u32<'a>(s: &'a str, parser: &mut Parser<'a>, offset: usize) -> Result<'a, u32> {
-            let (base, s) = if s.starts_with("0x") {
+        fn base_and_digits(s: &str) -> (NumBase, &'_ str) {
+            if s.starts_with("0x") {
                 (NumBase::Hex, &s[2..])
             } else {
                 (NumBase::Dec, s)
-            };
-            parse_u32_str(parser, s, base, Sign::Plus, offset)
+            }
         }
 
         let offset = match parser.peek("'offset' keyword for memory instruction")? {
             (Token::Keyword(kw), offset) if kw.starts_with("offset=") => {
-                let u = parse_u32(&kw[7..], parser, offset)?;
+                let (base, digits) = base_and_digits(&kw[7..]);
+                let u = parse_u32_str(parser, digits, base, Sign::Plus, offset)?;
                 parser.eat_token(); // Eat 'offset' keyword
                 Some(u)
             }
@@ -1449,7 +1450,8 @@ impl<'a> Parse<'a> for Mem {
 
         let align = match parser.peek("'align' keyword for memory instruction")? {
             (Token::Keyword(kw), offset) if kw.starts_with("align=") => {
-                let u = parse_u32(&kw[6..], parser, offset)?;
+                let (base, digits) = base_and_digits(&kw[6..]);
+                let u = parse_u8_str(parser, digits, base, Sign::Plus, offset)?;
                 parser.eat_token(); // Eat 'align' keyword
                 Some(u)
             }

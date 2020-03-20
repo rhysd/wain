@@ -178,9 +178,12 @@ impl<'outer, 'm, 'a> FuncBodyContext<'outer, 'm, 'a> {
 
     fn validate_memarg(&self, mem: &Mem, bits: u8) -> Result<'a, ()> {
         self.outer.memory_from_idx(0, self.current_offset)?;
-        // The alignment 2^align must not be larger than the bit width of t divided by 8.
+        // The alignment must not be larger than the bit width of t divided by 8.
         if let Some(align) = mem.align {
-            if (1 << align) > bits / 8 {
+            if align.count_ones() != 1 {
+                return self.error(ErrorKind::AlignNotPowerOf2(align));
+            }
+            if align > bits / 8 {
                 return self.error(ErrorKind::TooLargeAlign { align, bits });
             }
         }
