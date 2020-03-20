@@ -9,16 +9,6 @@ pub enum ErrorKind {
         what: &'static str,
     },
     MultipleReturnTypes(Vec<ValType>),
-    UnknownImport {
-        mod_name: String,
-        name: String,
-    },
-    ImportKindMismatch {
-        mod_name: String,
-        name: String,
-        expected: &'static str,
-        actual: &'static str,
-    },
     TypeMismatch {
         op: &'static str,
         expected: ValType,
@@ -97,24 +87,6 @@ impl<'a> fmt::Display for Error<'a> {
                     ss.join(", ")
                 )?
             }
-            UnknownImport { mod_name, name } if *mod_name == "env" => write!(
-                f,
-                "no exported name '{}' in module 'env'. currently only 'print' is exported",
-                name,
-            )?,
-            UnknownImport { mod_name, .. } => write!(
-                f,
-                "unknown module name '{}'. valid module name is currently only 'env'",
-                mod_name
-            )?,
-            ImportKindMismatch { mod_name, name, expected, actual } => write!(
-                f,
-                "expected {} for import item {}::{}, but got {}",
-                expected,
-                mod_name,
-                name,
-                actual,
-            )?,
             TypeMismatch {
                 op,
                 expected,

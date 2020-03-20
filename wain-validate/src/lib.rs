@@ -143,63 +143,12 @@ impl<'a> Validate<'a> for FuncType {
     }
 }
 
-// https://webassembly.github.io/spec/core/valid/modules.html#imports
-// Not implement Validate<'a> since the offset parameter is necessary for better error message
-#[derive(PartialEq, Eq)]
-enum ImportKind {
-    Func,
-    Table,
-    Memory,
-    Global,
-}
-impl ImportKind {
-    fn name(self) -> &'static str {
-        match self {
-            ImportKind::Func => "function",
-            ImportKind::Table => "table",
-            ImportKind::Memory => "memory",
-            ImportKind::Global => "global variable",
-        }
-    }
-}
-fn validate_import<'module, 'a>(
-    import: &Import<'a>,
-    kind: ImportKind,
-    ctx: &mut Context<'module, 'a>,
-    offset: usize,
-) -> Result<'a, ()> {
-    if import.mod_name.0 != "env" && import.name.0 != "print" {
-        let mod_name = import.mod_name.0.to_string();
-        let name = import.name.0.to_string();
-        ctx.error(ErrorKind::UnknownImport { mod_name, name }, offset)
-    } else if kind != ImportKind::Func {
-        let mod_name = import.mod_name.0.to_string();
-        let name = import.name.0.to_string();
-        ctx.error(
-            ErrorKind::ImportKindMismatch {
-                mod_name,
-                name,
-                expected: ImportKind::Func.name(),
-                actual: kind.name(),
-            },
-            offset,
-        )
-    } else {
-        Ok(())
-    }
-}
-
 // https://webassembly.github.io/spec/core/valid/modules.html#tables
 impl<'a> Validate<'a> for Table<'a> {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+    fn validate<'module>(&self, _ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
         // Validation for table type is unnecessary here
         // https://webassembly.github.io/spec/core/syntax/types.html#syntax-tabletype
         // Limits should be within 2**32 but the values are already u32. It should be validated by parser
-
-        if let Some(import) = &self.import {
-            validate_import(import, ImportKind::Table, ctx, self.start)?;
-        }
-
         Ok(())
     }
 }
@@ -228,10 +177,6 @@ impl<'a> Validate<'a> for Memory<'a> {
             );
         }
 
-        if let Some(import) = &self.import {
-            validate_import(import, ImportKind::Memory, ctx, self.start)?;
-        }
-
         Ok(())
     }
 }
@@ -243,9 +188,7 @@ impl<'a> Validate<'a> for Global<'a> {
         // Nothing to do for validating GlobalType
 
         match &self.kind {
-            GlobalKind::Import(import) => {
-                validate_import(import, ImportKind::Global, ctx, self.start)
-            }
+            GlobalKind::Import(_) => Ok(()),
             GlobalKind::Init(init) => crate::insn::validate_constant(
                 init,
                 &ctx.module.globals,
@@ -335,7 +278,7 @@ impl<'a> Validate<'a> for Func<'a> {
     fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
         let func_ty = ctx.type_from_idx(self.idx, self.start)?;
         match &self.kind {
-            FuncKind::Import(import) => validate_import(import, ImportKind::Func, ctx, self.start),
+            FuncKind::Import(_) => Ok(()),
             FuncKind::Body { locals, expr } => {
                 crate::insn::validate_func_body(expr, func_ty, locals, ctx, self.start)
             }
