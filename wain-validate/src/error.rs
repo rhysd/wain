@@ -1,4 +1,5 @@
 use std::fmt;
+use wain_ast::source::Source;
 use wain_ast::*;
 
 #[cfg_attr(test, derive(Debug))]
@@ -53,9 +54,9 @@ pub enum ErrorKind {
 }
 
 #[cfg_attr(test, derive(Debug))]
-pub struct Error<'a> {
+pub struct Error<S: Source> {
     kind: ErrorKind,
-    source: &'a str,
+    source: S,
     offset: usize,
 }
 
@@ -71,7 +72,7 @@ impl fmt::Display for Ordinal {
     }
 }
 
-impl<'a> fmt::Display for Error<'a> {
+impl<S: Source> fmt::Display for Error<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ErrorKind::*;
         match &self.kind {
@@ -129,31 +130,18 @@ impl<'a> fmt::Display for Error<'a> {
             AlreadyExported{ name, prev_offset } => write!(f, "'{}' was already exported at offset {}", name, prev_offset)?,
         }
 
-        if self.offset == self.source.len() {
-            write!(f, " caused at byte offset {} (end of input)", self.offset)
-        } else {
-            let source = &self.source[self.offset..];
-            let end = source
-                .find(['\n', '\r'].as_ref())
-                .unwrap_or_else(|| source.len());
-            write!(
-                f,
-                " caused at byte offset {}\n\n ... {}\n     ^\n     starts from here",
-                self.offset,
-                &source[..end],
-            )
-        }
+        self.source.describe(f, self.offset)
     }
 }
 
-impl<'a> Error<'a> {
-    pub(crate) fn new(kind: ErrorKind, offset: usize, source: &'a str) -> Box<Self> {
+impl<S: Source> Error<S> {
+    pub(crate) fn new(kind: ErrorKind, offset: usize, source: &S) -> Box<Self> {
         Box::new(Self {
             kind,
-            source,
+            source: source.clone(),
             offset,
         })
     }
 }
 
-pub type Result<'a, T> = ::std::result::Result<T, Box<Error<'a>>>;
+pub type Result<T, S> = ::std::result::Result<T, Box<Error<S>>>;

@@ -8,17 +8,18 @@ mod insn;
 
 use error::{Error, ErrorKind, Result};
 use std::collections::HashMap;
+use wain_ast::source::Source;
 use wain_ast::*;
 
 // Validation context
 // https://webassembly.github.io/spec/core/valid/conventions.html#context
-struct Context<'module, 'a: 'module> {
+struct Context<'module, 'a: 'module, S: Source> {
     module: &'module Module<'a>,
-    source: &'a str,
+    source: &'module S,
 }
 
-impl<'module, 'a> Context<'module, 'a> {
-    fn error<T>(&self, kind: ErrorKind, offset: usize) -> Result<'a, T> {
+impl<'module, 'a, S: Source> Context<'module, 'a, S> {
+    fn error<T>(&self, kind: ErrorKind, offset: usize) -> Result<T, S> {
         Err(Error::new(kind, offset, self.source))
     }
 
@@ -28,7 +29,7 @@ impl<'module, 'a> Context<'module, 'a> {
         idx: u32,
         what: &'static str,
         offset: usize,
-    ) -> Result<'a, &'module T> {
+    ) -> Result<&'module T, S> {
         if let Some(item) = s.get(idx as usize) {
             Ok(item)
         } else {
@@ -43,47 +44,47 @@ impl<'module, 'a> Context<'module, 'a> {
         }
     }
 
-    fn type_from_idx(&self, idx: u32, offset: usize) -> Result<'a, &'module FuncType> {
+    fn type_from_idx(&self, idx: u32, offset: usize) -> Result<&'module FuncType, S> {
         self.validate_idx(&self.module.types, idx, "type", offset)
     }
 
-    fn func_from_idx(&self, idx: u32, offset: usize) -> Result<'a, &'module Func> {
+    fn func_from_idx(&self, idx: u32, offset: usize) -> Result<&'module Func, S> {
         self.validate_idx(&self.module.funcs, idx, "function", offset)
     }
 
-    fn table_from_idx(&self, idx: u32, offset: usize) -> Result<'a, &'module Table> {
+    fn table_from_idx(&self, idx: u32, offset: usize) -> Result<&'module Table, S> {
         self.validate_idx(&self.module.tables, idx, "table", offset)
     }
 
-    fn global_from_idx(&self, idx: u32, offset: usize) -> Result<'a, &'module Global> {
+    fn global_from_idx(&self, idx: u32, offset: usize) -> Result<&'module Global, S> {
         self.validate_idx(&self.module.globals, idx, "global variable", offset)
     }
 
-    fn memory_from_idx(&self, idx: u32, offset: usize) -> Result<'a, &'module Memory> {
+    fn memory_from_idx(&self, idx: u32, offset: usize) -> Result<&'module Memory, S> {
         self.validate_idx(&self.module.memories, idx, "memory", offset)
     }
 }
 
-pub fn validate<'module, 'a>(module: &'module Module<'a>, source: &'a str) -> Result<'a, ()> {
+pub fn validate<'module, 'a, S: Source>(root: &'module Root<'a, S>) -> Result<(), S> {
     let mut ctx = Context {
-        module: &module,
-        source,
+        module: &root.module,
+        source: &root.source,
     };
-    module.validate(&mut ctx)
+    root.module.validate(&mut ctx)
 }
 
-trait Validate<'a> {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()>;
+trait Validate<'a, S: Source> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S>;
 }
 
-impl<'a, V: Validate<'a>> Validate<'a> for Vec<V> {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source, V: Validate<'a, S>> Validate<'a, S> for Vec<V> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         self.iter().map(|n| n.validate(ctx)).collect()
     }
 }
 
-impl<'a, V: Validate<'a>> Validate<'a> for Option<V> {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source, V: Validate<'a, S>> Validate<'a, S> for Option<V> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         match self {
             Some(node) => node.validate(ctx),
             None => Ok(()),
@@ -92,8 +93,8 @@ impl<'a, V: Validate<'a>> Validate<'a> for Option<V> {
 }
 
 // https://webassembly.github.io/spec/core/valid/modules.html#valid-module
-impl<'a> Validate<'a> for Module<'a> {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source> Validate<'a, S> for Module<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         self.types.validate(ctx)?;
         self.funcs.validate(ctx)?;
         self.tables.validate(ctx)?;
@@ -130,8 +131,8 @@ impl<'a> Validate<'a> for Module<'a> {
 }
 
 // https://webassembly.github.io/spec/core/valid/types.html#valid-functype
-impl<'a> Validate<'a> for FuncType {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source> Validate<'a, S> for FuncType {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         if self.results.len() > 1 {
             ctx.error(
                 ErrorKind::MultipleReturnTypes(self.results.clone()),
@@ -144,8 +145,8 @@ impl<'a> Validate<'a> for FuncType {
 }
 
 // https://webassembly.github.io/spec/core/valid/modules.html#tables
-impl<'a> Validate<'a> for Table<'a> {
-    fn validate<'module>(&self, _ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source> Validate<'a, S> for Table<'a> {
+    fn validate<'module>(&self, _ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         // Validation for table type is unnecessary here
         // https://webassembly.github.io/spec/core/syntax/types.html#syntax-tabletype
         // Limits should be within 2**32 but the values are already u32. It should be validated by parser
@@ -154,8 +155,8 @@ impl<'a> Validate<'a> for Table<'a> {
 }
 
 // https://webassembly.github.io/spec/core/valid/modules.html#memories
-impl<'a> Validate<'a> for Memory<'a> {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source> Validate<'a, S> for Memory<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         // https://webassembly.github.io/spec/core/valid/types.html#valid-memtype
         let limit = 1 << 16;
         let invalid = match self.ty.limit {
@@ -182,8 +183,8 @@ impl<'a> Validate<'a> for Memory<'a> {
 }
 
 // https://webassembly.github.io/spec/core/valid/modules.html#globals
-impl<'a> Validate<'a> for Global<'a> {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source> Validate<'a, S> for Global<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         // https://webassembly.github.io/spec/core/valid/types.html#valid-globaltype
         // Nothing to do for validating GlobalType
 
@@ -201,8 +202,8 @@ impl<'a> Validate<'a> for Global<'a> {
 }
 
 // https://webassembly.github.io/spec/core/valid/modules.html#element-segments
-impl<'a> Validate<'a> for ElemSegment {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source> Validate<'a, S> for ElemSegment {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         ctx.table_from_idx(self.idx, self.start)?;
         crate::insn::validate_constant(
             &self.offset,
@@ -219,8 +220,8 @@ impl<'a> Validate<'a> for ElemSegment {
 }
 
 // https://webassembly.github.io/spec/core/valid/modules.html#data-segments
-impl<'a> Validate<'a> for DataSegment<'a> {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source> Validate<'a, S> for DataSegment<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         ctx.memory_from_idx(self.idx, self.start)?;
         crate::insn::validate_constant(
             &self.offset,
@@ -234,8 +235,8 @@ impl<'a> Validate<'a> for DataSegment<'a> {
 }
 
 // https://webassembly.github.io/spec/core/valid/modules.html#start-function
-impl<'a> Validate<'a> for StartFunction {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source> Validate<'a, S> for StartFunction {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         let func = ctx.func_from_idx(self.idx, self.start)?;
         let fty = ctx.type_from_idx(func.idx, self.start)?;
         if !fty.params.is_empty() || !fty.results.is_empty() {
@@ -253,8 +254,8 @@ impl<'a> Validate<'a> for StartFunction {
 }
 
 // https://webassembly.github.io/spec/core/valid/modules.html#exports
-impl<'a> Validate<'a> for Export<'a> {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source> Validate<'a, S> for Export<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         match self.kind {
             ExportKind::Func(idx) => {
                 ctx.func_from_idx(idx, self.start)?;
@@ -274,8 +275,8 @@ impl<'a> Validate<'a> for Export<'a> {
 }
 
 // https://webassembly.github.io/spec/core/valid/modules.html#functions
-impl<'a> Validate<'a> for Func<'a> {
-    fn validate<'module>(&self, ctx: &mut Context<'module, 'a>) -> Result<'a, ()> {
+impl<'a, S: Source> Validate<'a, S> for Func<'a> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         let func_ty = ctx.type_from_idx(self.idx, self.start)?;
         match &self.kind {
             FuncKind::Import(_) => Ok(()),

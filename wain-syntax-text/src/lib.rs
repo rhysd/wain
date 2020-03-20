@@ -3,7 +3,7 @@
 extern crate wain_ast;
 
 mod compose;
-mod util;
+mod source;
 
 pub mod ast;
 pub mod lexer;
@@ -12,6 +12,7 @@ pub mod wat2wasm;
 
 use compose::{ComposeError, Composer};
 use parser::{ParseError, Parser};
+use source::TextSource;
 use std::fmt;
 use wat2wasm::{wat2wasm, TransformError};
 
@@ -48,7 +49,7 @@ from_errors! {
     ComposeError<'a> => Compose,
 }
 
-pub fn parse(source: &'_ str) -> Result<wain_ast::Root<'_>, Error<'_>> {
+pub fn parse(source: &'_ str) -> Result<wain_ast::Root<'_, TextSource>, Error<'_>> {
     let mut parser = Parser::new(source);
     let parsed = parser.parse()?;
     let mut tree = wat2wasm(parsed, source)?;

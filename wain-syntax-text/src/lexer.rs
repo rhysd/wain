@@ -1,4 +1,4 @@
-use crate::util::describe_position;
+use crate::source::describe_position;
 use std::char;
 use std::fmt;
 use std::iter;

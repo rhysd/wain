@@ -1,5 +1,5 @@
 use crate::ast as wat;
-use crate::util::describe_position;
+use crate::source::{describe_position, TextSource};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
@@ -242,7 +242,10 @@ impl<'a> Context<'a> {
     }
 }
 
-pub fn wat2wasm<'a>(parsed: wat::Parsed<'a>, source: &'a str) -> Result<'a, wasm::Root<'a>> {
+pub fn wat2wasm<'a>(
+    parsed: wat::Parsed<'a>,
+    source: &'a str,
+) -> Result<'a, wasm::Root<'a, TextSource<'a>>> {
     let mut ctx = Context {
         source,
         type_indices: parsed.type_indices,
@@ -255,7 +258,10 @@ pub fn wat2wasm<'a>(parsed: wat::Parsed<'a>, source: &'a str) -> Result<'a, wasm
         label_stack: LabelStack::new(source),
     };
     let module = parsed.module.transform(&mut ctx)?;
-    Ok(wasm::Root { module })
+    Ok(wasm::Root {
+        module,
+        source: TextSource(source),
+    })
 }
 
 trait Transform<'a>: Sized {

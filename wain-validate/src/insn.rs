@@ -9,6 +9,7 @@
 use crate::error::{Error, ErrorKind, Result};
 use crate::Context as OuterContext;
 use std::mem;
+use wain_ast::source::Source;
 use wain_ast::*;
 
 #[derive(Copy, Clone)]
@@ -37,10 +38,10 @@ struct CtrlFrame {
 }
 
 // https://webassembly.github.io/spec/core/valid/conventions.html#context
-struct FuncBodyContext<'outer, 'm: 'outer, 'a: 'm> {
+struct FuncBodyContext<'outer, 'm: 'outer, 'a: 'm, S: Source> {
     current_op: &'static str,
     current_offset: usize,
-    outer: &'outer OuterContext<'m, 'a>,
+    outer: &'outer OuterContext<'m, 'a, S>,
     // Types on stack to check operands of instructions such as unreachable, br, table_br
     op_stack: Vec<Type>,
     // Index of current control frame
@@ -57,12 +58,12 @@ struct FuncBodyContext<'outer, 'm: 'outer, 'a: 'm> {
     unreachable: bool,
 }
 
-impl<'outer, 'm, 'a> FuncBodyContext<'outer, 'm, 'a> {
-    fn error<T>(&self, kind: ErrorKind) -> Result<'a, T> {
+impl<'outer, 'm, 'a, S: Source> FuncBodyContext<'outer, 'm, 'a, S> {
+    fn error<T>(&self, kind: ErrorKind) -> Result<T, S> {
         self.outer.error(kind, self.current_offset)
     }
 
-    fn ensure_ctrl_frame_not_empty(&self) -> Result<'a, ()> {
+    fn ensure_ctrl_frame_not_empty(&self) -> Result<(), S> {
         if self.op_stack.len() > self.current_frame.idx {
             return Ok(());
         }
@@ -90,7 +91,7 @@ impl<'outer, 'm, 'a> FuncBodyContext<'outer, 'm, 'a> {
         })
     }
 
-    fn ensure_op_stack_top(&self, expected: Type) -> Result<'a, Type> {
+    fn ensure_op_stack_top(&self, expected: Type) -> Result<Type, S> {
         self.ensure_ctrl_frame_not_empty()?;
         if self.op_stack.len() == self.current_frame.idx {
             assert!(self.unreachable);
@@ -112,7 +113,7 @@ impl<'outer, 'm, 'a> FuncBodyContext<'outer, 'm, 'a> {
         Ok(actual)
     }
 
-    fn pop_op_stack(&mut self, expected: Type) -> Result<'a, Type> {
+    fn pop_op_stack(&mut self, expected: Type) -> Result<Type, S> {
         let ty = self.ensure_op_stack_top(expected)?;
         self.op_stack.pop();
         Ok(ty)
@@ -130,7 +131,7 @@ impl<'outer, 'm, 'a> FuncBodyContext<'outer, 'm, 'a> {
         self.current_frame = prev;
     }
 
-    fn pop_label_stack(&mut self) -> Result<'a, ()> {
+    fn pop_label_stack(&mut self) -> Result<(), S> {
         if let Some(ty) = self.label_stack.pop() {
             if let Some(ty) = ty {
                 self.ensure_op_stack_top(Type::Known(ty))?;
@@ -143,7 +144,7 @@ impl<'outer, 'm, 'a> FuncBodyContext<'outer, 'm, 'a> {
         }
     }
 
-    fn validate_label_idx(&self, idx: u32) -> Result<'a, Option<ValType>> {
+    fn validate_label_idx(&self, idx: u32) -> Result<Option<ValType>, S> {
         let len = self.label_stack.len();
         if (idx as usize) >= len {
             return self.error(ErrorKind::IndexOutOfBounds {
@@ -159,7 +160,7 @@ impl<'outer, 'm, 'a> FuncBodyContext<'outer, 'm, 'a> {
         Ok(ty)
     }
 
-    fn validate_local_idx(&self, idx: u32) -> Result<'a, ValType> {
+    fn validate_local_idx(&self, idx: u32) -> Result<ValType, S> {
         let uidx = idx as usize;
         if let Some(ty) = self.params.get(uidx) {
             return Ok(*ty);
@@ -176,7 +177,7 @@ impl<'outer, 'm, 'a> FuncBodyContext<'outer, 'm, 'a> {
         }
     }
 
-    fn validate_memarg(&self, mem: &Mem, bits: u8) -> Result<'a, ()> {
+    fn validate_memarg(&self, mem: &Mem, bits: u8) -> Result<(), S> {
         self.outer.memory_from_idx(0, self.current_offset)?;
         // The alignment must not be larger than the bit width of t divided by 8.
         if let Some(align) = mem.align {
@@ -190,34 +191,34 @@ impl<'outer, 'm, 'a> FuncBodyContext<'outer, 'm, 'a> {
         Ok(())
     }
 
-    fn validate_load(&mut self, mem: &Mem, bits: u8, ty: ValType) -> Result<'a, ()> {
+    fn validate_load(&mut self, mem: &Mem, bits: u8, ty: ValType) -> Result<(), S> {
         self.validate_memarg(mem, bits)?;
         self.pop_op_stack(Type::i32())?; // load address
         self.op_stack.push(Type::Known(ty));
         Ok(())
     }
 
-    fn validate_store(&mut self, mem: &Mem, bits: u8, ty: ValType) -> Result<'a, ()> {
+    fn validate_store(&mut self, mem: &Mem, bits: u8, ty: ValType) -> Result<(), S> {
         self.validate_memarg(mem, bits)?;
         self.pop_op_stack(Type::Known(ty))?; // value to store
         self.pop_op_stack(Type::i32())?; // store address
         Ok(())
     }
 
-    fn validate_convert(&mut self, from: ValType, to: ValType) -> Result<'a, ()> {
+    fn validate_convert(&mut self, from: ValType, to: ValType) -> Result<(), S> {
         self.pop_op_stack(Type::Known(from))?;
         self.op_stack.push(Type::Known(to));
         Ok(())
     }
 }
 
-pub(crate) fn validate_func_body<'outer, 'm, 'a>(
+pub(crate) fn validate_func_body<'outer, 'm, 'a, S: Source>(
     body: &'outer [Instruction],
     func_ty: &'outer FuncType,
     locals: &'outer [ValType],
-    outer: &'outer OuterContext<'m, 'a>,
+    outer: &'outer OuterContext<'m, 'a, S>,
     start: usize,
-) -> Result<'a, ()> {
+) -> Result<(), S> {
     // FuncType validated func_ty has at most one result type
     let ret_ty = func_ty.results.get(0).copied();
     let mut ctx = FuncBodyContext {
@@ -244,23 +245,25 @@ pub(crate) fn validate_func_body<'outer, 'm, 'a>(
     Ok(())
 }
 
-trait ValidateInsnSeq<'outer, 'm, 'a> {
-    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a>) -> Result<'a, ()>;
+trait ValidateInsnSeq<'outer, 'm, 'a, S: Source> {
+    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a, S>) -> Result<(), S>;
 }
 
-impl<'a, 'm, 'outer, V: ValidateInsnSeq<'outer, 'm, 'a>> ValidateInsnSeq<'outer, 'm, 'a> for [V] {
-    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a>) -> Result<'a, ()> {
+impl<'a, 'm, 'outer, S: Source, V: ValidateInsnSeq<'outer, 'm, 'a, S>>
+    ValidateInsnSeq<'outer, 'm, 'a, S> for [V]
+{
+    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a, S>) -> Result<(), S> {
         self.iter()
             .map(|insn| insn.validate(ctx))
-            .collect::<Result<_>>()?;
+            .collect::<Result<_, _>>()?;
         ctx.unreachable = false; // clear flag
         Ok(())
     }
 }
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#instruction-sequences
-impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
-    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a>) -> Result<'a, ()> {
+impl<'outer, 'm, 'a, S: Source> ValidateInsnSeq<'outer, 'm, 'a, S> for Instruction {
+    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a, S>) -> Result<(), S> {
         ctx.current_op = self.kind.name();
         ctx.current_offset = self.start;
         let start = self.start;
@@ -581,13 +584,13 @@ impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
 }
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions
-pub(crate) fn validate_constant<'a>(
+pub(crate) fn validate_constant<'a, S: Source>(
     insns: &[Instruction],
     globals: &[Global<'a>],
     expr_ty: ValType,
-    source: &'a str,
+    source: &S,
     start: usize,
-) -> Result<'a, ()> {
+) -> Result<(), S> {
     let mut last_ty = None;
     for insn in insns {
         use InsnKind::*;

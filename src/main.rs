@@ -15,7 +15,7 @@ fn main() {
             exit(1);
         }
     };
-    if let Err(e) = wain_validate::validate(&ast.module, &stdin) {
+    if let Err(e) = wain_validate::validate(&ast) {
         eprintln!("Error: {}", e);
         exit(1);
     }

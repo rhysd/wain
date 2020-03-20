@@ -1,4 +1,5 @@
 use std::fmt;
+use wain_ast::source::Source;
 
 pub(crate) fn describe_position(
     f: &mut fmt::Formatter<'_>,
@@ -18,5 +19,20 @@ pub(crate) fn describe_position(
             start,
             &source[..end],
         )
+    }
+}
+
+#[derive(Clone)]
+pub struct TextSource<'a>(pub(crate) &'a str);
+
+impl<'a> Source for TextSource<'a> {
+    type Raw = &'a str;
+
+    fn describe(&self, f: &mut fmt::Formatter<'_>, offset: usize) -> fmt::Result {
+        describe_position(f, self.0, offset)
+    }
+
+    fn raw(&self) -> Self::Raw {
+        self.0
     }
 }

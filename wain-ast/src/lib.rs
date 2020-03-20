@@ -1,9 +1,12 @@
+pub mod source;
+
 use std::borrow::Cow;
 use std::fmt;
 
 // Root of the tree
-pub struct Root<'a> {
+pub struct Root<'a, S: source::Source> {
     pub module: Module<'a>,
+    pub source: S,
 }
 
 // Note: Since crate for syntax tree data structure is separated, all fields of AST node structs need

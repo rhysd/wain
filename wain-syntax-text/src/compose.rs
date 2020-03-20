@@ -6,7 +6,7 @@
 // - m1.start = ϵ ∨ m2.start = ϵ
 // - m1.funcs = m1.tables = m1.mems = m1.globals = ϵ ∨ m2.imports = ϵ
 //
-use crate::util::describe_position;
+use crate::source::describe_position;
 use std::fmt;
 use wain_ast::*;
 
