@@ -1494,485 +1494,6 @@ fn parse_maybe_result_type<'a>(parser: &mut Parser<'a>) -> Result<'a, Option<Val
     }
 }
 
-fn parse_naked_insn<'a>(parser: &mut Parser<'a>, end: bool) -> Result<'a, Instruction<'a>> {
-    let (kw, start) = match_token!(parser, "keyword for instruction", Token::Keyword(k) => k);
-    let kind = match kw {
-        // Control instructions
-        // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
-        "block" | "loop" => {
-            let label = parser.maybe_ident("label for block or loop")?;
-            let ty = parse_maybe_result_type(parser)?;
-            let body = parser.parse()?;
-            let id = if end {
-                match_token!(
-                    parser,
-                    "'end' keyword for block or loop",
-                    Token::Keyword("end")
-                );
-                parser.maybe_ident("ID for block or loop")?
-            } else {
-                None
-            };
-            if kw == "block" {
-                InsnKind::Block {
-                    label,
-                    ty,
-                    body,
-                    id,
-                }
-            } else {
-                InsnKind::Loop {
-                    label,
-                    ty,
-                    body,
-                    id,
-                }
-            }
-        }
-        "if" => {
-            // Note: 'else' can be omitted when else clause is empty
-            // https://webassembly.github.io/spec/core/text/instructions.html#abbreviations
-            let is_folded = !end;
-            let label = parser.maybe_ident("label for block or loop")?;
-            let ty = parse_maybe_result_type(parser)?;
-            if is_folded {
-                parser.opening_paren("'then' clause in folded 'if'")?;
-                match_token!(
-                    parser,
-                    "'then' keyword for folded 'if'",
-                    Token::Keyword("then")
-                );
-            }
-            let then_body = parser.parse()?;
-            if is_folded {
-                parser.closing_paren("then clause in folded 'if'")?;
-            }
-            let (else_body, else_id) = match parser.peek("'else', 'end', '(' or ')' in 'if'")? {
-                (Token::Keyword("end"), _) if end && !is_folded => (vec![], None),
-                (Token::RParen, _) if !end => (vec![], None),
-                (Token::LParen, _) if is_folded => {
-                    parser.eat_token(); // Eat '('
-                    match_token!(
-                        parser,
-                        "'else' keyword in else clause of folded 'if'",
-                        Token::Keyword("else")
-                    );
-                    let body = parser.parse()?;
-                    parser.closing_paren("else clause in folded 'if'")?;
-                    (body, None)
-                }
-                (Token::Keyword("else"), _) if !is_folded => {
-                    parser.eat_token(); // Eat 'else'
-                    let id = parser.maybe_ident("ID for 'else' in 'if'")?;
-                    let body = parser.parse()?;
-                    (body, id)
-                }
-                (tok, offset) => {
-                    return parser.unexpected_token(tok.clone(), "'else' or 'end' in 'if'", offset);
-                }
-            };
-            let end_id = if end {
-                match_token!(parser, "'end' keyword for 'if'", Token::Keyword("end"));
-                parser.maybe_ident("ID for end of 'if'")?
-            } else {
-                None
-            };
-            InsnKind::If {
-                label,
-                ty,
-                then_body,
-                else_id,
-                else_body,
-                end_id,
-            }
-        }
-        "unreachable" => InsnKind::Unreachable,
-        "nop" => InsnKind::Nop,
-        "br" => InsnKind::Br(parser.parse()?),
-        "br_if" => InsnKind::BrIf(parser.parse()?),
-        "br_table" => {
-            let mut labels = vec![];
-            while let (Token::Int(..), _) | (Token::Ident(_), _) =
-                parser.peek("labels for 'br_table'")?
-            {
-                labels.push(parser.parse()?);
-            }
-            if let Some(default_label) = labels.pop() {
-                InsnKind::BrTable {
-                    labels,
-                    default_label,
-                }
-            } else {
-                return parser.error(
-                    ParseErrorKind::InvalidOperand {
-                        insn: "br_table",
-                        msg: "at least one label is necessary",
-                    },
-                    start,
-                );
-            }
-        }
-        "return" => InsnKind::Return,
-        "call" => InsnKind::Call(parser.parse()?),
-        "call_indirect" => InsnKind::CallIndirect(parser.parse()?),
-        // Parametric instructions
-        // https://webassembly.github.io/spec/core/text/instructions.html#parametric-instructions
-        "drop" => InsnKind::Drop,
-        "select" => InsnKind::Select,
-        // Variable instructions
-        // https://webassembly.github.io/spec/core/text/instructions.html#variable-instructions
-        "local.get" => InsnKind::LocalGet(parser.parse()?),
-        "local.set" => InsnKind::LocalSet(parser.parse()?),
-        "local.tee" => InsnKind::LocalTee(parser.parse()?),
-        "global.get" => InsnKind::GlobalGet(parser.parse()?),
-        "global.set" => InsnKind::GlobalSet(parser.parse()?),
-        // Memory instructions
-        // https://webassembly.github.io/spec/core/text/instructions.html#memory-instructions
-        "i32.load" => InsnKind::I32Load(parser.parse()?),
-        "i64.load" => InsnKind::I64Load(parser.parse()?),
-        "f32.load" => InsnKind::F32Load(parser.parse()?),
-        "f64.load" => InsnKind::F64Load(parser.parse()?),
-        "i32.load8_s" => InsnKind::I32Load8S(parser.parse()?),
-        "i32.load8_u" => InsnKind::I32Load8U(parser.parse()?),
-        "i32.load16_s" => InsnKind::I32Load16S(parser.parse()?),
-        "i32.load16_u" => InsnKind::I32Load16U(parser.parse()?),
-        "i64.load8_s" => InsnKind::I64Load8S(parser.parse()?),
-        "i64.load8_u" => InsnKind::I64Load8U(parser.parse()?),
-        "i64.load16_s" => InsnKind::I64Load16S(parser.parse()?),
-        "i64.load16_u" => InsnKind::I64Load16U(parser.parse()?),
-        "i64.load32_s" => InsnKind::I64Load32S(parser.parse()?),
-        "i64.load32_u" => InsnKind::I64Load32U(parser.parse()?),
-        "i32.store" => InsnKind::I32Store(parser.parse()?),
-        "i64.store" => InsnKind::I64Store(parser.parse()?),
-        "f32.store" => InsnKind::F32Store(parser.parse()?),
-        "f64.store" => InsnKind::F64Store(parser.parse()?),
-        "i32.store8" => InsnKind::I32Store8(parser.parse()?),
-        "i32.store16" => InsnKind::I32Store16(parser.parse()?),
-        "i64.store8" => InsnKind::I64Store8(parser.parse()?),
-        "i64.store16" => InsnKind::I64Store16(parser.parse()?),
-        "i64.store32" => InsnKind::I64Store32(parser.parse()?),
-        "memory.size" => InsnKind::MemorySize,
-        "memory.grow" => InsnKind::MemoryGrow,
-        // Numeric instructions
-        // https://webassembly.github.io/spec/core/text/instructions.html#numeric-instructions
-        // Constants
-        "i32.const" => {
-            let ((sign, base, digits), offset) = match_token!(parser, "integer for i32.const operand", Token::Int(s, b, d) => (s, b, d));
-            let u = parse_u32_str(parser, digits, base, sign, offset)?;
-            if u == 0x8000_0000 && sign == Sign::Minus {
-                // In this case `u as i32` causes overflow
-                InsnKind::I32Const(i32::min_value())
-            } else if u < 0x8000_0000 {
-                InsnKind::I32Const(sign.apply(u as i32))
-            } else {
-                return parser.cannot_parse_num(
-                    "too large or small integer for i32",
-                    digits,
-                    base,
-                    sign,
-                    offset,
-                );
-            }
-        }
-        "i64.const" => {
-            let ((sign, base, digits), offset) = match_token!(parser, "integer for i64.const operand", Token::Int(s, b, d) => (s, b, d));
-            let u = parse_u64_str(parser, digits, base, sign, offset)?;
-            if u == 0x8000_0000_0000_0000 && sign == Sign::Minus {
-                InsnKind::I64Const(i64::min_value())
-            } else if u < 0x8000_0000_0000_0000 {
-                InsnKind::I64Const(sign.apply(u as i64))
-            } else {
-                return parser.cannot_parse_num(
-                    "too large or small integer for i64",
-                    digits,
-                    base,
-                    sign,
-                    offset,
-                );
-            }
-        }
-        "f32.const" => {
-            let val = match parser.next_token("float number or integer for f32.const")? {
-                (Token::Float(sign, float), offset) => match float {
-                    Float::Inf => match sign {
-                        Sign::Plus => f32::INFINITY,
-                        Sign::Minus => f32::NEG_INFINITY,
-                    },
-                    Float::Nan(None) => sign.apply(f32::NAN),
-                    Float::Nan(Some(payload)) => {
-                        // Encode  f32 NaN value via u32 assuming IEEE-754 format for NaN boxing.
-                        // Palyload must be
-                        //   - within 23bits (fraction of f32 is 23bits)
-                        //   - >= 2^(23-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
-                        // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
-                        let payload_u =
-                            parse_u32_str(parser, payload, NumBase::Hex, Sign::Plus, offset)?;
-                        if payload_u < 0x40_0000 || 0x80_0000 <= payload_u {
-                            return parser.cannot_parse_num(
-                                "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23",
-                                payload,
-                                NumBase::Hex,
-                                Sign::Plus,
-                                offset,
-                            );
-                        }
-                        // NaN boxing. 2^22 <= payload_u < 2^23 and floating point number is in IEEE754 format.
-                        // This will encode the payload into fraction of NaN.
-                        //   0x{sign}11111111{payload}
-                        let sign = match sign {
-                            Sign::Plus => 0,
-                            Sign::Minus => 1u32 << 31, // most significant bit is 1 for negative number
-                        };
-                        let exp = 0b1111_1111u32 << (31 - 8);
-                        f32::from_bits(sign | exp | payload_u)
-                    }
-                    Float::Val { base, frac, exp } => {
-                        // Note: Better algorithm should be considered
-                        // https://github.com/rust-lang/rust/blob/3982d3514efbb65b3efac6bb006b3fa496d16663/src/libcore/num/dec2flt/algorithm.rs
-                        let mut frac = sign.apply(parse_f32_str(parser, frac, base, sign, offset)?);
-                        // In IEEE754, exp part is actually 8bits
-                        if let Some((exp_sign, exp)) = exp {
-                            let exp = parse_u32_str(parser, exp, NumBase::Dec, exp_sign, offset)?;
-                            let step = match base {
-                                NumBase::Hex => 2.0,
-                                NumBase::Dec => 10.0,
-                            };
-                            // powi is not available because an error gets larger
-                            match exp_sign {
-                                Sign::Plus => {
-                                    for _ in 0..exp {
-                                        frac *= step;
-                                    }
-                                }
-                                Sign::Minus => {
-                                    for _ in 0..exp {
-                                        frac /= step;
-                                    }
-                                }
-                            }
-                            frac
-                        } else {
-                            frac
-                        }
-                    }
-                },
-                (Token::Int(sign, base, digits), offset) => {
-                    parse_f32_str(parser, digits, base, sign, offset)?
-                }
-                (tok, offset) => {
-                    return parser.unexpected_token(
-                        tok,
-                        "float number or integer for f32.const",
-                        offset,
-                    )
-                }
-            };
-            InsnKind::F32Const(val)
-        }
-        "f64.const" => {
-            let val = match parser.next_token("float number or integer for f64.const")? {
-                (Token::Float(sign, float), offset) => match float {
-                    Float::Inf => match sign {
-                        Sign::Plus => f64::INFINITY,
-                        Sign::Minus => f64::NEG_INFINITY,
-                    },
-                    Float::Nan(None) => sign.apply(f64::NAN),
-                    Float::Nan(Some(payload)) => {
-                        // Encode f64 NaN value via u64 assuming IEEE-754 format for NaN boxing.
-                        // Palyload must be
-                        //   - within 52bits (since fraction of f64 is 52bits)
-                        //   - >= 2^(52-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
-                        // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
-                        let payload_u =
-                            parse_u64_str(parser, payload, NumBase::Hex, Sign::Plus, offset)?;
-                        if payload_u < 0x8_0000_0000_0000 || 0x10_0000_0000_0000 <= payload_u {
-                            return parser.cannot_parse_num(
-                                "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52",
-                                payload,
-                                NumBase::Hex,
-                                Sign::Plus,
-                                offset,
-                            );
-                        }
-                        // NaN boxing. 2^51 <= payload_u < 2^52 and floating point number is in IEEE754 format.
-                        // This will encode the payload into fraction of NaN.
-                        //   0x{sign}11111111111{payload}
-                        let sign = match sign {
-                            Sign::Plus => 0,
-                            Sign::Minus => 1u64 << 63, // most significant bit is 1 for negative number
-                        };
-                        let exp = 0b111_1111_1111u64 << (63 - 11);
-                        f64::from_bits(sign | exp | payload_u)
-                    }
-                    Float::Val { base, frac, exp } => {
-                        let mut frac = sign.apply(parse_f64_str(parser, frac, base, sign, offset)?);
-                        // In IEEE754, exp part is actually 11bits
-                        if let Some((exp_sign, exp)) = exp {
-                            let exp = parse_u32_str(parser, exp, base, exp_sign, offset)?;
-                            let step = match base {
-                                NumBase::Hex => 2.0,
-                                NumBase::Dec => 10.0,
-                            };
-                            // powi is not available because an error gets larger
-                            match exp_sign {
-                                Sign::Plus => {
-                                    for _ in 0..exp {
-                                        frac *= step;
-                                    }
-                                }
-                                Sign::Minus => {
-                                    for _ in 0..exp {
-                                        frac /= step;
-                                    }
-                                }
-                            }
-                            frac
-                        } else {
-                            frac
-                        }
-                    }
-                },
-                (Token::Int(sign, base, digits), offset) => {
-                    parse_f64_str(parser, digits, base, sign, offset)?
-                }
-                (tok, offset) => {
-                    return parser.unexpected_token(
-                        tok,
-                        "float number or integer for f64.const",
-                        offset,
-                    )
-                }
-            };
-            InsnKind::F64Const(val)
-        }
-        "i32.clz" => InsnKind::I32Clz,
-        "i32.ctz" => InsnKind::I32Ctz,
-        "i32.popcnt" => InsnKind::I32Popcnt,
-        "i32.add" => InsnKind::I32Add,
-        "i32.sub" => InsnKind::I32Sub,
-        "i32.mul" => InsnKind::I32Mul,
-        "i32.div_s" => InsnKind::I32DivS,
-        "i32.div_u" => InsnKind::I32DivU,
-        "i32.rem_s" => InsnKind::I32RemS,
-        "i32.rem_u" => InsnKind::I32RemU,
-        "i32.and" => InsnKind::I32And,
-        "i32.or" => InsnKind::I32Or,
-        "i32.xor" => InsnKind::I32Xor,
-        "i32.shl" => InsnKind::I32Shl,
-        "i32.shr_s" => InsnKind::I32ShrS,
-        "i32.shr_u" => InsnKind::I32ShrU,
-        "i32.rotl" => InsnKind::I32Rotl,
-        "i32.rotr" => InsnKind::I32Rotr,
-        "i64.clz" => InsnKind::I64Clz,
-        "i64.ctz" => InsnKind::I64Ctz,
-        "i64.popcnt" => InsnKind::I64Popcnt,
-        "i64.add" => InsnKind::I64Add,
-        "i64.sub" => InsnKind::I64Sub,
-        "i64.mul" => InsnKind::I64Mul,
-        "i64.div_s" => InsnKind::I64DivS,
-        "i64.div_u" => InsnKind::I64DivU,
-        "i64.rem_s" => InsnKind::I64RemS,
-        "i64.rem_u" => InsnKind::I64RemU,
-        "i64.and" => InsnKind::I64And,
-        "i64.or" => InsnKind::I64Or,
-        "i64.xor" => InsnKind::I64Xor,
-        "i64.shl" => InsnKind::I64Shl,
-        "i64.shr_s" => InsnKind::I64ShrS,
-        "i64.shr_u" => InsnKind::I64ShrU,
-        "i64.rotl" => InsnKind::I64Rotl,
-        "i64.rotr" => InsnKind::I64Rotr,
-        "f32.abs" => InsnKind::F32Abs,
-        "f32.neg" => InsnKind::F32Neg,
-        "f32.ceil" => InsnKind::F32Ceil,
-        "f32.floor" => InsnKind::F32Floor,
-        "f32.trunc" => InsnKind::F32Trunc,
-        "f32.nearest" => InsnKind::F32Nearest,
-        "f32.sqrt" => InsnKind::F32Sqrt,
-        "f32.add" => InsnKind::F32Add,
-        "f32.sub" => InsnKind::F32Sub,
-        "f32.mul" => InsnKind::F32Mul,
-        "f32.div" => InsnKind::F32Div,
-        "f32.min" => InsnKind::F32Min,
-        "f32.max" => InsnKind::F32Max,
-        "f32.copysign" => InsnKind::F32Copysign,
-        "f64.abs" => InsnKind::F64Abs,
-        "f64.neg" => InsnKind::F64Neg,
-        "f64.ceil" => InsnKind::F64Ceil,
-        "f64.floor" => InsnKind::F64Floor,
-        "f64.trunc" => InsnKind::F64Trunc,
-        "f64.nearest" => InsnKind::F64Nearest,
-        "f64.sqrt" => InsnKind::F64Sqrt,
-        "f64.add" => InsnKind::F64Add,
-        "f64.sub" => InsnKind::F64Sub,
-        "f64.mul" => InsnKind::F64Mul,
-        "f64.div" => InsnKind::F64Div,
-        "f64.min" => InsnKind::F64Min,
-        "f64.max" => InsnKind::F64Max,
-        "f64.copysign" => InsnKind::F64Copysign,
-        "i32.eqz" => InsnKind::I32Eqz,
-        "i32.eq" => InsnKind::I32Eq,
-        "i32.ne" => InsnKind::I32Ne,
-        "i32.lt_s" => InsnKind::I32LtS,
-        "i32.lt_u" => InsnKind::I32LtU,
-        "i32.gt_s" => InsnKind::I32GtS,
-        "i32.gt_u" => InsnKind::I32GtU,
-        "i32.le_s" => InsnKind::I32LeS,
-        "i32.le_u" => InsnKind::I32LeU,
-        "i32.ge_s" => InsnKind::I32GeS,
-        "i32.ge_u" => InsnKind::I32GeU,
-        "i64.eqz" => InsnKind::I64Eqz,
-        "i64.eq" => InsnKind::I64Eq,
-        "i64.ne" => InsnKind::I64Ne,
-        "i64.lt_s" => InsnKind::I64LtS,
-        "i64.lt_u" => InsnKind::I64LtU,
-        "i64.gt_s" => InsnKind::I64GtS,
-        "i64.gt_u" => InsnKind::I64GtU,
-        "i64.le_s" => InsnKind::I64LeS,
-        "i64.le_u" => InsnKind::I64LeU,
-        "i64.ge_s" => InsnKind::I64GeS,
-        "i64.ge_u" => InsnKind::I64GeU,
-        "f32.eq" => InsnKind::F32Eq,
-        "f32.ne" => InsnKind::F32Ne,
-        "f32.lt" => InsnKind::F32Lt,
-        "f32.gt" => InsnKind::F32Gt,
-        "f32.le" => InsnKind::F32Le,
-        "f32.ge" => InsnKind::F32Ge,
-        "f64.eq" => InsnKind::F64Eq,
-        "f64.ne" => InsnKind::F64Ne,
-        "f64.lt" => InsnKind::F64Lt,
-        "f64.gt" => InsnKind::F64Gt,
-        "f64.le" => InsnKind::F64Le,
-        "f64.ge" => InsnKind::F64Ge,
-        "i32.wrap_i64" => InsnKind::I32WrapI64,
-        "i32.trunc_f32_s" => InsnKind::I32TruncF32S,
-        "i32.trunc_f32_u" => InsnKind::I32TruncF32U,
-        "i32.trunc_f64_s" => InsnKind::I32TruncF64S,
-        "i32.trunc_f64_u" => InsnKind::I32TruncF64U,
-        "i64.extend_i32_s" => InsnKind::I64ExtendI32S,
-        "i64.extend_i32_u" => InsnKind::I64ExtendI32U,
-        "i64.trunc_f32_s" => InsnKind::I64TruncF32S,
-        "i64.trunc_f32_u" => InsnKind::I64TruncF32U,
-        "i64.trunc_f64_s" => InsnKind::I64TruncF64S,
-        "i64.trunc_f64_u" => InsnKind::I64TruncF64U,
-        "f32.convert_i32_s" => InsnKind::F32ConvertI32S,
-        "f32.convert_i32_u" => InsnKind::F32ConvertI32U,
-        "f32.convert_i64_s" => InsnKind::F32ConvertI64S,
-        "f32.convert_i64_u" => InsnKind::F32ConvertI64U,
-        "f32.demote_f64" => InsnKind::F32DemoteF64,
-        "f64.convert_i32_s" => InsnKind::F64ConvertI32S,
-        "f64.convert_i32_u" => InsnKind::F64ConvertI32U,
-        "f64.convert_i64_s" => InsnKind::F64ConvertI64S,
-        "f64.convert_i64_u" => InsnKind::F64ConvertI64U,
-        "f64.promote_f32" => InsnKind::F64PromoteF32,
-        "i32.reinterpret_f32" => InsnKind::I32ReinterpretF32,
-        "i64.reinterpret_f64" => InsnKind::I64ReinterpretF64,
-        "f32.reinterpret_i32" => InsnKind::F32ReinterpretI32,
-        "f64.reinterpret_i64" => InsnKind::F64ReinterpretI64,
-        _ => return parser.error(ParseErrorKind::UnexpectedKeyword(kw), start),
-    };
-    Ok(Instruction { start, kind })
-}
-
 // https://webassembly.github.io/spec/core/text/instructions.html#folded-instructions
 impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
     fn new(parser: &'p mut Parser<'a>) -> MaybeFoldedInsn<'a, 'p> {
@@ -1982,9 +1503,546 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
         }
     }
 
+    fn parse_naked_insn(&mut self, end: bool) -> Result<'a, Instruction<'a>> {
+        let (kw, start) =
+            match_token!(self.parser, "keyword for instruction", Token::Keyword(k) => k);
+        let kind = match kw {
+            // Control instructions
+            // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
+            "block" | "loop" => {
+                let label = self.parser.maybe_ident("label for block or loop")?;
+                let ty = parse_maybe_result_type(self.parser)?;
+                let body = self.parser.parse()?;
+                let id = if end {
+                    match_token!(
+                        self.parser,
+                        "'end' keyword for block or loop",
+                        Token::Keyword("end")
+                    );
+                    self.parser.maybe_ident("ID for block or loop")?
+                } else {
+                    None
+                };
+                if kw == "block" {
+                    InsnKind::Block {
+                        label,
+                        ty,
+                        body,
+                        id,
+                    }
+                } else {
+                    InsnKind::Loop {
+                        label,
+                        ty,
+                        body,
+                        id,
+                    }
+                }
+            }
+            "if" => {
+                // Note: 'else' can be omitted when else clause is empty
+                // https://webassembly.github.io/spec/core/text/instructions.html#abbreviations
+                let is_folded = !end;
+                let label = self.parser.maybe_ident("label for block or loop")?;
+                let ty = parse_maybe_result_type(self.parser)?;
+
+                // Folded 'if' instruction abbreviation:
+                //   (if {label} {resulttype} {foldedinstr}* (then {instr}*) (else {instr}*))
+                //      == {foldedinstr}* if {label} {resulttype} {instr}* else {instr}* end
+
+                // foldedinstr* for condition
+                if is_folded {
+                    loop {
+                        let kw = self
+                            .parser
+                            .peek_fold_start(
+                                "folded instructions for condition in folded 'if' instruction",
+                            )?
+                            .0;
+                        match kw {
+                            Some("then") => break,
+                            _ => self.parse_folded()?,
+                        }
+                    }
+                }
+
+                // (then {instr}*)
+                if is_folded {
+                    self.parser.opening_paren("'then' clause in folded 'if'")?;
+                    match_token!(
+                        self.parser,
+                        "'then' keyword for folded 'if'",
+                        Token::Keyword("then")
+                    );
+                }
+                let then_body = self.parser.parse()?;
+                if is_folded {
+                    self.parser.closing_paren("then clause in folded 'if'")?;
+                }
+
+                // (else {instr}*))
+                let (else_body, else_id) =
+                    match self.parser.peek("'else', 'end', '(' or ')' in 'if'")? {
+                        (Token::Keyword("end"), _) if end && !is_folded => (vec![], None),
+                        (Token::RParen, _) if !end => (vec![], None),
+                        (Token::LParen, _) if is_folded => {
+                            self.parser.eat_token(); // Eat '('
+                            match_token!(
+                                self.parser,
+                                "'else' keyword in else clause of folded 'if'",
+                                Token::Keyword("else")
+                            );
+                            let body = self.parser.parse()?;
+                            self.parser.closing_paren("else clause in folded 'if'")?;
+                            (body, None)
+                        }
+                        (Token::Keyword("else"), _) if !is_folded => {
+                            self.parser.eat_token(); // Eat 'else'
+                            let id = self.parser.maybe_ident("ID for 'else' in 'if'")?;
+                            let body = self.parser.parse()?;
+                            (body, id)
+                        }
+                        (tok, offset) => {
+                            return self.parser.unexpected_token(
+                                tok.clone(),
+                                "'else' or 'end' in 'if'",
+                                offset,
+                            );
+                        }
+                    };
+                let end_id = if end {
+                    match_token!(self.parser, "'end' keyword for 'if'", Token::Keyword("end"));
+                    self.parser.maybe_ident("ID for end of 'if'")?
+                } else {
+                    None
+                };
+                InsnKind::If {
+                    label,
+                    ty,
+                    then_body,
+                    else_id,
+                    else_body,
+                    end_id,
+                }
+            }
+            "unreachable" => InsnKind::Unreachable,
+            "nop" => InsnKind::Nop,
+            "br" => InsnKind::Br(self.parser.parse()?),
+            "br_if" => InsnKind::BrIf(self.parser.parse()?),
+            "br_table" => {
+                let mut labels = vec![];
+                while let (Token::Int(..), _) | (Token::Ident(_), _) =
+                    self.parser.peek("labels for 'br_table'")?
+                {
+                    labels.push(self.parser.parse()?);
+                }
+                if let Some(default_label) = labels.pop() {
+                    InsnKind::BrTable {
+                        labels,
+                        default_label,
+                    }
+                } else {
+                    return self.parser.error(
+                        ParseErrorKind::InvalidOperand {
+                            insn: "br_table",
+                            msg: "at least one label is necessary",
+                        },
+                        start,
+                    );
+                }
+            }
+            "return" => InsnKind::Return,
+            "call" => InsnKind::Call(self.parser.parse()?),
+            "call_indirect" => InsnKind::CallIndirect(self.parser.parse()?),
+            // Parametric instructions
+            // https://webassembly.github.io/spec/core/text/instructions.html#parametric-instructions
+            "drop" => InsnKind::Drop,
+            "select" => InsnKind::Select,
+            // Variable instructions
+            // https://webassembly.github.io/spec/core/text/instructions.html#variable-instructions
+            "local.get" => InsnKind::LocalGet(self.parser.parse()?),
+            "local.set" => InsnKind::LocalSet(self.parser.parse()?),
+            "local.tee" => InsnKind::LocalTee(self.parser.parse()?),
+            "global.get" => InsnKind::GlobalGet(self.parser.parse()?),
+            "global.set" => InsnKind::GlobalSet(self.parser.parse()?),
+            // Memory instructions
+            // https://webassembly.github.io/spec/core/text/instructions.html#memory-instructions
+            "i32.load" => InsnKind::I32Load(self.parser.parse()?),
+            "i64.load" => InsnKind::I64Load(self.parser.parse()?),
+            "f32.load" => InsnKind::F32Load(self.parser.parse()?),
+            "f64.load" => InsnKind::F64Load(self.parser.parse()?),
+            "i32.load8_s" => InsnKind::I32Load8S(self.parser.parse()?),
+            "i32.load8_u" => InsnKind::I32Load8U(self.parser.parse()?),
+            "i32.load16_s" => InsnKind::I32Load16S(self.parser.parse()?),
+            "i32.load16_u" => InsnKind::I32Load16U(self.parser.parse()?),
+            "i64.load8_s" => InsnKind::I64Load8S(self.parser.parse()?),
+            "i64.load8_u" => InsnKind::I64Load8U(self.parser.parse()?),
+            "i64.load16_s" => InsnKind::I64Load16S(self.parser.parse()?),
+            "i64.load16_u" => InsnKind::I64Load16U(self.parser.parse()?),
+            "i64.load32_s" => InsnKind::I64Load32S(self.parser.parse()?),
+            "i64.load32_u" => InsnKind::I64Load32U(self.parser.parse()?),
+            "i32.store" => InsnKind::I32Store(self.parser.parse()?),
+            "i64.store" => InsnKind::I64Store(self.parser.parse()?),
+            "f32.store" => InsnKind::F32Store(self.parser.parse()?),
+            "f64.store" => InsnKind::F64Store(self.parser.parse()?),
+            "i32.store8" => InsnKind::I32Store8(self.parser.parse()?),
+            "i32.store16" => InsnKind::I32Store16(self.parser.parse()?),
+            "i64.store8" => InsnKind::I64Store8(self.parser.parse()?),
+            "i64.store16" => InsnKind::I64Store16(self.parser.parse()?),
+            "i64.store32" => InsnKind::I64Store32(self.parser.parse()?),
+            "memory.size" => InsnKind::MemorySize,
+            "memory.grow" => InsnKind::MemoryGrow,
+            // Numeric instructions
+            // https://webassembly.github.io/spec/core/text/instructions.html#numeric-instructions
+            // Constants
+            "i32.const" => {
+                let ((sign, base, digits), offset) = match_token!(self.parser, "integer for i32.const operand", Token::Int(s, b, d) => (s, b, d));
+                let u = parse_u32_str(self.parser, digits, base, sign, offset)?;
+                if u == 0x8000_0000 && sign == Sign::Minus {
+                    // In this case `u as i32` causes overflow
+                    InsnKind::I32Const(i32::min_value())
+                } else if u < 0x8000_0000 {
+                    InsnKind::I32Const(sign.apply(u as i32))
+                } else {
+                    return self.parser.cannot_parse_num(
+                        "too large or small integer for i32",
+                        digits,
+                        base,
+                        sign,
+                        offset,
+                    );
+                }
+            }
+            "i64.const" => {
+                let ((sign, base, digits), offset) = match_token!(self.parser, "integer for i64.const operand", Token::Int(s, b, d) => (s, b, d));
+                let u = parse_u64_str(self.parser, digits, base, sign, offset)?;
+                if u == 0x8000_0000_0000_0000 && sign == Sign::Minus {
+                    InsnKind::I64Const(i64::min_value())
+                } else if u < 0x8000_0000_0000_0000 {
+                    InsnKind::I64Const(sign.apply(u as i64))
+                } else {
+                    return self.parser.cannot_parse_num(
+                        "too large or small integer for i64",
+                        digits,
+                        base,
+                        sign,
+                        offset,
+                    );
+                }
+            }
+            "f32.const" => {
+                let val = match self
+                    .parser
+                    .next_token("float number or integer for f32.const")?
+                {
+                    (Token::Float(sign, float), offset) => match float {
+                        Float::Inf => match sign {
+                            Sign::Plus => f32::INFINITY,
+                            Sign::Minus => f32::NEG_INFINITY,
+                        },
+                        Float::Nan(None) => sign.apply(f32::NAN),
+                        Float::Nan(Some(payload)) => {
+                            // Encode  f32 NaN value via u32 assuming IEEE-754 format for NaN boxing.
+                            // Palyload must be
+                            //   - within 23bits (fraction of f32 is 23bits)
+                            //   - >= 2^(23-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
+                            // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
+                            let payload_u = parse_u32_str(
+                                self.parser,
+                                payload,
+                                NumBase::Hex,
+                                Sign::Plus,
+                                offset,
+                            )?;
+                            if payload_u < 0x40_0000 || 0x80_0000 <= payload_u {
+                                return self.parser.cannot_parse_num(
+                                    "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23",
+                                    payload,
+                                    NumBase::Hex,
+                                    Sign::Plus,
+                                    offset,
+                                );
+                            }
+                            // NaN boxing. 2^22 <= payload_u < 2^23 and floating point number is in IEEE754 format.
+                            // This will encode the payload into fraction of NaN.
+                            //   0x{sign}11111111{payload}
+                            let sign = match sign {
+                                Sign::Plus => 0,
+                                Sign::Minus => 1u32 << 31, // most significant bit is 1 for negative number
+                            };
+                            let exp = 0b1111_1111u32 << (31 - 8);
+                            f32::from_bits(sign | exp | payload_u)
+                        }
+                        Float::Val { base, frac, exp } => {
+                            // Note: Better algorithm should be considered
+                            // https://github.com/rust-lang/rust/blob/3982d3514efbb65b3efac6bb006b3fa496d16663/src/libcore/num/dec2flt/algorithm.rs
+                            let mut frac =
+                                sign.apply(parse_f32_str(self.parser, frac, base, sign, offset)?);
+                            // In IEEE754, exp part is actually 8bits
+                            if let Some((exp_sign, exp)) = exp {
+                                let exp = parse_u32_str(
+                                    self.parser,
+                                    exp,
+                                    NumBase::Dec,
+                                    exp_sign,
+                                    offset,
+                                )?;
+                                let step = match base {
+                                    NumBase::Hex => 2.0,
+                                    NumBase::Dec => 10.0,
+                                };
+                                // powi is not available because an error gets larger
+                                match exp_sign {
+                                    Sign::Plus => {
+                                        for _ in 0..exp {
+                                            frac *= step;
+                                        }
+                                    }
+                                    Sign::Minus => {
+                                        for _ in 0..exp {
+                                            frac /= step;
+                                        }
+                                    }
+                                }
+                                frac
+                            } else {
+                                frac
+                            }
+                        }
+                    },
+                    (Token::Int(sign, base, digits), offset) => {
+                        parse_f32_str(self.parser, digits, base, sign, offset)?
+                    }
+                    (tok, offset) => {
+                        return self.parser.unexpected_token(
+                            tok,
+                            "float number or integer for f32.const",
+                            offset,
+                        )
+                    }
+                };
+                InsnKind::F32Const(val)
+            }
+            "f64.const" => {
+                let val = match self
+                    .parser
+                    .next_token("float number or integer for f64.const")?
+                {
+                    (Token::Float(sign, float), offset) => match float {
+                        Float::Inf => match sign {
+                            Sign::Plus => f64::INFINITY,
+                            Sign::Minus => f64::NEG_INFINITY,
+                        },
+                        Float::Nan(None) => sign.apply(f64::NAN),
+                        Float::Nan(Some(payload)) => {
+                            // Encode f64 NaN value via u64 assuming IEEE-754 format for NaN boxing.
+                            // Palyload must be
+                            //   - within 52bits (since fraction of f64 is 52bits)
+                            //   - >= 2^(52-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
+                            // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
+                            let payload_u = parse_u64_str(
+                                self.parser,
+                                payload,
+                                NumBase::Hex,
+                                Sign::Plus,
+                                offset,
+                            )?;
+                            if payload_u < 0x8_0000_0000_0000 || 0x10_0000_0000_0000 <= payload_u {
+                                return self.parser.cannot_parse_num(
+                                    "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52",
+                                    payload,
+                                    NumBase::Hex,
+                                    Sign::Plus,
+                                    offset,
+                                );
+                            }
+                            // NaN boxing. 2^51 <= payload_u < 2^52 and floating point number is in IEEE754 format.
+                            // This will encode the payload into fraction of NaN.
+                            //   0x{sign}11111111111{payload}
+                            let sign = match sign {
+                                Sign::Plus => 0,
+                                Sign::Minus => 1u64 << 63, // most significant bit is 1 for negative number
+                            };
+                            let exp = 0b111_1111_1111u64 << (63 - 11);
+                            f64::from_bits(sign | exp | payload_u)
+                        }
+                        Float::Val { base, frac, exp } => {
+                            let mut frac =
+                                sign.apply(parse_f64_str(self.parser, frac, base, sign, offset)?);
+                            // In IEEE754, exp part is actually 11bits
+                            if let Some((exp_sign, exp)) = exp {
+                                let exp = parse_u32_str(self.parser, exp, base, exp_sign, offset)?;
+                                let step = match base {
+                                    NumBase::Hex => 2.0,
+                                    NumBase::Dec => 10.0,
+                                };
+                                // powi is not available because an error gets larger
+                                match exp_sign {
+                                    Sign::Plus => {
+                                        for _ in 0..exp {
+                                            frac *= step;
+                                        }
+                                    }
+                                    Sign::Minus => {
+                                        for _ in 0..exp {
+                                            frac /= step;
+                                        }
+                                    }
+                                }
+                                frac
+                            } else {
+                                frac
+                            }
+                        }
+                    },
+                    (Token::Int(sign, base, digits), offset) => {
+                        parse_f64_str(self.parser, digits, base, sign, offset)?
+                    }
+                    (tok, offset) => {
+                        return self.parser.unexpected_token(
+                            tok,
+                            "float number or integer for f64.const",
+                            offset,
+                        )
+                    }
+                };
+                InsnKind::F64Const(val)
+            }
+            "i32.clz" => InsnKind::I32Clz,
+            "i32.ctz" => InsnKind::I32Ctz,
+            "i32.popcnt" => InsnKind::I32Popcnt,
+            "i32.add" => InsnKind::I32Add,
+            "i32.sub" => InsnKind::I32Sub,
+            "i32.mul" => InsnKind::I32Mul,
+            "i32.div_s" => InsnKind::I32DivS,
+            "i32.div_u" => InsnKind::I32DivU,
+            "i32.rem_s" => InsnKind::I32RemS,
+            "i32.rem_u" => InsnKind::I32RemU,
+            "i32.and" => InsnKind::I32And,
+            "i32.or" => InsnKind::I32Or,
+            "i32.xor" => InsnKind::I32Xor,
+            "i32.shl" => InsnKind::I32Shl,
+            "i32.shr_s" => InsnKind::I32ShrS,
+            "i32.shr_u" => InsnKind::I32ShrU,
+            "i32.rotl" => InsnKind::I32Rotl,
+            "i32.rotr" => InsnKind::I32Rotr,
+            "i64.clz" => InsnKind::I64Clz,
+            "i64.ctz" => InsnKind::I64Ctz,
+            "i64.popcnt" => InsnKind::I64Popcnt,
+            "i64.add" => InsnKind::I64Add,
+            "i64.sub" => InsnKind::I64Sub,
+            "i64.mul" => InsnKind::I64Mul,
+            "i64.div_s" => InsnKind::I64DivS,
+            "i64.div_u" => InsnKind::I64DivU,
+            "i64.rem_s" => InsnKind::I64RemS,
+            "i64.rem_u" => InsnKind::I64RemU,
+            "i64.and" => InsnKind::I64And,
+            "i64.or" => InsnKind::I64Or,
+            "i64.xor" => InsnKind::I64Xor,
+            "i64.shl" => InsnKind::I64Shl,
+            "i64.shr_s" => InsnKind::I64ShrS,
+            "i64.shr_u" => InsnKind::I64ShrU,
+            "i64.rotl" => InsnKind::I64Rotl,
+            "i64.rotr" => InsnKind::I64Rotr,
+            "f32.abs" => InsnKind::F32Abs,
+            "f32.neg" => InsnKind::F32Neg,
+            "f32.ceil" => InsnKind::F32Ceil,
+            "f32.floor" => InsnKind::F32Floor,
+            "f32.trunc" => InsnKind::F32Trunc,
+            "f32.nearest" => InsnKind::F32Nearest,
+            "f32.sqrt" => InsnKind::F32Sqrt,
+            "f32.add" => InsnKind::F32Add,
+            "f32.sub" => InsnKind::F32Sub,
+            "f32.mul" => InsnKind::F32Mul,
+            "f32.div" => InsnKind::F32Div,
+            "f32.min" => InsnKind::F32Min,
+            "f32.max" => InsnKind::F32Max,
+            "f32.copysign" => InsnKind::F32Copysign,
+            "f64.abs" => InsnKind::F64Abs,
+            "f64.neg" => InsnKind::F64Neg,
+            "f64.ceil" => InsnKind::F64Ceil,
+            "f64.floor" => InsnKind::F64Floor,
+            "f64.trunc" => InsnKind::F64Trunc,
+            "f64.nearest" => InsnKind::F64Nearest,
+            "f64.sqrt" => InsnKind::F64Sqrt,
+            "f64.add" => InsnKind::F64Add,
+            "f64.sub" => InsnKind::F64Sub,
+            "f64.mul" => InsnKind::F64Mul,
+            "f64.div" => InsnKind::F64Div,
+            "f64.min" => InsnKind::F64Min,
+            "f64.max" => InsnKind::F64Max,
+            "f64.copysign" => InsnKind::F64Copysign,
+            "i32.eqz" => InsnKind::I32Eqz,
+            "i32.eq" => InsnKind::I32Eq,
+            "i32.ne" => InsnKind::I32Ne,
+            "i32.lt_s" => InsnKind::I32LtS,
+            "i32.lt_u" => InsnKind::I32LtU,
+            "i32.gt_s" => InsnKind::I32GtS,
+            "i32.gt_u" => InsnKind::I32GtU,
+            "i32.le_s" => InsnKind::I32LeS,
+            "i32.le_u" => InsnKind::I32LeU,
+            "i32.ge_s" => InsnKind::I32GeS,
+            "i32.ge_u" => InsnKind::I32GeU,
+            "i64.eqz" => InsnKind::I64Eqz,
+            "i64.eq" => InsnKind::I64Eq,
+            "i64.ne" => InsnKind::I64Ne,
+            "i64.lt_s" => InsnKind::I64LtS,
+            "i64.lt_u" => InsnKind::I64LtU,
+            "i64.gt_s" => InsnKind::I64GtS,
+            "i64.gt_u" => InsnKind::I64GtU,
+            "i64.le_s" => InsnKind::I64LeS,
+            "i64.le_u" => InsnKind::I64LeU,
+            "i64.ge_s" => InsnKind::I64GeS,
+            "i64.ge_u" => InsnKind::I64GeU,
+            "f32.eq" => InsnKind::F32Eq,
+            "f32.ne" => InsnKind::F32Ne,
+            "f32.lt" => InsnKind::F32Lt,
+            "f32.gt" => InsnKind::F32Gt,
+            "f32.le" => InsnKind::F32Le,
+            "f32.ge" => InsnKind::F32Ge,
+            "f64.eq" => InsnKind::F64Eq,
+            "f64.ne" => InsnKind::F64Ne,
+            "f64.lt" => InsnKind::F64Lt,
+            "f64.gt" => InsnKind::F64Gt,
+            "f64.le" => InsnKind::F64Le,
+            "f64.ge" => InsnKind::F64Ge,
+            "i32.wrap_i64" => InsnKind::I32WrapI64,
+            "i32.trunc_f32_s" => InsnKind::I32TruncF32S,
+            "i32.trunc_f32_u" => InsnKind::I32TruncF32U,
+            "i32.trunc_f64_s" => InsnKind::I32TruncF64S,
+            "i32.trunc_f64_u" => InsnKind::I32TruncF64U,
+            "i64.extend_i32_s" => InsnKind::I64ExtendI32S,
+            "i64.extend_i32_u" => InsnKind::I64ExtendI32U,
+            "i64.trunc_f32_s" => InsnKind::I64TruncF32S,
+            "i64.trunc_f32_u" => InsnKind::I64TruncF32U,
+            "i64.trunc_f64_s" => InsnKind::I64TruncF64S,
+            "i64.trunc_f64_u" => InsnKind::I64TruncF64U,
+            "f32.convert_i32_s" => InsnKind::F32ConvertI32S,
+            "f32.convert_i32_u" => InsnKind::F32ConvertI32U,
+            "f32.convert_i64_s" => InsnKind::F32ConvertI64S,
+            "f32.convert_i64_u" => InsnKind::F32ConvertI64U,
+            "f32.demote_f64" => InsnKind::F32DemoteF64,
+            "f64.convert_i32_s" => InsnKind::F64ConvertI32S,
+            "f64.convert_i32_u" => InsnKind::F64ConvertI32U,
+            "f64.convert_i64_s" => InsnKind::F64ConvertI64S,
+            "f64.convert_i64_u" => InsnKind::F64ConvertI64U,
+            "f64.promote_f32" => InsnKind::F64PromoteF32,
+            "i32.reinterpret_f32" => InsnKind::I32ReinterpretF32,
+            "i64.reinterpret_f64" => InsnKind::I64ReinterpretF64,
+            "f32.reinterpret_i32" => InsnKind::F32ReinterpretI32,
+            "f64.reinterpret_i64" => InsnKind::F64ReinterpretI64,
+            _ => {
+                return self
+                    .parser
+                    .error(ParseErrorKind::UnexpectedKeyword(kw), start)
+            }
+        };
+        Ok(Instruction { start, kind })
+    }
+
     fn parse_folded(&mut self) -> Result<'a, ()> {
         let start = self.parser.opening_paren("folded instruction")?;
-        let mut insn = parse_naked_insn(self.parser, false)?;
+        let mut insn = self.parse_naked_insn(false)?;
         insn.start = start;
 
         if !insn.kind.is_block() {
@@ -2007,7 +2065,8 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
         if let Token::LParen = self.parser.peek("instruction keyword or '('")?.0 {
             self.parse_folded()?;
         } else {
-            self.insns.push(parse_naked_insn(self.parser, true)?);
+            let insn = self.parse_naked_insn(true)?;
+            self.insns.push(insn);
         }
         Ok(())
     }
@@ -2026,7 +2085,10 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
             {
                 Token::LParen => self.parse_folded()?,
                 Token::RParen | Token::Keyword("end") | Token::Keyword("else") => return Ok(()),
-                Token::Keyword(_) => self.insns.push(parse_naked_insn(self.parser, true)?),
+                Token::Keyword(_) => {
+                    let insn = self.parse_naked_insn(true)?;
+                    self.insns.push(insn)
+                }
                 _ => return Ok(()),
             };
         }
@@ -3893,6 +3955,20 @@ mod tests {
             [
                 If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
             ] if then_body.len() == 2 && else_body.len() == 2
+        );
+        assert_insn!(
+            r#"(if (nop) (then) (else))"#,
+            [
+                Nop,
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
+        );
+        assert_insn!(
+            r#"(if (nop) (nop) (nop) (then))"#,
+            [
+                Nop, Nop, Nop,
+                If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
+            ] if then_body.is_empty() && else_body.is_empty()
         );
         assert_insn!(r#"unreachable"#, [Unreachable]);
         assert_insn!(r#"br 0"#, [Br(Index::Num(0))]);
