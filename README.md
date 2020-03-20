@@ -2,11 +2,13 @@ wain
 ====
 [![CI][ci-badge]][ci]
 
-[wain][proj] is a **W**eb**A**ssembly **In**terpreter written in Rust from scrach.
+[wain][proj] is a **W**eb**A**ssembly **In**terpreter written in Rust from scratch.
 
 Work in progress.
 
 ## Installation
+
+MSRV: Rust 1.42.0
 
 ```
 git clone git@github.com:rhysd/wain.git

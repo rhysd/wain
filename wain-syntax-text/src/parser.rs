@@ -2626,18 +2626,6 @@ mod tests {
         };
     }
 
-    macro_rules! is_match {
-        ($e:expr, $p:pat if $c:expr) => {
-            match $e {
-                $p if $c => true,
-                _ => false,
-            }
-        };
-        ($e:expr, $p:pat) => {
-            is_match!($e, $p if true)
-        }
-    }
-
     #[test]
     fn root() {
         assert_parse!(
@@ -3788,19 +3776,19 @@ mod tests {
             r#"block nop end"#,
             [
                 Block{ label: None, ty: None, body, id: None }
-            ] if is_match!(body[0].kind, Nop)
+            ] if matches!(body[0].kind, Nop)
         );
         assert_insn!(
             r#"block $blk nop end"#,
             [
                 Block{ label: Some("$blk"), ty: None, body, id: None }
-            ] if is_match!(body[0].kind, Nop)
+            ] if matches!(body[0].kind, Nop)
         );
         assert_insn!(
             r#"block (result i32) nop end"#,
             [
                 Block{ label: None, ty: Some(ValType::I32), body, id: None }
-            ] if is_match!(body[0].kind, Nop)
+            ] if matches!(body[0].kind, Nop)
         );
         assert_insn!(
             r#"(block)"#,
@@ -3824,7 +3812,7 @@ mod tests {
             r#"(block nop)"#,
             [
                 Block{ label: None, ty: None, body, id: None }
-            ] if is_match!(body[0].kind, Nop)
+            ] if matches!(body[0].kind, Nop)
         );
         // Note: 'loop' instruction is parsed with the same logic as 'block' instruction. Only one test case is sufficient
         assert_insn!(
@@ -3879,25 +3867,25 @@ mod tests {
             r#"if nop end"#,
             [
                 If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
-            ] if is_match!(then_body[0].kind, Nop) && else_body.is_empty()
+            ] if matches!(then_body[0].kind, Nop) && else_body.is_empty()
         );
         assert_insn!(
             r#"if $l nop end"#,
             [
                 If{ label: Some("$l"), ty: None, then_body, else_id: None, else_body, end_id: None }
-            ] if is_match!(then_body[0].kind, Nop) && else_body.is_empty()
+            ] if matches!(then_body[0].kind, Nop) && else_body.is_empty()
         );
         assert_insn!(
             r#"if $l (result i32) nop end"#,
             [
                 If{ label: Some("$l"), ty: Some(ValType::I32), then_body, else_id: None, else_body, end_id: None }
-            ] if is_match!(then_body[0].kind, Nop) && else_body.is_empty()
+            ] if matches!(then_body[0].kind, Nop) && else_body.is_empty()
         );
         assert_insn!(
             r#"if nop else unreachable end"#,
             [
                 If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
-            ] if is_match!(then_body[0].kind, Nop) && is_match!(else_body[0].kind, Unreachable)
+            ] if matches!(then_body[0].kind, Nop) && matches!(else_body[0].kind, Unreachable)
         );
         assert_insn!(
             r#"(if (then))"#,
@@ -3939,19 +3927,19 @@ mod tests {
             r#"(if (then nop))"#,
             [
                 If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
-            ] if is_match!(then_body[0].kind, Nop) && else_body.is_empty()
+            ] if matches!(then_body[0].kind, Nop) && else_body.is_empty()
         );
         assert_insn!(
             r#"(if (then nop) (else nop))"#,
             [
                 If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
-            ] if is_match!(then_body[0].kind, Nop) && is_match!(else_body[0].kind, Nop)
+            ] if matches!(then_body[0].kind, Nop) && matches!(else_body[0].kind, Nop)
         );
         assert_insn!(
             r#"(if (then (nop)) (else (nop)))"#,
             [
                 If{ label: None, ty: None, then_body, else_id: None, else_body, end_id: None }
-            ] if is_match!(then_body[0].kind, Nop) && is_match!(else_body[0].kind, Nop)
+            ] if matches!(then_body[0].kind, Nop) && matches!(else_body[0].kind, Nop)
         );
         assert_insn!(
             r#"(if (then nop nop) (else nop nop))"#,
@@ -4439,7 +4427,7 @@ mod tests {
                 offset,
                 init,
                 ..
-            } if is_match!(offset[0].kind, I32Const(10)) && init.is_empty()
+            } if matches!(offset[0].kind, I32Const(10)) && init.is_empty()
         );
         assert_parse!(
             r#"(elem 0x1f i32.const 10)"#,
@@ -4449,7 +4437,7 @@ mod tests {
                 offset,
                 init,
                 ..
-            } if is_match!(offset[0].kind, I32Const(10)) && init.is_empty()
+            } if matches!(offset[0].kind, I32Const(10)) && init.is_empty()
         );
         assert_parse!(
             r#"(elem $e i32.const 10)"#,
@@ -4459,7 +4447,7 @@ mod tests {
                 offset,
                 init,
                 ..
-            } if is_match!(offset[0].kind, I32Const(10)) && init.is_empty()
+            } if matches!(offset[0].kind, I32Const(10)) && init.is_empty()
         );
         assert_parse!(
             r#"(elem (offset))"#,
@@ -4477,7 +4465,7 @@ mod tests {
                 offset,
                 init,
                 ..
-            } if is_match!(offset[0].kind, Nop) && init.is_empty()
+            } if matches!(offset[0].kind, Nop) && init.is_empty()
         );
         assert_parse!(
             r#"(elem (offset (nop (nop))))"#,
@@ -4505,7 +4493,7 @@ mod tests {
                 init,
                 ..
             } if offset.len() == 1 &&
-                 is_match!(init.as_slice(), [Index::Num(0xf), Index::Ident("$f")])
+                 matches!(init.as_slice(), [Index::Num(0xf), Index::Ident("$f")])
         );
         assert_parse!(
             r#"(elem nop 0xf)"#,
@@ -4514,8 +4502,8 @@ mod tests {
                 offset,
                 init,
                 ..
-            } if is_match!(offset[0].kind, Nop) &&
-                 is_match!(init.as_slice(), [Index::Num(0xf)])
+            } if matches!(offset[0].kind, Nop) &&
+                 matches!(init.as_slice(), [Index::Num(0xf)])
         );
         assert_parse!(
             r#"(elem nop $f)"#,
@@ -4524,18 +4512,18 @@ mod tests {
                 offset,
                 init,
                 ..
-            } if is_match!(offset[0].kind, Nop) &&
-                 is_match!(init.as_slice(), [Index::Ident("$f")])
+            } if matches!(offset[0].kind, Nop) &&
+                 matches!(init.as_slice(), [Index::Ident("$f")])
         );
         assert_parse!(
             r#"(elem block end 0)"#,
             Elem<'_>,
-            Elem { offset, .. } if is_match!(offset[0].kind, Block{..})
+            Elem { offset, .. } if matches!(offset[0].kind, Block{..})
         );
         assert_parse!(
             r#"(elem (i32.const 42) 0)"#,
             Elem<'_>,
-            Elem { offset, .. } if is_match!(offset[0].kind, I32Const(42))
+            Elem { offset, .. } if matches!(offset[0].kind, I32Const(42))
         );
         assert_parse!(
             r#"(elem i32.const 0 func $f)"#,
@@ -4565,8 +4553,8 @@ mod tests {
                 Table{ id: Some("$tbl"), ty: TableType{ limit: Limits::Range{ min: 2, max: 2 } }, .. },
                 Elem{ idx: Index::Num(0), offset, init, .. }
             )
-            if is_match!(offset[0].kind, InsnKind::I32Const(0)) &&
-               is_match!(init[0], Index::Num(0)) && is_match!(init[1], Index::Num(1))
+            if matches!(offset[0].kind, InsnKind::I32Const(0)) &&
+               matches!(init[0], Index::Num(0)) && matches!(init[1], Index::Num(1))
         );
         assert_parse!(
             r#"(table $tbl (import "m" "n") 2 2 funcref)"#,
@@ -4681,7 +4669,7 @@ mod tests {
                 offset,
                 data,
                 ..
-            } if is_match!(offset[0].kind, InsnKind::I32Const(0)) && data.is_empty()
+            } if matches!(offset[0].kind, InsnKind::I32Const(0)) && data.is_empty()
         );
         assert_parse!(
             r#"(data 0 (offset i32.const 0))"#,
@@ -4691,7 +4679,7 @@ mod tests {
                 offset,
                 data,
                 ..
-            } if is_match!(offset[0].kind, InsnKind::I32Const(0)) && data.is_empty()
+            } if matches!(offset[0].kind, InsnKind::I32Const(0)) && data.is_empty()
         );
         assert_parse!(
             r#"(data 0 (offset i32.const 0) "hello")"#,
@@ -4721,7 +4709,7 @@ mod tests {
                 offset,
                 data,
                 ..
-            } if is_match!(offset[0].kind, InsnKind::I32Const(1024)) &&
+            } if matches!(offset[0].kind, InsnKind::I32Const(1024)) &&
                  data.as_ref() == b"Hello, world\n\0".as_ref()
         );
 
@@ -4784,7 +4772,7 @@ mod tests {
                     ..
                 },
             )
-            if is_match!(offset[0].kind, InsnKind::I32Const(0)) &&
+            if matches!(offset[0].kind, InsnKind::I32Const(0)) &&
                data.as_ref() == b"foobar".as_ref()
         );
         assert_parse!(
@@ -4980,15 +4968,15 @@ mod tests {
             r#"(global i32 i32.const 32 i32.load align=8)"#,
             Global<'_>,
             Global { kind: GlobalKind::Init(init), .. }
-            if is_match!(&init[0].kind, InsnKind::I32Const(32)) &&
-               is_match!(&init[1].kind, InsnKind::I32Load(Mem{ align: Some(8), .. }))
+            if matches!(&init[0].kind, InsnKind::I32Const(32)) &&
+               matches!(&init[1].kind, InsnKind::I32Load(Mem{ align: Some(8), .. }))
         );
         assert_parse!(
             r#"(global i32 (i32.add (i32.const 4)))"#,
             Global<'_>,
             Global { kind: GlobalKind::Init(init), .. }
-            if is_match!(&init[0].kind, InsnKind::I32Const(4)) &&
-               is_match!(&init[1].kind, InsnKind::I32Add)
+            if matches!(&init[0].kind, InsnKind::I32Const(4)) &&
+               matches!(&init[1].kind, InsnKind::I32Add)
         );
 
         assert_error!(
