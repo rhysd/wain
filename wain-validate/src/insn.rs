@@ -362,8 +362,10 @@ impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-call
             Call(funcidx) => {
                 let func = ctx.outer.func_from_idx(*funcidx, start)?;
-                let fty = &ctx.outer.module.types[func.idx as usize]; // func.idx was already validated
-                for ty in fty.params.iter() {
+                // func.idx was already validated
+                let fty = &ctx.outer.module.types[func.idx as usize];
+                // Pop extracts parameters in reverse order
+                for ty in fty.params.iter().rev() {
                     ctx.pop_op_stack(Type::Known(*ty))?;
                 }
                 for ty in fty.results.iter() {
@@ -376,7 +378,8 @@ impl<'outer, 'm, 'a> ValidateInsnSeq<'outer, 'm, 'a> for Instruction {
                 // Check table index
                 ctx.pop_op_stack(Type::i32())?;
                 let fty = ctx.outer.type_from_idx(*typeidx, start)?;
-                for ty in fty.params.iter() {
+                // Pop extracts parameters in reverse order
+                for ty in fty.params.iter().rev() {
                     ctx.pop_op_stack(Type::Known(*ty))?;
                 }
                 for ty in fty.results.iter() {
