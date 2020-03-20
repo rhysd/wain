@@ -7,6 +7,7 @@ mod error;
 mod insn;
 
 use error::{Error, ErrorKind, Result};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use wain_ast::source::Source;
 use wain_ast::*;
@@ -19,8 +20,8 @@ struct Context<'module, 'a: 'module, S: Source> {
 }
 
 impl<'module, 'a, S: Source> Context<'module, 'a, S> {
-    fn error<T>(&self, kind: ErrorKind, offset: usize) -> Result<T, S> {
-        Err(Error::new(kind, offset, self.source))
+    fn error<T>(&self, kind: ErrorKind, when: &'static str, offset: usize) -> Result<T, S> {
+        Err(Error::new(kind, Cow::Borrowed(when), offset, self.source))
     }
 
     fn validate_idx<T>(
@@ -28,6 +29,7 @@ impl<'module, 'a, S: Source> Context<'module, 'a, S> {
         s: &'module [T],
         idx: u32,
         what: &'static str,
+        when: &'static str,
         offset: usize,
     ) -> Result<&'module T, S> {
         if let Some(item) = s.get(idx as usize) {
@@ -39,29 +41,55 @@ impl<'module, 'a, S: Source> Context<'module, 'a, S> {
                     upper: s.len(),
                     what,
                 },
+                when,
                 offset,
             )
         }
     }
 
-    fn type_from_idx(&self, idx: u32, offset: usize) -> Result<&'module FuncType, S> {
-        self.validate_idx(&self.module.types, idx, "type", offset)
+    fn type_from_idx(
+        &self,
+        idx: u32,
+        when: &'static str,
+        offset: usize,
+    ) -> Result<&'module FuncType, S> {
+        self.validate_idx(&self.module.types, idx, "type", when, offset)
     }
 
-    fn func_from_idx(&self, idx: u32, offset: usize) -> Result<&'module Func, S> {
-        self.validate_idx(&self.module.funcs, idx, "function", offset)
+    fn func_from_idx(
+        &self,
+        idx: u32,
+        when: &'static str,
+        offset: usize,
+    ) -> Result<&'module Func, S> {
+        self.validate_idx(&self.module.funcs, idx, "function", when, offset)
     }
 
-    fn table_from_idx(&self, idx: u32, offset: usize) -> Result<&'module Table, S> {
-        self.validate_idx(&self.module.tables, idx, "table", offset)
+    fn table_from_idx(
+        &self,
+        idx: u32,
+        when: &'static str,
+        offset: usize,
+    ) -> Result<&'module Table, S> {
+        self.validate_idx(&self.module.tables, idx, "table", when, offset)
     }
 
-    fn global_from_idx(&self, idx: u32, offset: usize) -> Result<&'module Global, S> {
-        self.validate_idx(&self.module.globals, idx, "global variable", offset)
+    fn global_from_idx(
+        &self,
+        idx: u32,
+        when: &'static str,
+        offset: usize,
+    ) -> Result<&'module Global, S> {
+        self.validate_idx(&self.module.globals, idx, "global variable", when, offset)
     }
 
-    fn memory_from_idx(&self, idx: u32, offset: usize) -> Result<&'module Memory, S> {
-        self.validate_idx(&self.module.memories, idx, "memory", offset)
+    fn memory_from_idx(
+        &self,
+        idx: u32,
+        when: &'static str,
+        offset: usize,
+    ) -> Result<&'module Memory, S> {
+        self.validate_idx(&self.module.memories, idx, "memory", when, offset)
     }
 }
 
@@ -106,10 +134,18 @@ impl<'a, S: Source> Validate<'a, S> for Module<'a> {
         self.exports.validate(ctx)?;
 
         if self.tables.len() > 1 {
-            return ctx.error(ErrorKind::MultipleTables(self.tables.len()), self.start);
+            return ctx.error(
+                ErrorKind::MultipleTables(self.tables.len()),
+                "tables in module",
+                self.start,
+            );
         }
         if self.memories.len() > 1 {
-            return ctx.error(ErrorKind::MultipleMemories(self.memories.len()), self.start);
+            return ctx.error(
+                ErrorKind::MultipleMemories(self.memories.len()),
+                "memories in module",
+                self.start,
+            );
         }
 
         // Export name in module must be unique
@@ -121,6 +157,7 @@ impl<'a, S: Source> Validate<'a, S> for Module<'a> {
                         name: name.to_string(),
                         prev_offset,
                     },
+                    "exports in module",
                     offset,
                 );
             }
@@ -136,6 +173,7 @@ impl<'a, S: Source> Validate<'a, S> for FuncType {
         if self.results.len() > 1 {
             ctx.error(
                 ErrorKind::MultipleReturnTypes(self.results.clone()),
+                "result types in function type",
                 self.start,
             )
         } else {
@@ -174,6 +212,7 @@ impl<'a, S: Source> Validate<'a, S> for Memory<'a> {
                     max: limit,
                     what: "memory type",
                 },
+                "limits in memory",
                 self.start,
             );
         }
@@ -192,9 +231,9 @@ impl<'a, S: Source> Validate<'a, S> for Global<'a> {
             GlobalKind::Import(_) => Ok(()),
             GlobalKind::Init(init) => crate::insn::validate_constant(
                 init,
-                &ctx.module.globals,
+                ctx,
                 self.ty,
-                ctx.source,
+                "init expression for global variable",
                 self.start,
             ),
         }
@@ -204,16 +243,16 @@ impl<'a, S: Source> Validate<'a, S> for Global<'a> {
 // https://webassembly.github.io/spec/core/valid/modules.html#element-segments
 impl<'a, S: Source> Validate<'a, S> for ElemSegment {
     fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
-        ctx.table_from_idx(self.idx, self.start)?;
+        ctx.table_from_idx(self.idx, "element segment", self.start)?;
         crate::insn::validate_constant(
             &self.offset,
-            &ctx.module.globals,
+            ctx,
             ValType::I32,
-            ctx.source,
+            "offset expression in element segment",
             self.start,
         )?;
         for funcidx in self.init.iter() {
-            ctx.func_from_idx(*funcidx, self.start)?;
+            ctx.func_from_idx(*funcidx, "init in element segment", self.start)?;
         }
         Ok(())
     }
@@ -222,12 +261,12 @@ impl<'a, S: Source> Validate<'a, S> for ElemSegment {
 // https://webassembly.github.io/spec/core/valid/modules.html#data-segments
 impl<'a, S: Source> Validate<'a, S> for DataSegment<'a> {
     fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
-        ctx.memory_from_idx(self.idx, self.start)?;
+        ctx.memory_from_idx(self.idx, "data segment", self.start)?;
         crate::insn::validate_constant(
             &self.offset,
-            &ctx.module.globals,
+            ctx,
             ValType::I32,
-            ctx.source,
+            "offset expression in data segment",
             self.start,
         )?;
         Ok(())
@@ -237,8 +276,8 @@ impl<'a, S: Source> Validate<'a, S> for DataSegment<'a> {
 // https://webassembly.github.io/spec/core/valid/modules.html#start-function
 impl<'a, S: Source> Validate<'a, S> for StartFunction {
     fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
-        let func = ctx.func_from_idx(self.idx, self.start)?;
-        let fty = ctx.type_from_idx(func.idx, self.start)?;
+        let func = ctx.func_from_idx(self.idx, "start function in module", self.start)?;
+        let fty = ctx.type_from_idx(func.idx, "start function in module", self.start)?;
         if !fty.params.is_empty() || !fty.results.is_empty() {
             return ctx.error(
                 ErrorKind::StartFunctionSignature {
@@ -246,6 +285,7 @@ impl<'a, S: Source> Validate<'a, S> for StartFunction {
                     params: fty.params.clone(),
                     results: fty.results.clone(),
                 },
+                "parameter of type for start function",
                 self.start,
             );
         }
@@ -258,16 +298,16 @@ impl<'a, S: Source> Validate<'a, S> for Export<'a> {
     fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         match self.kind {
             ExportKind::Func(idx) => {
-                ctx.func_from_idx(idx, self.start)?;
+                ctx.func_from_idx(idx, "exported function", self.start)?;
             }
             ExportKind::Table(idx) => {
-                ctx.table_from_idx(idx, self.start)?;
+                ctx.table_from_idx(idx, "exported table", self.start)?;
             }
             ExportKind::Memory(idx) => {
-                ctx.memory_from_idx(idx, self.start)?;
+                ctx.memory_from_idx(idx, "exported memory", self.start)?;
             }
             ExportKind::Global(idx) => {
-                ctx.global_from_idx(idx, self.start)?;
+                ctx.global_from_idx(idx, "exported global variable", self.start)?;
             }
         }
         Ok(())
@@ -277,7 +317,7 @@ impl<'a, S: Source> Validate<'a, S> for Export<'a> {
 // https://webassembly.github.io/spec/core/valid/modules.html#functions
 impl<'a, S: Source> Validate<'a, S> for Func<'a> {
     fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
-        let func_ty = ctx.type_from_idx(self.idx, self.start)?;
+        let func_ty = ctx.type_from_idx(self.idx, "function", self.start)?;
         match &self.kind {
             FuncKind::Import(_) => Ok(()),
             FuncKind::Body { locals, expr } => {

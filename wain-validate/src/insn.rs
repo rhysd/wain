@@ -6,7 +6,7 @@
 // Algorithm for validating instructions:
 //   https://webassembly.github.io/spec/core/appendix/algorithm.html#algo-valid
 
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{ErrorKind, Ordinal, Result};
 use crate::Context as OuterContext;
 use std::mem;
 use wain_ast::source::Source;
@@ -60,7 +60,7 @@ struct FuncBodyContext<'outer, 'm: 'outer, 'a: 'm, S: Source> {
 
 impl<'outer, 'm, 'a, S: Source> FuncBodyContext<'outer, 'm, 'a, S> {
     fn error<T>(&self, kind: ErrorKind) -> Result<T, S> {
-        self.outer.error(kind, self.current_offset)
+        self.outer.error(kind, self.current_op, self.current_offset)
     }
 
     fn ensure_ctrl_frame_not_empty(&self) -> Result<(), S> {
@@ -103,13 +103,10 @@ impl<'outer, 'm, 'a, S: Source> FuncBodyContext<'outer, 'm, 'a, S> {
         // Note: None here means unknown type due to unreachable
         if let (Type::Known(expected), Type::Known(actual)) = (expected, actual) {
             if actual != expected {
-                return self.error(ErrorKind::TypeMismatch {
-                    op: self.current_op,
-                    expected,
-                    actual,
-                });
+                return self.error(ErrorKind::TypeMismatch { expected, actual });
             }
         }
+
         Ok(actual)
     }
 
@@ -174,11 +171,19 @@ impl<'outer, 'm, 'a, S: Source> FuncBodyContext<'outer, 'm, 'a, S> {
                 upper: self.locals.len(),
                 what: "local variable",
             })
+            .map_err(|e| {
+                e.update_msg(format!(
+                    "access to {} local variable at {}",
+                    Ordinal(uidx - self.params.len()),
+                    self.current_op
+                ))
+            })
         }
     }
 
     fn validate_memarg(&self, mem: &Mem, bits: u8) -> Result<(), S> {
-        self.outer.memory_from_idx(0, self.current_offset)?;
+        self.outer
+            .memory_from_idx(0, self.current_op, self.current_offset)?;
         // The alignment must not be larger than the bit width of t divided by 8.
         if let Some(align) = mem.align {
             if align.count_ones() != 1 {
@@ -238,7 +243,7 @@ pub(crate) fn validate_func_body<'outer, 'm, 'a, S: Source>(
     };
     body.validate(&mut ctx)?;
     if let Some(ty) = ret_ty {
-        ctx.current_op = "func";
+        ctx.current_op = "function return type";
         ctx.current_offset = start;
         ctx.ensure_op_stack_top(Type::Known(ty))?;
     }
@@ -341,15 +346,23 @@ impl<'outer, 'm, 'a, S: Source> ValidateInsnSeq<'outer, 'm, 'a, S> for Instructi
                 default_label,
             } => {
                 let expected = ctx.validate_label_idx(*default_label)?;
-                for idx in labels.iter() {
+                for (i, idx) in labels.iter().enumerate() {
                     let ty = ctx.validate_label_idx(*idx)?;
                     if let (Some(l), Some(r)) = (&expected, &ty) {
                         if l != r {
-                            return ctx.error(ErrorKind::TypeMismatch {
-                                op: ctx.current_op,
-                                expected: *l,
-                                actual: *r,
-                            });
+                            return ctx
+                                .error(ErrorKind::TypeMismatch {
+                                    expected: *l,
+                                    actual: *r,
+                                })
+                                .map_err(|e| {
+                                    e.update_msg(format!(
+                                        "{} label {} at {}",
+                                        Ordinal(i),
+                                        idx,
+                                        ctx.current_op
+                                    ))
+                                });
                         }
                     }
                 }
@@ -364,12 +377,13 @@ impl<'outer, 'm, 'a, S: Source> ValidateInsnSeq<'outer, 'm, 'a, S> for Instructi
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-call
             Call(funcidx) => {
-                let func = ctx.outer.func_from_idx(*funcidx, start)?;
+                let func = ctx.outer.func_from_idx(*funcidx, ctx.current_op, start)?;
                 // func.idx was already validated
                 let fty = &ctx.outer.module.types[func.idx as usize];
                 // Pop extracts parameters in reverse order
-                for ty in fty.params.iter().rev() {
-                    ctx.pop_op_stack(Type::Known(*ty))?;
+                for (i, ty) in fty.params.iter().enumerate().rev() {
+                    ctx.pop_op_stack(Type::Known(*ty))
+                        .map_err(|e| e.update_msg(format!("{} parameter at call", Ordinal(i))))?;
                 }
                 for ty in fty.results.iter() {
                     ctx.op_stack.push(Type::Known(*ty));
@@ -377,13 +391,15 @@ impl<'outer, 'm, 'a, S: Source> ValidateInsnSeq<'outer, 'm, 'a, S> for Instructi
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-call-indirect
             CallIndirect(typeidx) => {
-                ctx.outer.table_from_idx(0, start)?;
+                ctx.outer.table_from_idx(0, ctx.current_op, start)?;
                 // Check table index
                 ctx.pop_op_stack(Type::i32())?;
-                let fty = ctx.outer.type_from_idx(*typeidx, start)?;
+                let fty = ctx.outer.type_from_idx(*typeidx, ctx.current_op, start)?;
                 // Pop extracts parameters in reverse order
-                for ty in fty.params.iter().rev() {
-                    ctx.pop_op_stack(Type::Known(*ty))?;
+                for (i, ty) in fty.params.iter().enumerate().rev() {
+                    ctx.pop_op_stack(Type::Known(*ty)).map_err(|e| {
+                        e.update_msg(format!("{} parameter at call.indirect", Ordinal(i)))
+                    })?;
                 }
                 for ty in fty.results.iter() {
                     ctx.op_stack.push(Type::Known(*ty));
@@ -420,12 +436,16 @@ impl<'outer, 'm, 'a, S: Source> ValidateInsnSeq<'outer, 'm, 'a, S> for Instructi
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-global-get
             GlobalGet(globalidx) => {
-                let global = ctx.outer.global_from_idx(*globalidx, start)?;
+                let global = ctx
+                    .outer
+                    .global_from_idx(*globalidx, ctx.current_op, start)?;
                 ctx.op_stack.push(Type::Known(global.ty));
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-global-set
             GlobalSet(globalidx) => {
-                let global = ctx.outer.global_from_idx(*globalidx, start)?;
+                let global = ctx
+                    .outer
+                    .global_from_idx(*globalidx, ctx.current_op, start)?;
                 let ty = Type::Known(global.ty);
                 if !global.mutable {
                     return ctx.error(ErrorKind::SetImmutableGlobal {
@@ -584,65 +604,64 @@ impl<'outer, 'm, 'a, S: Source> ValidateInsnSeq<'outer, 'm, 'a, S> for Instructi
 }
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions
-pub(crate) fn validate_constant<'a, S: Source>(
+pub(crate) fn validate_constant<'m, 'a, S: Source>(
     insns: &[Instruction],
-    globals: &[Global<'a>],
+    ctx: &OuterContext<'m, 'a, S>,
     expr_ty: ValType,
-    source: &S,
+    when: &'static str,
     start: usize,
 ) -> Result<(), S> {
     let mut last_ty = None;
     for insn in insns {
+        let name = insn.kind.name();
         use InsnKind::*;
         match &insn.kind {
             GlobalGet(globalidx) => {
-                if let Some(global) = globals.get(*globalidx as usize) {
+                if let Some(global) = ctx.module.globals.get(*globalidx as usize) {
                     last_ty = Some(global.ty);
                 } else {
-                    return Err(Error::new(
-                        ErrorKind::IndexOutOfBounds {
-                            idx: *globalidx,
-                            upper: globals.len(),
-                            what: "global variable",
-                        },
-                        insn.start,
-                        source,
-                    ));
+                    return ctx
+                        .error(
+                            ErrorKind::IndexOutOfBounds {
+                                idx: *globalidx,
+                                upper: ctx.module.globals.len(),
+                                what: "global variable read",
+                            },
+                            "",
+                            insn.start,
+                        )
+                        .map_err(|e| {
+                            e.update_msg(format!("constant expression in {} at {}", name, when))
+                        });
                 }
             }
             I32Const(_) => last_ty = Some(ValType::I32),
             I64Const(_) => last_ty = Some(ValType::I64),
             F32Const(_) => last_ty = Some(ValType::F32),
             F64Const(_) => last_ty = Some(ValType::F64),
-            kind => {
-                return Err(Error::new(
-                    ErrorKind::NotConstantInstruction(kind.name()),
-                    insn.start,
-                    source,
-                ))
+            _ => {
+                return ctx
+                    .error(ErrorKind::NotConstantInstruction(name), "", insn.start)
+                    .map_err(|e| e.update_msg(format!("constant expression at {}", when)));
             }
         }
     }
 
     if let Some(ty) = last_ty {
         if ty != expr_ty {
-            Err(Error::new(
+            ctx.error(
                 ErrorKind::TypeMismatch {
-                    op: "constant expression",
                     expected: expr_ty,
                     actual: ty,
                 },
+                "",
                 start,
-                source,
-            ))
+            )
+            .map_err(|e| e.update_msg(format!("type of constant expression at {}", when)))
         } else {
             Ok(())
         }
     } else {
-        Err(Error::new(
-            ErrorKind::NoInstructionForConstant,
-            start,
-            source,
-        ))
+        ctx.error(ErrorKind::NoInstructionForConstant, when, start)
     }
 }

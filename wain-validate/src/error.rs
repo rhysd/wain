@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 use wain_ast::source::Source;
 use wain_ast::*;
@@ -11,7 +12,6 @@ pub enum ErrorKind {
     },
     MultipleReturnTypes(Vec<ValType>),
     TypeMismatch {
-        op: &'static str,
         expected: ValType,
         actual: ValType,
     },
@@ -58,9 +58,17 @@ pub struct Error<S: Source> {
     kind: ErrorKind,
     source: S,
     offset: usize,
+    pub(crate) when: Cow<'static, str>,
 }
 
-struct Ordinal(usize);
+impl<S: Source> Error<S> {
+    pub(crate) fn update_msg(mut self: Box<Self>, new_msg: String) -> Box<Self> {
+        self.when = Cow::Owned(new_msg);
+        self
+    }
+}
+
+pub(crate) struct Ordinal(pub(crate) usize);
 impl fmt::Display for Ordinal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 % 10 {
@@ -90,14 +98,9 @@ impl<S: Source> fmt::Display for Error<S> {
                 )?
             }
             TypeMismatch {
-                op,
                 expected,
                 actual,
-            } => write!(
-                f,
-                "type does not match at '{}': expected {} but got {}",
-                op, expected, actual
-            )?,
+            } => write!(f, "expected type '{}' but got type '{}'", expected, actual)?,
             CtrlFrameEmpty {
                 op,
                 frame_start,
@@ -130,16 +133,24 @@ impl<S: Source> fmt::Display for Error<S> {
             AlreadyExported{ name, prev_offset } => write!(f, "'{}' was already exported at offset {}", name, prev_offset)?,
         }
 
+        write!(f, " while validating {}", self.when)?;
+
         self.source.describe(f, self.offset)
     }
 }
 
 impl<S: Source> Error<S> {
-    pub(crate) fn new(kind: ErrorKind, offset: usize, source: &S) -> Box<Self> {
+    pub(crate) fn new(
+        kind: ErrorKind,
+        when: Cow<'static, str>,
+        offset: usize,
+        source: &S,
+    ) -> Box<Self> {
         Box::new(Self {
             kind,
             source: source.clone(),
             offset,
+            when,
         })
     }
 }
