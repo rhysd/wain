@@ -2130,6 +2130,13 @@ impl<'a> Parse<'a> for Elem<'a> {
             parser.insns
         };
 
+        // This token is not defined in webassembly.github.io/spec but wasm2wat emits it. It seems that this is not
+        // included in Wasm MVP, but it is necessary to parse .wat files emitted by wasm2wat.
+        // https://github.com/WebAssembly/wabt/blob/142c52678acf7decf6a48190c395ed73bb91170a/src/wat-writer.cc#L1271
+        if let (Token::Keyword("func"), _) = parser.peek("")? {
+            parser.eat_token(); // eat 'func'
+        }
+
         let mut init = vec![];
         loop {
             if let (Token::RParen, _) = parser.peek("')' for elem segment")? {
@@ -4527,6 +4534,11 @@ mod tests {
             r#"(elem (i32.const 42) 0)"#,
             Elem<'_>,
             Elem { offset, .. } if is_match!(offset[0].kind, I32Const(42))
+        );
+        assert_parse!(
+            r#"(elem i32.const 0 func $f)"#,
+            Elem<'_>,
+            Elem { ..  }
         );
     }
 
