@@ -15,6 +15,7 @@ name = "wain"
 wain-ast = { path = "./wain-ast" }
 wain-syntax-text = { path = "./wain-syntax-text" }
 wain-validate = { path = "./wain-validate" }
+wain-exec = { path = "./wain-exec" }
 
 [workspace]
 members = [
@@ -22,4 +23,5 @@ members = [
     "wain-ast",
     "wain-syntax-text",
     "wain-validate",
+    "wain-exec",
 ]

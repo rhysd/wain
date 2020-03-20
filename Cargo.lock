@@ -5,6 +5,7 @@ name = "wain"
 version = "0.0.0"
 dependencies = [
  "wain-ast 0.0.0",
+ "wain-exec 0.0.0",
  "wain-syntax-text 0.0.0",
  "wain-validate 0.0.0",
 ]
@@ -12,6 +13,13 @@ dependencies = [
 [[package]]
 name = "wain-ast"
 version = "0.0.0"
+
+[[package]]
+name = "wain-exec"
+version = "0.0.0"
+dependencies = [
+ "wain-ast 0.0.0",
+]
 
 [[package]]
 name = "wain-syntax-text"
