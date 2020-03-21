@@ -57,6 +57,16 @@ pub enum ValType {
     F32,
     F64,
 }
+impl ValType {
+    pub fn bytes(self: ValType) -> usize {
+        match self {
+            ValType::I32 => 4,
+            ValType::I64 => 8,
+            ValType::F32 => 4,
+            ValType::F64 => 8,
+        }
+    }
+}
 impl AsRef<str> for ValType {
     fn as_ref(&self) -> &'_ str {
         match self {

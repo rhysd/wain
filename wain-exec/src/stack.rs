@@ -1,17 +1,10 @@
+use crate::value::Value;
 use std::convert::TryInto;
 use std::f32;
 use std::f64;
 use wain_ast::ValType;
 
-#[cfg_attr(test, derive(Debug, PartialEq))]
-pub enum AnyValue {
-    I32(i32),
-    I64(i64),
-    F32(f32),
-    F64(f64),
-}
-
-// Vec<AnyValue> consumes too much space since its element size is always 64bits.
+// Vec<Value> consumes too much space since its element size is always 64bits.
 // To use space more efficiently, here use u32 for storing values as bytes.
 
 pub struct ValueStack {
@@ -19,7 +12,7 @@ pub struct ValueStack {
     types: Vec<ValType>,
 }
 
-trait StackValue {
+pub trait StackValue {
     fn read(stack: &ValueStack, addr: usize) -> Self;
     fn write(stack: &mut ValueStack, addr: usize, v: Self);
     fn pop(stack: &mut ValueStack) -> Self;
@@ -125,12 +118,12 @@ impl ValueStack {
         b
     }
 
-    pub fn pop_any(&mut self) -> AnyValue {
+    pub fn pop_any(&mut self) -> Value {
         match self.types[self.types.len() - 1] {
-            ValType::I32 => AnyValue::I32(self.pop()),
-            ValType::I64 => AnyValue::I64(self.pop()),
-            ValType::F32 => AnyValue::F32(self.pop()),
-            ValType::F64 => AnyValue::F64(self.pop()),
+            ValType::I32 => Value::I32(self.pop()),
+            ValType::I64 => Value::I64(self.pop()),
+            ValType::F32 => Value::F32(self.pop()),
+            ValType::F64 => Value::F64(self.pop()),
         }
     }
 
@@ -285,7 +278,7 @@ mod tests {
         s.push(f64::NEG_INFINITY);
         s.push(f64::NAN);
 
-        assert!(s.pop_f64().is_nan());
+        assert!(s.pop::<f64>().is_nan());
         assert_eq!(s.pop::<f64>(), f64::NEG_INFINITY);
         assert_eq!(s.pop::<f64>(), f64::INFINITY);
         assert_eq!(s.pop::<f64>(), -1.0);
@@ -336,22 +329,22 @@ mod tests {
         {
             if f64v.is_nan() {
                 match s.pop_any() {
-                    AnyValue::F64(v) => assert!(v.is_nan()),
+                    Value::F64(v) => assert!(v.is_nan()),
                     v => panic!("not match: {:?}", v),
                 }
             } else {
-                assert_eq!(s.pop_any(), AnyValue::F64(*f64v));
+                assert_eq!(s.pop_any(), Value::F64(*f64v));
             }
             if f32v.is_nan() {
                 match s.pop_any() {
-                    AnyValue::F32(v) => assert!(v.is_nan()),
+                    Value::F32(v) => assert!(v.is_nan()),
                     v => panic!("not match: {:?}", v),
                 }
             } else {
-                assert_eq!(s.pop_any(), AnyValue::F32(*f32v));
+                assert_eq!(s.pop_any(), Value::F32(*f32v));
             }
-            assert_eq!(s.pop_any(), AnyValue::I64(*i64v));
-            assert_eq!(s.pop_any(), AnyValue::I32(*i32v));
+            assert_eq!(s.pop_any(), Value::I64(*i64v));
+            assert_eq!(s.pop_any(), Value::I32(*i32v));
         }
     }
 }
