@@ -12,20 +12,12 @@ pub struct ValueStack {
     types: Vec<ValType>,
 }
 
-pub trait StackValue {
-    fn read(stack: &ValueStack, addr: usize) -> Self;
-    fn write(stack: &mut ValueStack, addr: usize, v: Self);
+pub trait PushPop {
     fn pop(stack: &mut ValueStack) -> Self;
     fn push(stack: &mut ValueStack, v: Self);
 }
 
-impl StackValue for i32 {
-    fn read(stack: &ValueStack, addr: usize) -> Self {
-        i32::from_le_bytes(stack.read_4_bytes(addr))
-    }
-    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
-        stack.write_bytes(addr, &v.to_le_bytes());
-    }
+impl PushPop for i32 {
     fn pop(stack: &mut ValueStack) -> Self {
         i32::from_le_bytes(stack.pop_4_bytes(ValType::I32))
     }
@@ -34,13 +26,7 @@ impl StackValue for i32 {
     }
 }
 
-impl StackValue for i64 {
-    fn read(stack: &ValueStack, addr: usize) -> Self {
-        i64::from_le_bytes(stack.read_8_bytes(addr))
-    }
-    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
-        stack.write_bytes(addr, &v.to_le_bytes());
-    }
+impl PushPop for i64 {
     fn pop(stack: &mut ValueStack) -> Self {
         i64::from_le_bytes(stack.pop_8_bytes(ValType::I64))
     }
@@ -49,13 +35,7 @@ impl StackValue for i64 {
     }
 }
 
-impl StackValue for f32 {
-    fn read(stack: &ValueStack, addr: usize) -> Self {
-        f32::from_le_bytes(stack.read_4_bytes(addr))
-    }
-    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
-        stack.write_bytes(addr, &v.to_le_bytes());
-    }
+impl PushPop for f32 {
     fn pop(stack: &mut ValueStack) -> Self {
         f32::from_le_bytes(stack.pop_4_bytes(ValType::F32))
     }
@@ -64,18 +44,73 @@ impl StackValue for f32 {
     }
 }
 
-impl StackValue for f64 {
-    fn read(stack: &ValueStack, addr: usize) -> Self {
-        f64::from_le_bytes(stack.read_8_bytes(addr))
-    }
-    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
-        stack.write_bytes(addr, &v.to_le_bytes());
-    }
+impl PushPop for f64 {
     fn pop(stack: &mut ValueStack) -> Self {
         f64::from_le_bytes(stack.pop_8_bytes(ValType::F64))
     }
     fn push(stack: &mut ValueStack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::F64);
+    }
+}
+
+impl PushPop for Value {
+    fn pop(stack: &mut ValueStack) -> Self {
+        assert!(!stack.types.is_empty());
+        match stack.types[stack.types.len() - 1] {
+            ValType::I32 => Value::I32(PushPop::pop(stack)),
+            ValType::I64 => Value::I64(PushPop::pop(stack)),
+            ValType::F32 => Value::F32(PushPop::pop(stack)),
+            ValType::F64 => Value::F64(PushPop::pop(stack)),
+        }
+    }
+    fn push(stack: &mut ValueStack, v: Self) {
+        match v {
+            Value::I32(i) => PushPop::push(stack, i),
+            Value::I64(i) => PushPop::push(stack, i),
+            Value::F32(f) => PushPop::push(stack, f),
+            Value::F64(f) => PushPop::push(stack, f),
+        }
+    }
+}
+
+pub trait ReadWrite {
+    fn read(stack: &ValueStack, addr: usize) -> Self;
+    fn write(stack: &mut ValueStack, addr: usize, v: Self);
+}
+
+impl ReadWrite for i32 {
+    fn read(stack: &ValueStack, addr: usize) -> Self {
+        i32::from_le_bytes(stack.read_4_bytes(addr))
+    }
+    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
+        stack.write_bytes(addr, &v.to_le_bytes());
+    }
+}
+
+impl ReadWrite for i64 {
+    fn read(stack: &ValueStack, addr: usize) -> Self {
+        i64::from_le_bytes(stack.read_8_bytes(addr))
+    }
+    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
+        stack.write_bytes(addr, &v.to_le_bytes());
+    }
+}
+
+impl ReadWrite for f32 {
+    fn read(stack: &ValueStack, addr: usize) -> Self {
+        f32::from_le_bytes(stack.read_4_bytes(addr))
+    }
+    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
+        stack.write_bytes(addr, &v.to_le_bytes());
+    }
+}
+
+impl ReadWrite for f64 {
+    fn read(stack: &ValueStack, addr: usize) -> Self {
+        f64::from_le_bytes(stack.read_8_bytes(addr))
+    }
+    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
+        stack.write_bytes(addr, &v.to_le_bytes());
     }
 }
 
@@ -94,8 +129,8 @@ impl ValueStack {
         self.values.extend_from_slice(bytes);
     }
 
-    pub fn push<V: StackValue>(&mut self, v: V) {
-        StackValue::push(self, v);
+    pub fn push<V: PushPop>(&mut self, v: V) {
+        PushPop::push(self, v);
     }
 
     fn pop_4_bytes(&mut self, ty: ValType) -> [u8; 4] {
@@ -118,17 +153,8 @@ impl ValueStack {
         b
     }
 
-    pub fn pop_any(&mut self) -> Value {
-        match self.types[self.types.len() - 1] {
-            ValType::I32 => Value::I32(self.pop()),
-            ValType::I64 => Value::I64(self.pop()),
-            ValType::F32 => Value::F32(self.pop()),
-            ValType::F64 => Value::F64(self.pop()),
-        }
-    }
-
-    pub fn pop<V: StackValue>(&mut self) -> V {
-        StackValue::pop(self)
+    pub fn pop<V: PushPop>(&mut self) -> V {
+        PushPop::pop(self)
     }
 
     fn read_4_bytes(&self, addr: usize) -> [u8; 4] {
@@ -149,12 +175,16 @@ impl ValueStack {
         }
     }
 
-    pub fn top_addr(&self) -> usize {
-        self.values.len()
+    pub fn write<V: ReadWrite>(&mut self, addr: usize, v: V) {
+        ReadWrite::write(self, addr, v)
     }
 
-    pub fn num_values(&self) -> usize {
-        self.types.len()
+    pub fn read<V: ReadWrite>(&self, addr: usize) -> V {
+        ReadWrite::read(self, addr)
+    }
+
+    pub fn top_addr(&self) -> usize {
+        self.values.len()
     }
 }
 
@@ -328,23 +358,23 @@ mod tests {
             .rev()
         {
             if f64v.is_nan() {
-                match s.pop_any() {
+                match s.pop() {
                     Value::F64(v) => assert!(v.is_nan()),
                     v => panic!("not match: {:?}", v),
                 }
             } else {
-                assert_eq!(s.pop_any(), Value::F64(*f64v));
+                assert_eq!(s.pop::<Value>(), Value::F64(*f64v));
             }
             if f32v.is_nan() {
-                match s.pop_any() {
+                match s.pop() {
                     Value::F32(v) => assert!(v.is_nan()),
                     v => panic!("not match: {:?}", v),
                 }
             } else {
-                assert_eq!(s.pop_any(), Value::F32(*f32v));
+                assert_eq!(s.pop::<Value>(), Value::F32(*f32v));
             }
-            assert_eq!(s.pop_any(), Value::I64(*i64v));
-            assert_eq!(s.pop_any(), Value::I32(*i32v));
+            assert_eq!(s.pop::<Value>(), Value::I64(*i64v));
+            assert_eq!(s.pop::<Value>(), Value::I32(*i32v));
         }
     }
 }
