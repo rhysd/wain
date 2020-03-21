@@ -7,54 +7,55 @@ use wain_ast::ValType;
 // Vec<Value> consumes too much space since its element size is always 64bits.
 // To use space more efficiently, here use u32 for storing values as bytes.
 
-pub struct ValueStack {
+pub struct Stack {
     values: Vec<u8>, // actual values per byte
     types: Vec<ValType>,
+    frames: Vec<CallFrame>, // activations of function frames
 }
 
 pub trait PushPop {
-    fn pop(stack: &mut ValueStack) -> Self;
-    fn push(stack: &mut ValueStack, v: Self);
+    fn pop(stack: &mut Stack) -> Self;
+    fn push(stack: &mut Stack, v: Self);
 }
 
 impl PushPop for i32 {
-    fn pop(stack: &mut ValueStack) -> Self {
+    fn pop(stack: &mut Stack) -> Self {
         i32::from_le_bytes(stack.pop_4_bytes(ValType::I32))
     }
-    fn push(stack: &mut ValueStack, v: Self) {
+    fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::I32);
     }
 }
 
 impl PushPop for i64 {
-    fn pop(stack: &mut ValueStack) -> Self {
+    fn pop(stack: &mut Stack) -> Self {
         i64::from_le_bytes(stack.pop_8_bytes(ValType::I64))
     }
-    fn push(stack: &mut ValueStack, v: Self) {
+    fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::I64);
     }
 }
 
 impl PushPop for f32 {
-    fn pop(stack: &mut ValueStack) -> Self {
+    fn pop(stack: &mut Stack) -> Self {
         f32::from_le_bytes(stack.pop_4_bytes(ValType::F32))
     }
-    fn push(stack: &mut ValueStack, v: Self) {
+    fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::F32);
     }
 }
 
 impl PushPop for f64 {
-    fn pop(stack: &mut ValueStack) -> Self {
+    fn pop(stack: &mut Stack) -> Self {
         f64::from_le_bytes(stack.pop_8_bytes(ValType::F64))
     }
-    fn push(stack: &mut ValueStack, v: Self) {
+    fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::F64);
     }
 }
 
 impl PushPop for Value {
-    fn pop(stack: &mut ValueStack) -> Self {
+    fn pop(stack: &mut Stack) -> Self {
         assert!(!stack.types.is_empty());
         match stack.types[stack.types.len() - 1] {
             ValType::I32 => Value::I32(PushPop::pop(stack)),
@@ -63,7 +64,7 @@ impl PushPop for Value {
             ValType::F64 => Value::F64(PushPop::pop(stack)),
         }
     }
-    fn push(stack: &mut ValueStack, v: Self) {
+    fn push(stack: &mut Stack, v: Self) {
         match v {
             Value::I32(i) => PushPop::push(stack, i),
             Value::I64(i) => PushPop::push(stack, i),
@@ -74,51 +75,52 @@ impl PushPop for Value {
 }
 
 pub trait ReadWrite {
-    fn read(stack: &ValueStack, addr: usize) -> Self;
-    fn write(stack: &mut ValueStack, addr: usize, v: Self);
+    fn read(stack: &Stack, addr: usize) -> Self;
+    fn write(stack: &mut Stack, addr: usize, v: Self);
 }
 
 impl ReadWrite for i32 {
-    fn read(stack: &ValueStack, addr: usize) -> Self {
+    fn read(stack: &Stack, addr: usize) -> Self {
         i32::from_le_bytes(stack.read_4_bytes(addr))
     }
-    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
+    fn write(stack: &mut Stack, addr: usize, v: Self) {
         stack.write_bytes(addr, &v.to_le_bytes());
     }
 }
 
 impl ReadWrite for i64 {
-    fn read(stack: &ValueStack, addr: usize) -> Self {
+    fn read(stack: &Stack, addr: usize) -> Self {
         i64::from_le_bytes(stack.read_8_bytes(addr))
     }
-    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
+    fn write(stack: &mut Stack, addr: usize, v: Self) {
         stack.write_bytes(addr, &v.to_le_bytes());
     }
 }
 
 impl ReadWrite for f32 {
-    fn read(stack: &ValueStack, addr: usize) -> Self {
+    fn read(stack: &Stack, addr: usize) -> Self {
         f32::from_le_bytes(stack.read_4_bytes(addr))
     }
-    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
+    fn write(stack: &mut Stack, addr: usize, v: Self) {
         stack.write_bytes(addr, &v.to_le_bytes());
     }
 }
 
 impl ReadWrite for f64 {
-    fn read(stack: &ValueStack, addr: usize) -> Self {
+    fn read(stack: &Stack, addr: usize) -> Self {
         f64::from_le_bytes(stack.read_8_bytes(addr))
     }
-    fn write(stack: &mut ValueStack, addr: usize, v: Self) {
+    fn write(stack: &mut Stack, addr: usize, v: Self) {
         stack.write_bytes(addr, &v.to_le_bytes());
     }
 }
 
-impl ValueStack {
+impl Stack {
     pub fn new() -> Self {
-        ValueStack {
+        Stack {
             values: vec![],
             types: vec![],
+            frames: vec![],
         }
     }
 
@@ -183,60 +185,64 @@ impl ValueStack {
         ReadWrite::read(self, addr)
     }
 
-    pub fn top_addr(&self) -> usize {
-        self.values.len()
-    }
-}
-
-pub struct CallFrame {
-    base_addr: usize,
-    local_offsets: Box<[usize]>,
-}
-
-impl CallFrame {
-    fn new(stack: &ValueStack, params: &[ValType], locals: &[ValType]) -> Self {
-        let mut offsets = Vec::with_capacity(params.len() + locals.len());
-        let mut idx = 0;
-        for p in params {
-            offsets.push(idx);
-            idx += p.bytes();
-        }
-        for l in locals {
-            offsets.push(idx);
-            idx += l.bytes();
-        }
-        Self {
-            base_addr: stack.top_addr(),
-            local_offsets: offsets.into_boxed_slice(),
-        }
+    fn top_addr(&self) -> usize {
+        self.values.len() - 1
     }
 
-    fn local_addr(&self, idx: u32) -> usize {
-        assert!((idx as usize) < self.local_offsets.len());
-        self.base_addr + self.local_offsets[idx as usize]
-    }
-}
-
-pub struct CallFrames {
-    frames: Vec<CallFrame>,
-}
-
-impl CallFrames {
-    pub fn new() -> Self {
-        Self { frames: vec![] }
+    fn top_idx(&self) -> usize {
+        self.types.len() - 1
     }
 
-    pub fn push(&mut self, stack: &ValueStack, params: &[ValType], locals: &[ValType]) {
-        self.frames.push(CallFrame::new(stack, params, locals));
+    pub fn push_frame(&mut self, params: &[ValType], locals: &[ValType]) {
+        self.frames.push(CallFrame::new(self, params, locals));
     }
 
-    pub fn pop(&mut self) {
-        self.frames.pop().expect("pop call frame");
+    pub fn pop_frame(&mut self) {
+        let frame = self.frames.pop().expect("pop call frame");
+        self.values.truncate(frame.base_addr);
+        self.types.truncate(frame.base_idx);
     }
 
     pub fn frame(&self) -> &CallFrame {
         assert!(!self.frames.is_empty());
         &self.frames[self.frames.len() - 1]
+    }
+
+    pub fn local<V: ReadWrite>(&self, idx: u32) -> V {
+        let addr = self.frame().local_addr(idx);
+        self.read(addr)
+    }
+}
+
+pub struct CallFrame {
+    base_addr: usize,
+    base_idx: usize,
+    local_addrs: Box<[usize]>,
+}
+
+impl CallFrame {
+    fn new(stack: &Stack, params: &[ValType], locals: &[ValType]) -> Self {
+        let base_addr = stack.top_addr();
+        let mut addrs = Vec::with_capacity(params.len() + locals.len());
+        let mut idx = 0;
+        for p in params {
+            addrs.push(base_addr + idx);
+            idx += p.bytes();
+        }
+        for l in locals {
+            addrs.push(base_addr + idx);
+            idx += l.bytes();
+        }
+        Self {
+            base_addr,
+            base_idx: stack.top_idx(),
+            local_addrs: addrs.into_boxed_slice(),
+        }
+    }
+
+    fn local_addr(&self, idx: u32) -> usize {
+        assert!((idx as usize) < self.local_addrs.len());
+        self.local_addrs[idx as usize]
     }
 }
 
@@ -246,7 +252,7 @@ mod tests {
 
     #[test]
     fn i32_value() {
-        let mut s = ValueStack::new();
+        let mut s = Stack::new();
         s.push(0i32);
         s.push(1i32);
         s.push(-1i32);
@@ -262,7 +268,7 @@ mod tests {
 
     #[test]
     fn i64_value() {
-        let mut s = ValueStack::new();
+        let mut s = Stack::new();
         s.push(0i64);
         s.push(1i64);
         s.push(-1i64);
@@ -282,7 +288,7 @@ mod tests {
 
     #[test]
     fn f32_value() {
-        let mut s = ValueStack::new();
+        let mut s = Stack::new();
         s.push(0.0f32);
         s.push(3.14f32);
         s.push(-1.0f32);
@@ -300,7 +306,7 @@ mod tests {
 
     #[test]
     fn f64_value() {
-        let mut s = ValueStack::new();
+        let mut s = Stack::new();
         s.push(0.0f64);
         s.push(3.14f64);
         s.push(-1.0f64);
@@ -331,7 +337,7 @@ mod tests {
         let f32_s = [0.0, 3.14, -1.0, f32::INFINITY, f32::NEG_INFINITY, f32::NAN];
         let f64_s = [0.0, 3.14, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN];
 
-        let mut s = ValueStack::new();
+        let mut s = Stack::new();
         for (((i32v, i64v), f32v), f64v) in i32_s
             .iter()
             .cycle()

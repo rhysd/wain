@@ -184,10 +184,20 @@ impl<'a, S: Source> Validate<'a, S> for FuncType {
 
 // https://webassembly.github.io/spec/core/valid/modules.html#tables
 impl<'a, S: Source> Validate<'a, S> for Table<'a> {
-    fn validate<'module>(&self, _ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
+    fn validate<'module>(&self, ctx: &mut Context<'module, 'a, S>) -> Result<(), S> {
         // Validation for table type is unnecessary here
         // https://webassembly.github.io/spec/core/syntax/types.html#syntax-tabletype
         // Limits should be within 2**32 but the values are already u32. It should be validated by parser
+
+        if let Limits::Range(min, max) = self.ty.limit {
+            if min > max {
+                return ctx.error(
+                    ErrorKind::InvalidLimitRange(min, max),
+                    "limits in table type",
+                    self.start,
+                );
+            }
+        }
         Ok(())
     }
 }
@@ -215,6 +225,16 @@ impl<'a, S: Source> Validate<'a, S> for Memory<'a> {
                 "limits in memory",
                 self.start,
             );
+        }
+
+        if let Limits::Range(min, max) = self.ty.limit {
+            if min > max {
+                return ctx.error(
+                    ErrorKind::InvalidLimitRange(min, max),
+                    "limits in memory type",
+                    self.start,
+                );
+            }
         }
 
         Ok(())

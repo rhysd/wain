@@ -19,5 +19,8 @@ fn main() {
         eprintln!("Error: {}", e);
         exit(1);
     }
-    // TODO
+    if let Some(e) = wain_exec::execute(ast.module) {
+        eprintln!("Error: {}", e);
+        exit(1);
+    }
 }

@@ -32,6 +32,7 @@ pub enum ErrorKind {
         align: u8,
         bits: u8,
     },
+    InvalidLimitRange(u32, u32),
     LimitsOutOfRange {
         value: u32,
         min: u32,
@@ -118,6 +119,7 @@ impl<S: Source> fmt::Display for Error<S> {
             SetImmutableGlobal{ ty, idx } => write!(f, "{} value cannot be set to immutable global variable {}", ty, idx)?,
             AlignNotPowerOf2(align) => write!(f, "align must be the exponent of a power of 2 but got {}", align)?,
             TooLargeAlign { align, bits } => write!(f, "align {} must not be larger than {}bits / 8", align, bits)?,
+            InvalidLimitRange(min, max) => write!(f, "range for limits {}..{} is invalid", min, max)?,
             LimitsOutOfRange { value, min, max, what } => write!(f, "limit {} is out of range {}..{} at {}", value, min, max, what)?,
             NotConstantInstruction(op) => write!(f, "instruction '{}' is not valid for constant. only 'global.get' or '*.const' are valid in constant expressions", op)?,
             NoInstructionForConstant => write!(f, "at least one instruction is necessary for constant expressions")?,

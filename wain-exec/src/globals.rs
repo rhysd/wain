@@ -1,4 +1,4 @@
-use crate::error::{Error, ErrorKind, Result};
+use crate::trap::{Result, Trap, TrapReason};
 use crate::value::Value;
 use std::convert::TryInto;
 use wain_ast::{Global, GlobalKind, InsnKind};
@@ -11,7 +11,8 @@ pub struct Globals {
 }
 
 impl Globals {
-    pub fn new<'a>(ast: &[Global<'a>]) -> Result<Self> {
+    // 5. https://webassembly.github.io/spec/core/exec/modules.html#instantiation
+    pub fn instantiate<'a>(ast: &[Global<'a>]) -> Result<Self> {
         let mut offsets = Vec::with_capacity(ast.len());
 
         fn global_value<'a>(idx: usize, globals: &[Global<'a>]) -> Result<Value> {
@@ -19,14 +20,7 @@ impl Globals {
             match &g.kind {
                 GlobalKind::Import(i) => {
                     // Currently no global variable cannot be imported
-                    Error::err(
-                        ErrorKind::UnknownImport {
-                            mod_name: i.mod_name.0.to_string(),
-                            name: i.name.0.to_string(),
-                            kind: "global variable",
-                        },
-                        g.start,
-                    )
+                    Err(Trap::unknown_import(i, "global variable", g.start))
                 }
                 GlobalKind::Init(init) => {
                     // By validation at least one instruction is guaranteed to be put in `init`
@@ -194,7 +188,7 @@ mod tests {
                 }]),
             },
         ];
-        let mut globals = Globals::new(&ast).unwrap();
+        let mut globals = Globals::instantiate(&ast).unwrap();
 
         assert_eq!(globals.get_i32(0), 3);
         assert_eq!(globals.get_i64(1), 123456);
@@ -231,7 +225,7 @@ mod tests {
             kind: GlobalKind::Import(import()),
         }];
 
-        let err = Globals::new(&globals).unwrap_err();
-        assert!(matches!(err.kind, ErrorKind::UnknownImport{..}));
+        let err = Globals::instantiate(&globals).unwrap_err();
+        assert!(matches!(err.reason, TrapReason::UnknownImport{..}));
     }
 }
