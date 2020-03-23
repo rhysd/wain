@@ -1,6 +1,6 @@
-use std::borrow::Cow;
 use std::fmt;
-use wain_ast::Import;
+use std::io;
+use wain_ast::{Import, ValType};
 
 #[cfg_attr(test, derive(Debug))]
 pub enum TrapReason {
@@ -9,12 +9,32 @@ pub enum TrapReason {
         name: String,
         kind: &'static str,
     },
-    StartFuncNotFound,
     OutOfLimit {
         max: usize,
         idx: usize,
         kind: &'static str,
     },
+    DataSegmentOutOfBuffer {
+        segment_end: usize,
+        buffer_size: usize,
+    },
+    ElemSegmentLargerThanTable {
+        segment_end: usize,
+        table_size: usize,
+    },
+    ReachUnreachable,
+    IdxOutOfTable {
+        idx: usize,
+        table_size: usize,
+    },
+    UninitializedElem(usize),
+    FuncSignatureMismatch {
+        expected_params: Vec<ValType>,
+        expected_results: Vec<ValType>,
+        actual_params: Vec<ValType>,
+        actual_results: Vec<ValType>,
+    },
+    IoError(io::Error),
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -44,6 +64,20 @@ impl Trap {
     }
 }
 
+struct JoinWritable<'a, D: fmt::Display>(&'a [D], &'static str);
+
+impl<'a, D: fmt::Display> fmt::Display for JoinWritable<'a, D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(d) = self.0.first() {
+            d.fmt(f)?;
+        }
+        for d in self.0.iter().skip(1) {
+            write!(f, "{}{}", self.1, d)?;
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Display for Trap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TrapReason::*;
@@ -55,13 +89,52 @@ impl fmt::Display for Trap {
             } => write!(
                 f,
                 "unknown module '{}' or unknown {} value '{}' imported from the module",
-                mod_name, kind, name
+                mod_name, kind, name,
             )?,
-            StartFuncNotFound => write!(
+            OutOfLimit { max, idx, kind } => write!(
                 f,
-                "could not invoke start function because 'start' section nor '_start' exported function was found",
+                "specified {} index 0x{:x} is out of limit 0x{:x}",
+                kind, idx, max,
             )?,
-            OutOfLimit{ max, idx, kind } => write!(f, "specified {} index {:x} is out of limit {:x}", kind, idx, max)?,
+            DataSegmentOutOfBuffer {
+                segment_end,
+                buffer_size,
+            } => write!(
+                f,
+                "'data' segment ends at address 0x{:x} but memory buffer size is 0x{:x}",
+                segment_end, buffer_size,
+            )?,
+            ElemSegmentLargerThanTable {
+                segment_end,
+                table_size,
+            } => write!(
+                f,
+                "'elem' segment ends at index {} but table length is {}",
+                segment_end, table_size,
+            )?,
+            ReachUnreachable => f.write_str("reached unreachable code")?,
+            IdxOutOfTable { idx, table_size } => write!(
+                f,
+                "cannot refer function because index {} is out of table size {}",
+                idx, table_size
+            )?,
+            UninitializedElem(idx) => {
+                write!(f, "element at index {} in table is uninitialized", idx,)?
+            }
+            FuncSignatureMismatch {
+                expected_params,
+                expected_results,
+                actual_params,
+                actual_results,
+            } => write!(
+                f,
+                "cannot invoke function due to mismatch of function signatures. expected '[{}] -> [{}]' but got '[{}] -> [{}]'",
+                JoinWritable(expected_params, " "),
+                JoinWritable(expected_results, " "),
+                JoinWritable(actual_params, " "),
+                JoinWritable(actual_results, " "),
+            )?,
+            IoError(e) => write!(f, "I/O error: {}", e)?,
         }
         write!(
             f,

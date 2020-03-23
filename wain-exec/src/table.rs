@@ -5,7 +5,7 @@ use wain_ast as ast;
 // Table instance
 pub struct Table {
     max: Option<usize>,
-    elems: Vec<u32>, // function indices
+    elems: Vec<Option<u32>>, // function indices
 }
 
 impl Table {
@@ -25,7 +25,7 @@ impl Table {
                     vec![]
                 } else {
                     let mut v = Vec::with_capacity(min as usize);
-                    v.resize(min as usize, u32::max_value());
+                    v.resize(min as usize, None);
                     v
                 };
                 Ok(Self { max, elems })
@@ -64,12 +64,38 @@ impl Table {
             }
         }
 
-        if self.elems.len() < end_idx {
-            self.elems.resize(end_idx, u32::max_value());
+        if self.elems.len() <= end_idx {
+            return Err(Trap::new(
+                TrapReason::ElemSegmentLargerThanTable {
+                    segment_end: end_idx,
+                    table_size: self.elems.len(),
+                },
+                elem.start,
+            ));
         }
 
-        self.elems[offset..end_idx].copy_from_slice(&elem.init);
+        for i in 0..elem.init.len() {
+            self.elems[offset + i] = Some(elem.init[i]);
+        }
 
         Ok(())
+    }
+
+    pub fn at(&self, idx: usize, source_offset: usize) -> Result<u32> {
+        if idx >= self.elems.len() {
+            return Err(Trap::new(
+                TrapReason::IdxOutOfTable {
+                    idx,
+                    table_size: self.elems.len(),
+                },
+                source_offset,
+            ));
+        }
+
+        if let Some(funcidx) = self.elems[idx] {
+            Ok(funcidx)
+        } else {
+            Err(Trap::new(TrapReason::UninitializedElem(idx), source_offset))
+        }
     }
 }

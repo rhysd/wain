@@ -484,12 +484,16 @@ impl<'outer, 'm, 'a, S: Source> ValidateInsnSeq<'outer, 'm, 'a, S> for Instructi
             I64Store32(mem) => ctx.validate_store(mem, 32, ValType::I64)?,
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-memory-size
             MemorySize => {
-                // module.memories[0] was already verified.
+                if ctx.outer.module.memories.is_empty() {
+                    return ctx.error(ErrorKind::MemoryIsNotDefined);
+                }
                 ctx.op_stack.push(Type::i32());
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-memory-grow
             MemoryGrow => {
-                // module.memories[0] was already verified.
+                if ctx.outer.module.memories.is_empty() {
+                    return ctx.error(ErrorKind::MemoryIsNotDefined);
+                }
                 // pop i32 and push i32
                 ctx.ensure_op_stack_top(Type::i32())?;
             }

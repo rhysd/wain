@@ -52,6 +52,7 @@ pub enum ErrorKind {
         name: String,
         prev_offset: usize,
     },
+    MemoryIsNotDefined,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -133,6 +134,7 @@ impl<S: Source> fmt::Display for Error<S> {
             MultipleTables(size) => write!(f, "number of tables must not be larger than 1 but got {}", size)?,
             MultipleMemories(size) => write!(f, "number of memories must not be larger than 1 but got {}", size)?,
             AlreadyExported{ name, prev_offset } => write!(f, "'{}' was already exported at offset {}", name, prev_offset)?,
+            MemoryIsNotDefined => write!(f, "at least one memory section must be defined")?,
         }
 
         write!(f, " while validating {}", self.when)?;

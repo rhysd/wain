@@ -186,15 +186,19 @@ impl Stack {
     }
 
     fn top_addr(&self) -> usize {
-        self.values.len() - 1
+        self.values.len()
     }
 
     fn top_idx(&self) -> usize {
-        self.types.len() - 1
+        self.types.len()
     }
 
     pub fn push_frame(&mut self, params: &[ValType], locals: &[ValType]) {
         self.frames.push(CallFrame::new(self, params, locals));
+        // Params are already pushed
+        for t in locals {
+            self.push(Value::default_value(*t));
+        }
     }
 
     pub fn pop_frame(&mut self) {
@@ -212,6 +216,27 @@ impl Stack {
         let addr = self.frame().local_addr(idx);
         self.read(addr)
     }
+
+    pub fn push_label(&self, ty: &Option<ValType>) -> Label {
+        Label {
+            addr: self.top_addr(),
+            type_idx: self.top_idx(),
+            has_result: ty.is_some(),
+        }
+    }
+
+    pub fn pop_label(&mut self, label: Label) {
+        // Part of 'br' instruction: https://webassembly.github.io/spec/core/exec/instructions.html#exec-br
+        if label.has_result {
+            let v: Value = self.pop();
+            self.values.truncate(label.addr);
+            self.types.truncate(label.type_idx);
+            self.push(v);
+        } else {
+            self.values.truncate(label.addr);
+            self.types.truncate(label.type_idx);
+        }
+    }
 }
 
 pub struct CallFrame {
@@ -222,28 +247,39 @@ pub struct CallFrame {
 
 impl CallFrame {
     fn new(stack: &Stack, params: &[ValType], locals: &[ValType]) -> Self {
-        let base_addr = stack.top_addr();
         let mut addrs = Vec::with_capacity(params.len() + locals.len());
-        let mut idx = 0;
+
+        // Note: Params were already pushed to stack
+        let params_bytes = params.iter().fold(0, |acc, p| acc + p.bytes());
+        let base_addr = stack.top_addr() - params_bytes;
+        let base_idx = stack.top_idx() - params.len();
+
+        let mut addr = 0;
         for p in params {
-            addrs.push(base_addr + idx);
-            idx += p.bytes();
+            addrs.push(base_addr + addr);
+            addr += p.bytes();
         }
         for l in locals {
-            addrs.push(base_addr + idx);
-            idx += l.bytes();
+            addrs.push(base_addr + addr);
+            addr += l.bytes();
         }
         Self {
             base_addr,
-            base_idx: stack.top_idx(),
+            base_idx,
             local_addrs: addrs.into_boxed_slice(),
         }
     }
 
-    fn local_addr(&self, idx: u32) -> usize {
-        assert!((idx as usize) < self.local_addrs.len());
-        self.local_addrs[idx as usize]
+    fn local_addr(&self, addr: u32) -> usize {
+        assert!((addr as usize) < self.local_addrs.len());
+        self.local_addrs[addr as usize]
     }
+}
+
+pub struct Label {
+    addr: usize,
+    type_idx: usize,
+    has_result: bool,
 }
 
 #[cfg(test)]

@@ -4,13 +4,9 @@ use wain_ast as ast;
 
 const PAGE_SIZE: usize = 65536; // 64Ki
 
-fn page_size(addr: usize) -> usize {
-    PAGE_SIZE * ((addr as usize) % PAGE_SIZE + 1)
-}
-
 // Memory instance
 pub struct Memory {
-    max: Option<usize>,
+    max: Option<u32>,
     data: Vec<u8>,
 }
 
@@ -24,14 +20,15 @@ impl Memory {
                 Err(Trap::unknown_import(i, "memory", memory.start))
             } else {
                 let (min, max) = match &memory.ty.limit {
-                    ast::Limits::Range(min, max) => (*min, Some(*max as usize)),
+                    ast::Limits::Range(min, max) => (*min, Some(*max)),
                     ast::Limits::From(min) => (*min, None),
                 };
                 let data = if min == 0 {
                     vec![]
                 } else {
-                    let mut v = Vec::with_capacity(min as usize);
-                    v.resize(page_size(min as usize), 0);
+                    let len = (min as usize) * PAGE_SIZE;
+                    let mut v = Vec::with_capacity(len);
+                    v.resize(len, 0);
                     v
                 };
                 Ok(Self { max, data })
@@ -45,7 +42,7 @@ impl Memory {
         }
     }
 
-    // 10. and 14. https://webassembly.github.io/spec/core/exec/modules.html#allocation
+    // 10. and 14. https://webassembly.github.io/spec/core/exec/modules.html#instantiation
     pub fn new_data(&mut self, segment: &ast::DataSegment, globals: &Globals) -> Result<()> {
         // By validation of constant expression, at least one instruction in the sequence is guaranteed
         // and type must be i32
@@ -56,14 +53,15 @@ impl Memory {
         };
         let offset = offset as usize;
         let data = &segment.data;
-        let end_idx = page_size(offset + data.len());
+        let end_addr = offset + data.len();
 
         if let Some(max) = self.max {
-            if end_idx > max {
+            let max = max as usize;
+            if end_addr > max * PAGE_SIZE {
                 return Err(Trap::new(
                     TrapReason::OutOfLimit {
                         max,
-                        idx: end_idx,
+                        idx: end_addr,
                         kind: "data element",
                     },
                     segment.start,
@@ -71,12 +69,36 @@ impl Memory {
             }
         }
 
-        if self.data.len() < end_idx {
-            self.data.resize(end_idx, 0);
+        if self.data.len() <= end_addr {
+            return Err(Trap::new(
+                TrapReason::DataSegmentOutOfBuffer {
+                    segment_end: end_addr,
+                    buffer_size: self.data.len(),
+                },
+                segment.start,
+            ));
         }
 
-        self.data[offset..end_idx].copy_from_slice(&segment.data);
+        self.data[offset..end_addr].copy_from_slice(&segment.data);
 
         Ok(())
+    }
+
+    pub fn size(&self) -> u32 {
+        (self.data.len() / PAGE_SIZE) as u32
+    }
+
+    pub fn grow(&mut self, num_pages: u32) -> i32 {
+        // https://webassembly.github.io/spec/core/exec/instructions.html#exec-memory-grow
+        let prev = self.size();
+        let next = prev + num_pages;
+        if let Some(max) = self.max {
+            if next > max {
+                return -1;
+            }
+        }
+        let next_len = (next as usize) * PAGE_SIZE;
+        self.data.resize(next_len, 0);
+        prev as i32
     }
 }
