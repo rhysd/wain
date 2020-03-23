@@ -50,7 +50,7 @@ impl Memory {
         // By validation of constant expression, at least one instruction in the sequence is guaranteed
         // and type must be i32
         let offset = match &segment.offset[segment.offset.len() - 1].kind {
-            ast::InsnKind::GlobalGet(idx) => globals.get_i32(*idx),
+            ast::InsnKind::GlobalGet(idx) => globals.get(*idx),
             ast::InsnKind::I32Const(i) => *i,
             _ => unreachable!("unexpected instruction for element offset"),
         };

@@ -1,7 +1,45 @@
-use crate::trap::{Result, Trap, TrapReason};
+use crate::trap::{Result, Trap};
 use crate::value::Value;
 use std::convert::TryInto;
 use wain_ast::{Global, GlobalKind, InsnKind};
+
+pub trait GlobalAccess {
+    fn set(globals: &mut Globals, idx: u32, v: Self);
+    fn get(globals: &Globals, idx: u32) -> Self;
+}
+
+impl GlobalAccess for i32 {
+    fn set(globals: &mut Globals, idx: u32, v: Self) {
+        globals.set_4_bytes(idx, v.to_le_bytes())
+    }
+    fn get(globals: &Globals, idx: u32) -> Self {
+        Self::from_le_bytes(globals.get_4_bytes(idx))
+    }
+}
+impl GlobalAccess for i64 {
+    fn set(globals: &mut Globals, idx: u32, v: Self) {
+        globals.set_8_bytes(idx, v.to_le_bytes())
+    }
+    fn get(globals: &Globals, idx: u32) -> Self {
+        Self::from_le_bytes(globals.get_8_bytes(idx))
+    }
+}
+impl GlobalAccess for f32 {
+    fn set(globals: &mut Globals, idx: u32, v: Self) {
+        globals.set_4_bytes(idx, v.to_le_bytes())
+    }
+    fn get(globals: &Globals, idx: u32) -> Self {
+        Self::from_le_bytes(globals.get_4_bytes(idx))
+    }
+}
+impl GlobalAccess for f64 {
+    fn set(globals: &mut Globals, idx: u32, v: Self) {
+        globals.set_8_bytes(idx, v.to_le_bytes())
+    }
+    fn get(globals: &Globals, idx: u32) -> Self {
+        Self::from_le_bytes(globals.get_8_bytes(idx))
+    }
+}
 
 // Fixed-size any values store indexed in advance
 #[cfg_attr(test, derive(Debug))]
@@ -84,20 +122,8 @@ impl Globals {
         }
     }
 
-    pub fn set_i32(&mut self, idx: u32, i: i32) {
-        self.set_4_bytes(idx, i.to_le_bytes());
-    }
-
-    pub fn set_f32(&mut self, idx: u32, f: f32) {
-        self.set_4_bytes(idx, f.to_le_bytes());
-    }
-
-    pub fn set_i64(&mut self, idx: u32, i: i64) {
-        self.set_8_bytes(idx, i.to_le_bytes());
-    }
-
-    pub fn set_f64(&mut self, idx: u32, f: f64) {
-        self.set_8_bytes(idx, f.to_le_bytes());
+    pub fn set<V: GlobalAccess>(&mut self, idx: u32, v: V) {
+        GlobalAccess::set(self, idx, v)
     }
 
     fn get_4_bytes(&self, idx: u32) -> [u8; 4] {
@@ -116,26 +142,15 @@ impl Globals {
             .expect("4 bytes for i64 or f64 variable")
     }
 
-    pub fn get_i32(&self, idx: u32) -> i32 {
-        i32::from_le_bytes(self.get_4_bytes(idx))
-    }
-
-    pub fn get_f32(&self, idx: u32) -> f32 {
-        f32::from_le_bytes(self.get_4_bytes(idx))
-    }
-
-    pub fn get_i64(&self, idx: u32) -> i64 {
-        i64::from_le_bytes(self.get_8_bytes(idx))
-    }
-
-    pub fn get_f64(&self, idx: u32) -> f64 {
-        f64::from_le_bytes(self.get_8_bytes(idx))
+    pub fn get<V: GlobalAccess>(&self, idx: u32) -> V {
+        GlobalAccess::get(self, idx)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::trap::TrapReason;
     use std::borrow::Cow;
     use wain_ast::{Import, InsnKind, Instruction, Name, ValType};
 
@@ -190,22 +205,22 @@ mod tests {
         ];
         let mut globals = Globals::instantiate(&ast).unwrap();
 
-        assert_eq!(globals.get_i32(0), 3);
-        assert_eq!(globals.get_i64(1), 123456);
-        assert_eq!(globals.get_f32(2), 3.14);
-        assert_eq!(globals.get_f64(3), 54.3e21);
-        assert_eq!(globals.get_i32(4), 3);
+        assert_eq!(globals.get::<i32>(0), 3);
+        assert_eq!(globals.get::<i64>(1), 123456);
+        assert_eq!(globals.get::<f32>(2), 3.14);
+        assert_eq!(globals.get::<f64>(3), 54.3e21);
+        assert_eq!(globals.get::<i32>(4), 3);
 
-        globals.set_i32(0, 42);
-        globals.set_i64(1, 12345);
-        globals.set_f32(2, 3.14);
-        globals.set_f64(3, 12.3e10);
+        globals.set(0, 42i32);
+        globals.set(1, 12345i64);
+        globals.set(2, 3.14f32);
+        globals.set(3, 12.3e10f64);
 
-        assert_eq!(globals.get_i32(0), 42);
-        assert_eq!(globals.get_i64(1), 12345);
-        assert_eq!(globals.get_f32(2), 3.14);
-        assert_eq!(globals.get_f64(3), 12.3e10);
-        assert_eq!(globals.get_i32(4), 3);
+        assert_eq!(globals.get::<i32>(0), 42);
+        assert_eq!(globals.get::<i64>(1), 12345);
+        assert_eq!(globals.get::<f32>(2), 3.14);
+        assert_eq!(globals.get::<f64>(3), 12.3e10);
+        assert_eq!(globals.get::<i32>(4), 3);
     }
 
     #[test]
