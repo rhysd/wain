@@ -25,7 +25,7 @@ enum ExecState {
 
 type ExecResult = Result<ExecState>;
 
-// Abtract machine to run wasm code
+// State of abtract machine to run wasm code. This struct contains both store and stack
 pub struct Machine<'module, 'source> {
     module: &'module ast::Module<'source>,
     table: Table, // Only one table is allowed for MVP
@@ -102,10 +102,10 @@ impl<'m, 'a> Machine<'m, 'a> {
         let fty = &self.module.types[func.idx as usize];
 
         // Push call frame
-        let mut frame = CallFrame::new(&self.stack, &fty.params, locals);
+        let frame = CallFrame::new(&self.stack, &fty.params, locals);
 
         for insn in body.iter() {
-            match insn.execute(self, &mut frame)? {
+            match insn.execute(self, &frame)? {
                 ExecState::Continue => {}
                 ExecState::Ret => break,
                 ExecState::Breaking(_) => unreachable!(), // thanks to validation, this does not occur
@@ -158,12 +158,12 @@ impl<'m, 'a> Machine<'m, 'a> {
 }
 
 trait Execute<'f, 'm, 'a> {
-    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &mut CallFrame<'f>) -> ExecResult;
+    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &CallFrame<'f>) -> ExecResult;
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html#blocks
 impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for Vec<ast::Instruction> {
-    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &mut CallFrame<'f>) -> ExecResult {
+    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &CallFrame<'f>) -> ExecResult {
         // Run instruction sequence as block
         for insn in self.iter() {
             match insn.execute(machine, frame)? {
@@ -177,7 +177,7 @@ impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for Vec<ast::Instruction> {
 
 // https://webassembly.github.io/spec/core/exec/instructions.html
 impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for ast::Instruction {
-    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &mut CallFrame<'f>) -> ExecResult {
+    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &CallFrame<'f>) -> ExecResult {
         use ast::InsnKind::*;
         match &self.kind {
             // Control instructions
@@ -288,11 +288,38 @@ impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for ast::Instruction {
                 machine.stack.push(if cond == 0 { lhs } else { rhs });
             }
             // Variable instructions
-            LocalGet(idx) => unimplemented!("LocalGet"),
-            LocalSet(idx) => unimplemented!("LocalSet"),
-            LocalTee(idx) => unimplemented!("LocalTee"),
-            GlobalGet(idx) => unimplemented!("GlobalGet"),
-            GlobalSet(idx) => unimplemented!("GlobalSet"),
+            // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-get
+            LocalGet(localidx) => {
+                let addr = frame.local_addr(*localidx);
+                match frame.local_type(*localidx) {
+                    ast::ValType::I32 => machine.stack.push(machine.stack.read::<i32>(addr)),
+                    ast::ValType::I64 => machine.stack.push(machine.stack.read::<i64>(addr)),
+                    ast::ValType::F32 => machine.stack.push(machine.stack.read::<f32>(addr)),
+                    ast::ValType::F64 => machine.stack.push(machine.stack.read::<f64>(addr)),
+                }
+            }
+            // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-set
+            LocalSet(localidx) => {
+                let addr = frame.local_addr(*localidx);
+                let val = machine.stack.pop();
+                machine.stack.write_any(addr, val);
+            }
+            // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-tee
+            LocalTee(localidx) => {
+                // Like local.set, but it does not change stack
+                let addr = frame.local_addr(*localidx);
+                let val = machine.stack.top();
+                machine.stack.write_any(addr, val);
+            }
+            // https://webassembly.github.io/spec/core/exec/instructions.html#exec-global-get
+            GlobalGet(globalidx) => match machine.module.globals[*globalidx as usize].ty {
+                ast::ValType::I32 => machine.stack.push(machine.globals.get::<i32>(*globalidx)),
+                ast::ValType::I64 => machine.stack.push(machine.globals.get::<i64>(*globalidx)),
+                ast::ValType::F32 => machine.stack.push(machine.globals.get::<f32>(*globalidx)),
+                ast::ValType::F64 => machine.stack.push(machine.globals.get::<f64>(*globalidx)),
+            },
+            // https://webassembly.github.io/spec/core/exec/instructions.html#exec-global-set
+            GlobalSet(globalidx) => machine.globals.set_any(*globalidx, machine.stack.top()),
             // Memory instructions
             I32Load(mem) => unimplemented!("I32Load"),
             I64Load(mem) => unimplemented!("I64Load"),

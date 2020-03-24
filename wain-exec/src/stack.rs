@@ -12,63 +12,91 @@ pub struct Stack {
     types: Vec<ValType>,
 }
 
-pub trait PushPop {
+pub trait StackAccess {
     fn pop(stack: &mut Stack) -> Self;
     fn push(stack: &mut Stack, v: Self);
+    fn top(stack: &mut Stack) -> Self;
 }
 
-impl PushPop for i32 {
+impl StackAccess for i32 {
     fn pop(stack: &mut Stack) -> Self {
-        i32::from_le_bytes(stack.pop_4_bytes(ValType::I32))
+        assert_eq!(stack.top_type(), ValType::I32);
+        i32::from_le_bytes(stack.pop_4_bytes())
     }
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::I32);
     }
+    fn top(stack: &mut Stack) -> Self {
+        assert_eq!(stack.top_type(), ValType::I32);
+        i32::from_le_bytes(stack.top_4_bytes())
+    }
 }
 
-impl PushPop for i64 {
+impl StackAccess for i64 {
     fn pop(stack: &mut Stack) -> Self {
-        i64::from_le_bytes(stack.pop_8_bytes(ValType::I64))
+        assert_eq!(stack.top_type(), ValType::I64);
+        i64::from_le_bytes(stack.pop_8_bytes())
     }
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::I64);
     }
+    fn top(stack: &mut Stack) -> Self {
+        assert_eq!(stack.top_type(), ValType::I64);
+        i64::from_le_bytes(stack.top_8_bytes())
+    }
 }
 
-impl PushPop for f32 {
+impl StackAccess for f32 {
     fn pop(stack: &mut Stack) -> Self {
-        f32::from_le_bytes(stack.pop_4_bytes(ValType::F32))
+        assert_eq!(stack.top_type(), ValType::F32);
+        f32::from_le_bytes(stack.pop_4_bytes())
     }
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::F32);
     }
+    fn top(stack: &mut Stack) -> Self {
+        assert_eq!(stack.top_type(), ValType::F32);
+        f32::from_le_bytes(stack.top_4_bytes())
+    }
 }
 
-impl PushPop for f64 {
+impl StackAccess for f64 {
     fn pop(stack: &mut Stack) -> Self {
-        f64::from_le_bytes(stack.pop_8_bytes(ValType::F64))
+        assert_eq!(stack.top_type(), ValType::F64);
+        f64::from_le_bytes(stack.pop_8_bytes())
     }
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::F64);
     }
+    fn top(stack: &mut Stack) -> Self {
+        assert_eq!(stack.top_type(), ValType::F64);
+        f64::from_le_bytes(stack.top_8_bytes())
+    }
 }
 
-impl PushPop for Value {
+impl StackAccess for Value {
     fn pop(stack: &mut Stack) -> Self {
-        assert!(!stack.types.is_empty());
         match stack.types[stack.types.len() - 1] {
-            ValType::I32 => Value::I32(PushPop::pop(stack)),
-            ValType::I64 => Value::I64(PushPop::pop(stack)),
-            ValType::F32 => Value::F32(PushPop::pop(stack)),
-            ValType::F64 => Value::F64(PushPop::pop(stack)),
+            ValType::I32 => Value::I32(StackAccess::pop(stack)),
+            ValType::I64 => Value::I64(StackAccess::pop(stack)),
+            ValType::F32 => Value::F32(StackAccess::pop(stack)),
+            ValType::F64 => Value::F64(StackAccess::pop(stack)),
         }
     }
     fn push(stack: &mut Stack, v: Self) {
         match v {
-            Value::I32(i) => PushPop::push(stack, i),
-            Value::I64(i) => PushPop::push(stack, i),
-            Value::F32(f) => PushPop::push(stack, f),
-            Value::F64(f) => PushPop::push(stack, f),
+            Value::I32(i) => StackAccess::push(stack, i),
+            Value::I64(i) => StackAccess::push(stack, i),
+            Value::F32(f) => StackAccess::push(stack, f),
+            Value::F64(f) => StackAccess::push(stack, f),
+        }
+    }
+    fn top(stack: &mut Stack) -> Self {
+        match stack.types[stack.types.len() - 1] {
+            ValType::I32 => Value::I32(StackAccess::top(stack)),
+            ValType::I64 => Value::I64(StackAccess::top(stack)),
+            ValType::F32 => Value::F32(StackAccess::top(stack)),
+            ValType::F64 => Value::F64(StackAccess::top(stack)),
         }
     }
 }
@@ -124,37 +152,51 @@ impl Stack {
 
     // Note: Here I don't use std::slice::from_raw since its unsafe
 
+    fn top_type(&self) -> ValType {
+        self.types[self.types.len() - 1]
+    }
+
     fn push_bytes(&mut self, bytes: &[u8], ty: ValType) {
         self.types.push(ty);
         self.values.extend_from_slice(bytes);
     }
 
-    pub fn push<V: PushPop>(&mut self, v: V) {
-        PushPop::push(self, v);
+    pub fn push<V: StackAccess>(&mut self, v: V) {
+        StackAccess::push(self, v);
     }
 
-    fn pop_4_bytes(&mut self, ty: ValType) -> [u8; 4] {
-        assert_eq!(self.types.pop().expect("pop 4 bytes"), ty);
-        let len = self.values.len();
-        let b = self.values[len - 4..]
+    fn top_4_bytes(&mut self) -> [u8; 4] {
+        self.values[self.values.len() - 4..]
             .try_into()
-            .expect("4 bytes for i32 value");
-        self.values.truncate(len - 4);
+            .expect("top 4 bytes for 32bits value")
+    }
+
+    fn pop_4_bytes(&mut self) -> [u8; 4] {
+        let b = self.top_4_bytes();
+        self.types.pop();
+        self.values.truncate(self.values.len() - 4);
         b
     }
 
-    fn pop_8_bytes(&mut self, ty: ValType) -> [u8; 8] {
-        assert_eq!(self.types.pop().expect("pop 8 bytes"), ty);
-        let len = self.values.len();
-        let b = self.values[len - 8..]
+    fn top_8_bytes(&mut self) -> [u8; 8] {
+        self.values[self.values.len() - 8..]
             .try_into()
-            .expect("4 bytes for 64bit value");
-        self.values.truncate(len - 8);
+            .expect("top 8 bytes for 64bit value")
+    }
+
+    fn pop_8_bytes(&mut self) -> [u8; 8] {
+        let b = self.top_8_bytes();
+        self.types.pop();
+        self.values.truncate(self.values.len() - 8);
         b
     }
 
-    pub fn pop<V: PushPop>(&mut self) -> V {
-        PushPop::pop(self)
+    pub fn pop<V: StackAccess>(&mut self) -> V {
+        StackAccess::pop(self)
+    }
+
+    pub fn top<V: StackAccess>(&mut self) -> V {
+        StackAccess::top(self)
     }
 
     fn read_4_bytes(&self, addr: usize) -> [u8; 4] {
@@ -181,6 +223,15 @@ impl Stack {
 
     pub fn read<V: ReadWrite>(&self, addr: usize) -> V {
         ReadWrite::read(self, addr)
+    }
+
+    pub fn write_any(&mut self, addr: usize, v: Value) {
+        match v {
+            Value::I32(i) => self.write(addr, i),
+            Value::I64(i) => self.write(addr, i),
+            Value::F32(f) => self.write(addr, f),
+            Value::F64(f) => self.write(addr, f),
+        }
     }
 
     fn top_addr(&self) -> usize {
@@ -222,9 +273,9 @@ impl Stack {
 pub struct CallFrame<'func> {
     pub base_addr: usize,
     pub base_idx: usize,
-    pub local_addrs: Box<[usize]>, // Calculate local addresses in advance for random access
-    pub params: &'func [ValType],
-    pub locals: &'func [ValType],
+    local_addrs: Box<[usize]>, // Calculate local addresses in advance for random access
+    params: &'func [ValType],
+    locals: &'func [ValType],
 }
 
 impl<'f> CallFrame<'f> {
@@ -254,6 +305,22 @@ impl<'f> CallFrame<'f> {
             locals,
         }
     }
+
+    pub fn local_addr(&self, localidx: u32) -> usize {
+        self.local_addrs[localidx as usize]
+    }
+
+    pub fn local_type(&self, localidx: u32) -> ValType {
+        let idx = localidx as usize;
+        if idx < self.params.len() {
+            self.params[idx]
+        } else if idx < self.params.len() + self.locals.len() {
+            self.locals[idx - self.params.len()]
+        } else {
+            // Unreachable thanks to validation
+            unreachable!("local type out of bounds")
+        }
+    }
 }
 
 pub struct Label {
@@ -270,6 +337,7 @@ mod tests {
     fn i32_value() {
         let mut s = Stack::new();
         s.push(0i32);
+        assert_eq!(s.top::<i32>(), 0);
         s.push(1i32);
         s.push(-1i32);
         s.push(i32::max_value());
@@ -306,6 +374,7 @@ mod tests {
     fn f32_value() {
         let mut s = Stack::new();
         s.push(0.0f32);
+        assert_eq!(s.top::<f32>(), 0.0);
         s.push(3.14f32);
         s.push(-1.0f32);
         s.push(f32::INFINITY);
@@ -324,6 +393,7 @@ mod tests {
     fn f64_value() {
         let mut s = Stack::new();
         s.push(0.0f64);
+        assert_eq!(s.top::<f64>(), 0.0f64);
         s.push(3.14f64);
         s.push(-1.0f64);
         s.push(f64::INFINITY);
@@ -385,6 +455,7 @@ mod tests {
                     v => panic!("not match: {:?}", v),
                 }
             } else {
+                assert_eq!(s.top::<Value>(), Value::F64(*f64v));
                 assert_eq!(s.pop::<Value>(), Value::F64(*f64v));
             }
             if f32v.is_nan() {
@@ -393,9 +464,12 @@ mod tests {
                     v => panic!("not match: {:?}", v),
                 }
             } else {
+                assert_eq!(s.top::<Value>(), Value::F32(*f32v));
                 assert_eq!(s.pop::<Value>(), Value::F32(*f32v));
             }
+            assert_eq!(s.top::<Value>(), Value::I64(*i64v));
             assert_eq!(s.pop::<Value>(), Value::I64(*i64v));
+            assert_eq!(s.top::<Value>(), Value::I32(*i32v));
             assert_eq!(s.pop::<Value>(), Value::I32(*i32v));
         }
     }

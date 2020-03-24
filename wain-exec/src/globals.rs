@@ -126,6 +126,15 @@ impl Globals {
         GlobalAccess::set(self, idx, v)
     }
 
+    pub fn set_any(&mut self, idx: u32, val: Value) {
+        match val {
+            Value::I32(i) => self.set(idx, i),
+            Value::I64(i) => self.set(idx, i),
+            Value::F32(f) => self.set(idx, f),
+            Value::F64(f) => self.set(idx, f),
+        }
+    }
+
     fn get_4_bytes(&self, idx: u32) -> [u8; 4] {
         assert!((idx as usize) < self.offsets.len());
         let offset = self.offsets[idx as usize] as usize;
