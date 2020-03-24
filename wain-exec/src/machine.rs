@@ -1,6 +1,6 @@
 use crate::globals::Globals;
 use crate::memory::Memory;
-use crate::stack::Stack;
+use crate::stack::{CallFrame, Stack};
 use crate::table::Table;
 use crate::trap::{Result, Trap, TrapReason};
 use crate::value::Value;
@@ -83,8 +83,45 @@ impl<'m, 'a> Machine<'m, 'a> {
         })
     }
 
+    // https://webassembly.github.io/spec/core/exec/instructions.html#function-calls
     fn invoke(&mut self, funcidx: u32) -> ExecResult {
-        self.module.funcs[funcidx as usize].execute(self)
+        let func = &self.module.funcs[funcidx as usize];
+
+        // Call this function with params
+        let (locals, body) = match &func.kind {
+            ast::FuncKind::Import(i) => {
+                if i.mod_name.0 == "env" && i.name.0 == "putchar" {
+                    return self.putchar(func.start).map(|_| ExecState::Continue);
+                } else {
+                    return Err(Trap::unknown_import(i, "function", func.start));
+                }
+            }
+            ast::FuncKind::Body { locals, expr } => (locals, expr),
+        };
+
+        let fty = &self.module.types[func.idx as usize];
+
+        // Push call frame
+        let mut frame = CallFrame::new(&self.stack, &fty.params, locals);
+
+        for insn in body.iter() {
+            match insn.execute(self, &mut frame)? {
+                ExecState::Continue => {}
+                ExecState::Ret => break,
+                ExecState::Breaking(_) => unreachable!(), // thanks to validation, this does not occur
+            }
+        }
+
+        if fty.results.is_empty() {
+            self.stack.restore(frame.base_addr, frame.base_idx); // Pop call frame
+        } else {
+            // Push 1st result value since number of result type is 1 or 0 for MVP
+            let v: Value = self.stack.pop();
+            self.stack.restore(frame.base_addr, frame.base_idx); // Pop call frame
+            self.stack.push(v); // push result value
+        }
+
+        Ok(ExecState::Continue)
     }
 
     // As the last step of instantiation, invoke start function
@@ -120,56 +157,16 @@ impl<'m, 'a> Machine<'m, 'a> {
     }
 }
 
-trait Execute<'m, 'a> {
-    fn execute(&self, machine: &mut Machine<'m, 'a>) -> ExecResult;
-}
-
-// https://webassembly.github.io/spec/core/exec/instructions.html#function-calls
-impl<'m, 'a> Execute<'m, 'a> for ast::Func<'a> {
-    fn execute(&self, machine: &mut Machine<'m, 'a>) -> ExecResult {
-        // Call this function with params
-        let (locals, body) = match &self.kind {
-            ast::FuncKind::Import(i) => {
-                if i.mod_name.0 == "env" && i.name.0 == "putchar" {
-                    return machine.putchar(self.start).map(|_| ExecState::Continue);
-                } else {
-                    return Err(Trap::unknown_import(i, "function", self.start));
-                }
-            }
-            ast::FuncKind::Body { locals, expr } => (locals, expr),
-        };
-
-        let fty = &machine.module.types[self.idx as usize];
-
-        machine.stack.push_frame(&fty.params, locals);
-
-        for insn in body.iter() {
-            match insn.execute(machine)? {
-                ExecState::Continue => {}
-                ExecState::Ret => break,
-                ExecState::Breaking(_) => unreachable!(), // thanks to validation, this does not occur
-            }
-        }
-
-        if fty.results.is_empty() {
-            machine.stack.pop_frame();
-        } else {
-            // Push 1st result value since number of result type is 1 or 0 for MVP
-            let v: Value = machine.stack.pop();
-            machine.stack.pop_frame();
-            machine.stack.push(v); // push result value
-        }
-
-        Ok(ExecState::Continue)
-    }
+trait Execute<'f, 'm, 'a> {
+    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &mut CallFrame<'f>) -> ExecResult;
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html#blocks
-impl<'m, 'a> Execute<'m, 'a> for Vec<ast::Instruction> {
-    fn execute(&self, machine: &mut Machine<'m, 'a>) -> ExecResult {
+impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for Vec<ast::Instruction> {
+    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &mut CallFrame<'f>) -> ExecResult {
         // Run instruction sequence as block
         for insn in self.iter() {
-            match insn.execute(machine)? {
+            match insn.execute(machine, frame)? {
                 ExecState::Continue => {}
                 state => return Ok(state), // Stop executing this block on return or break
             }
@@ -179,15 +176,15 @@ impl<'m, 'a> Execute<'m, 'a> for Vec<ast::Instruction> {
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html
-impl<'m, 'a> Execute<'m, 'a> for ast::Instruction {
-    fn execute(&self, machine: &mut Machine<'m, 'a>) -> ExecResult {
+impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for ast::Instruction {
+    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &mut CallFrame<'f>) -> ExecResult {
         use ast::InsnKind::*;
         match &self.kind {
             // Control instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-block
             Block { ty, body } => {
                 let label = machine.stack.push_label(ty);
-                match body.execute(machine)? {
+                match body.execute(machine, frame)? {
                     ExecState::Continue => {}
                     ExecState::Ret => return Ok(ExecState::Ret),
                     ExecState::Breaking(0) => {}
@@ -199,7 +196,7 @@ impl<'m, 'a> Execute<'m, 'a> for ast::Instruction {
             Loop { ty, body } => {
                 let label = machine.stack.push_label(ty);
                 loop {
-                    match body.execute(machine)? {
+                    match body.execute(machine, frame)? {
                         ExecState::Continue => {} // next iteration
                         ExecState::Ret => return Ok(ExecState::Ret),
                         ExecState::Breaking(0) => break,
@@ -217,7 +214,7 @@ impl<'m, 'a> Execute<'m, 'a> for ast::Instruction {
                 let cond: i32 = machine.stack.pop();
                 let label = machine.stack.push_label(ty);
                 let insns = if cond != 0 { then_body } else { else_body };
-                match insns.execute(machine)? {
+                match insns.execute(machine, frame)? {
                     ExecState::Continue => {}
                     ExecState::Ret => return Ok(ExecState::Ret),
                     ExecState::Breaking(0) => {}
@@ -276,7 +273,7 @@ impl<'m, 'a> Execute<'m, 'a> for ast::Instruction {
                         self.start,
                     ));
                 }
-                return func.execute(machine);
+                return machine.invoke(funcidx);
             }
             // Parametric instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-drop

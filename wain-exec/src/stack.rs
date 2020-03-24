@@ -10,7 +10,6 @@ use wain_ast::ValType;
 pub struct Stack {
     values: Vec<u8>, // actual values per byte
     types: Vec<ValType>,
-    frames: Vec<CallFrame>, // activations of function frames
 }
 
 pub trait PushPop {
@@ -120,7 +119,6 @@ impl Stack {
         Stack {
             values: vec![],
             types: vec![],
-            frames: vec![],
         }
     }
 
@@ -193,28 +191,9 @@ impl Stack {
         self.types.len()
     }
 
-    pub fn push_frame(&mut self, params: &[ValType], locals: &[ValType]) {
-        self.frames.push(CallFrame::new(self, params, locals));
-        // Params are already pushed
-        for t in locals {
-            self.push(Value::default_value(*t));
-        }
-    }
-
-    pub fn pop_frame(&mut self) {
-        let frame = self.frames.pop().expect("pop call frame");
-        self.values.truncate(frame.base_addr);
-        self.types.truncate(frame.base_idx);
-    }
-
-    pub fn frame(&self) -> &CallFrame {
-        assert!(!self.frames.is_empty());
-        &self.frames[self.frames.len() - 1]
-    }
-
-    pub fn local<V: ReadWrite>(&self, idx: u32) -> V {
-        let addr = self.frame().local_addr(idx);
-        self.read(addr)
+    pub fn restore(&mut self, addr: usize, type_idx: usize) {
+        self.values.truncate(addr);
+        self.types.truncate(type_idx);
     }
 
     pub fn push_label(&self, ty: &Option<ValType>) -> Label {
@@ -229,24 +208,27 @@ impl Stack {
         // Part of 'br' instruction: https://webassembly.github.io/spec/core/exec/instructions.html#exec-br
         if label.has_result {
             let v: Value = self.pop();
-            self.values.truncate(label.addr);
-            self.types.truncate(label.type_idx);
+            self.restore(label.addr, label.type_idx);
             self.push(v);
         } else {
-            self.values.truncate(label.addr);
-            self.types.truncate(label.type_idx);
+            self.restore(label.addr, label.type_idx);
         }
     }
 }
 
-pub struct CallFrame {
-    base_addr: usize,
-    base_idx: usize,
-    local_addrs: Box<[usize]>,
+// Activations of function frames
+// This class is outside Machine because it has shorter lifetime. It only lives while the current
+// function is being invoked
+pub struct CallFrame<'func> {
+    pub base_addr: usize,
+    pub base_idx: usize,
+    pub local_addrs: Box<[usize]>, // Calculate local addresses in advance for random access
+    pub params: &'func [ValType],
+    pub locals: &'func [ValType],
 }
 
-impl CallFrame {
-    fn new(stack: &Stack, params: &[ValType], locals: &[ValType]) -> Self {
+impl<'f> CallFrame<'f> {
+    pub fn new(stack: &Stack, params: &'f [ValType], locals: &'f [ValType]) -> Self {
         let mut addrs = Vec::with_capacity(params.len() + locals.len());
 
         // Note: Params were already pushed to stack
@@ -263,16 +245,14 @@ impl CallFrame {
             addrs.push(base_addr + addr);
             addr += l.bytes();
         }
+
         Self {
             base_addr,
             base_idx,
             local_addrs: addrs.into_boxed_slice(),
+            params,
+            locals,
         }
-    }
-
-    fn local_addr(&self, addr: u32) -> usize {
-        assert!((addr as usize) < self.local_addrs.len());
-        self.local_addrs[addr as usize]
     }
 }
 
