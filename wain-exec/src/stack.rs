@@ -1,4 +1,4 @@
-use crate::value::Value;
+use crate::value::{ReadWrite, Value};
 use std::convert::{TryFrom, TryInto};
 use std::f32;
 use std::f64;
@@ -91,47 +91,6 @@ impl StackAccess for Value {
     }
 }
 
-pub trait ReadWrite {
-    fn read(stack: &Stack, addr: usize) -> Self;
-    fn write(stack: &mut Stack, addr: usize, v: Self);
-}
-
-impl ReadWrite for i32 {
-    fn read(stack: &Stack, addr: usize) -> Self {
-        i32::from_le_bytes(stack.read_bytes(addr))
-    }
-    fn write(stack: &mut Stack, addr: usize, v: Self) {
-        stack.write_bytes(addr, &v.to_le_bytes());
-    }
-}
-
-impl ReadWrite for i64 {
-    fn read(stack: &Stack, addr: usize) -> Self {
-        i64::from_le_bytes(stack.read_bytes(addr))
-    }
-    fn write(stack: &mut Stack, addr: usize, v: Self) {
-        stack.write_bytes(addr, &v.to_le_bytes());
-    }
-}
-
-impl ReadWrite for f32 {
-    fn read(stack: &Stack, addr: usize) -> Self {
-        f32::from_le_bytes(stack.read_bytes(addr))
-    }
-    fn write(stack: &mut Stack, addr: usize, v: Self) {
-        stack.write_bytes(addr, &v.to_le_bytes());
-    }
-}
-
-impl ReadWrite for f64 {
-    fn read(stack: &Stack, addr: usize) -> Self {
-        f64::from_le_bytes(stack.read_bytes(addr))
-    }
-    fn write(stack: &mut Stack, addr: usize, v: Self) {
-        stack.write_bytes(addr, &v.to_le_bytes());
-    }
-}
-
 impl Stack {
     pub fn new() -> Self {
         Stack {
@@ -177,28 +136,12 @@ impl Stack {
         StackAccess::top(self)
     }
 
-    fn read_bytes<'a, T>(&'a self, addr: usize) -> T
-    where
-        T: TryFrom<&'a [u8]>,
-        T::Error: fmt::Debug,
-    {
-        self.bytes[addr..addr + size_of::<T>()]
-            .try_into()
-            .expect("read bytes")
-    }
-
-    fn write_bytes(&mut self, addr: usize, bytes: &[u8]) {
-        for i in 0..bytes.len() {
-            self.bytes[addr + i] = bytes[i];
-        }
-    }
-
     pub fn write<V: ReadWrite>(&mut self, addr: usize, v: V) {
-        ReadWrite::write(self, addr, v)
+        ReadWrite::write(&mut self.bytes, addr, v)
     }
 
     pub fn read<V: ReadWrite>(&self, addr: usize) -> V {
-        ReadWrite::read(self, addr)
+        ReadWrite::read(&self.bytes, addr)
     }
 
     pub fn write_any(&mut self, addr: usize, v: Value) {

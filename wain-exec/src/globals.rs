@@ -1,52 +1,11 @@
 use crate::trap::{Result, Trap};
-use crate::value::Value;
-use std::convert::{TryFrom, TryInto};
-use std::fmt;
-use std::mem::size_of;
+use crate::value::{ReadWrite, Value};
 use wain_ast::{Global, GlobalKind, InsnKind};
-
-pub trait GlobalAccess {
-    fn set(globals: &mut Globals, idx: u32, v: Self);
-    fn get(globals: &Globals, idx: u32) -> Self;
-}
-
-impl GlobalAccess for i32 {
-    fn set(globals: &mut Globals, idx: u32, v: Self) {
-        globals.set_bytes(idx, &v.to_le_bytes())
-    }
-    fn get(globals: &Globals, idx: u32) -> Self {
-        Self::from_le_bytes(globals.get_bytes(idx))
-    }
-}
-impl GlobalAccess for i64 {
-    fn set(globals: &mut Globals, idx: u32, v: Self) {
-        globals.set_bytes(idx, &v.to_le_bytes())
-    }
-    fn get(globals: &Globals, idx: u32) -> Self {
-        Self::from_le_bytes(globals.get_bytes(idx))
-    }
-}
-impl GlobalAccess for f32 {
-    fn set(globals: &mut Globals, idx: u32, v: Self) {
-        globals.set_bytes(idx, &v.to_le_bytes())
-    }
-    fn get(globals: &Globals, idx: u32) -> Self {
-        Self::from_le_bytes(globals.get_bytes(idx))
-    }
-}
-impl GlobalAccess for f64 {
-    fn set(globals: &mut Globals, idx: u32, v: Self) {
-        globals.set_bytes(idx, &v.to_le_bytes())
-    }
-    fn get(globals: &Globals, idx: u32) -> Self {
-        Self::from_le_bytes(globals.get_bytes(idx))
-    }
-}
 
 // Fixed-size any values store indexed in advance
 #[cfg_attr(test, derive(Debug))]
 pub struct Globals {
-    values: Box<[u8]>,
+    bytes: Box<[u8]>,
     offsets: Box<[usize]>,
 }
 
@@ -77,47 +36,41 @@ impl Globals {
         }
 
         let mut idx = 0;
-        let mut values = vec![];
+        let mut bytes = vec![];
         for i in 0..ast.len() {
             offsets.push(idx);
             // Do not allocate space for imported global variables. They are defined in other
             // module instances
             match global_value(i, ast)? {
                 Value::I32(i) => {
-                    values.extend_from_slice(&i.to_le_bytes());
+                    bytes.extend_from_slice(&i.to_le_bytes());
                     idx += 4;
                 }
                 Value::I64(i) => {
-                    values.extend_from_slice(&i.to_le_bytes());
+                    bytes.extend_from_slice(&i.to_le_bytes());
                     idx += 8;
                 }
                 Value::F32(f) => {
-                    values.extend_from_slice(&f.to_le_bytes());
+                    bytes.extend_from_slice(&f.to_le_bytes());
                     idx += 4;
                 }
                 Value::F64(f) => {
-                    values.extend_from_slice(&f.to_le_bytes());
+                    bytes.extend_from_slice(&f.to_le_bytes());
                     idx += 8;
                 }
             }
         }
 
         Ok(Globals {
-            values: values.into_boxed_slice(),
+            bytes: bytes.into_boxed_slice(),
             offsets: offsets.into_boxed_slice(),
         })
     }
 
-    fn set_bytes(&mut self, idx: u32, bytes: &[u8]) {
+    pub fn set<V: ReadWrite>(&mut self, idx: u32, v: V) {
         assert!((idx as usize) < self.offsets.len());
         let offset = self.offsets[idx as usize];
-        for i in 0..bytes.len() {
-            self.values[offset + i] = bytes[i];
-        }
-    }
-
-    pub fn set<V: GlobalAccess>(&mut self, idx: u32, v: V) {
-        GlobalAccess::set(self, idx, v)
+        ReadWrite::write(&mut self.bytes, offset, v);
     }
 
     pub fn set_any(&mut self, idx: u32, val: Value) {
@@ -129,19 +82,10 @@ impl Globals {
         }
     }
 
-    fn get_bytes<'a, T>(&'a self, idx: u32) -> T
-    where
-        T: TryFrom<&'a [u8]>,
-        T::Error: fmt::Debug,
-    {
+    pub fn get<V: ReadWrite>(&self, idx: u32) -> V {
+        assert!((idx as usize) < self.offsets.len());
         let offset = self.offsets[idx as usize];
-        self.values[offset..offset + size_of::<T>()]
-            .try_into()
-            .expect("4 bytes for i32 or f32 variable")
-    }
-
-    pub fn get<V: GlobalAccess>(&self, idx: u32) -> V {
-        GlobalAccess::get(self, idx)
+        ReadWrite::read(&self.bytes, offset)
     }
 }
 
