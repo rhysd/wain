@@ -1,76 +1,66 @@
 use crate::value::Value;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::f32;
 use std::f64;
+use std::fmt;
+use std::mem::size_of;
 use wain_ast::ValType;
 
 // Vec<Value> consumes too much space since its element size is always 64bits.
 // To use space more efficiently, here use u32 for storing values as bytes.
 
 pub struct Stack {
-    values: Vec<u8>, // actual values per byte
-    types: Vec<ValType>,
+    bytes: Vec<u8>,      // Bytes buffer for actual values
+    types: Vec<ValType>, // this stack is necessary to pop arbitrary value
 }
 
-pub trait StackAccess {
-    fn pop(stack: &mut Stack) -> Self;
+pub trait StackAccess: Sized {
+    fn pop(stack: &mut Stack) -> Self {
+        let v = Self::top(stack);
+        stack.erase_top(size_of::<Self>());
+        v
+    }
     fn push(stack: &mut Stack, v: Self);
     fn top(stack: &mut Stack) -> Self;
 }
 
 impl StackAccess for i32 {
-    fn pop(stack: &mut Stack) -> Self {
-        assert_eq!(stack.top_type(), ValType::I32);
-        i32::from_le_bytes(stack.pop_4_bytes())
-    }
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::I32);
     }
     fn top(stack: &mut Stack) -> Self {
         assert_eq!(stack.top_type(), ValType::I32);
-        i32::from_le_bytes(stack.top_4_bytes())
+        i32::from_le_bytes(stack.top_bytes())
     }
 }
 
 impl StackAccess for i64 {
-    fn pop(stack: &mut Stack) -> Self {
-        assert_eq!(stack.top_type(), ValType::I64);
-        i64::from_le_bytes(stack.pop_8_bytes())
-    }
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::I64);
     }
     fn top(stack: &mut Stack) -> Self {
         assert_eq!(stack.top_type(), ValType::I64);
-        i64::from_le_bytes(stack.top_8_bytes())
+        i64::from_le_bytes(stack.top_bytes())
     }
 }
 
 impl StackAccess for f32 {
-    fn pop(stack: &mut Stack) -> Self {
-        assert_eq!(stack.top_type(), ValType::F32);
-        f32::from_le_bytes(stack.pop_4_bytes())
-    }
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::F32);
     }
     fn top(stack: &mut Stack) -> Self {
         assert_eq!(stack.top_type(), ValType::F32);
-        f32::from_le_bytes(stack.top_4_bytes())
+        f32::from_le_bytes(stack.top_bytes())
     }
 }
 
 impl StackAccess for f64 {
-    fn pop(stack: &mut Stack) -> Self {
-        assert_eq!(stack.top_type(), ValType::F64);
-        f64::from_le_bytes(stack.pop_8_bytes())
-    }
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::F64);
     }
     fn top(stack: &mut Stack) -> Self {
         assert_eq!(stack.top_type(), ValType::F64);
-        f64::from_le_bytes(stack.top_8_bytes())
+        f64::from_le_bytes(stack.top_bytes())
     }
 }
 
@@ -108,7 +98,7 @@ pub trait ReadWrite {
 
 impl ReadWrite for i32 {
     fn read(stack: &Stack, addr: usize) -> Self {
-        i32::from_le_bytes(stack.read_4_bytes(addr))
+        i32::from_le_bytes(stack.read_bytes(addr))
     }
     fn write(stack: &mut Stack, addr: usize, v: Self) {
         stack.write_bytes(addr, &v.to_le_bytes());
@@ -117,7 +107,7 @@ impl ReadWrite for i32 {
 
 impl ReadWrite for i64 {
     fn read(stack: &Stack, addr: usize) -> Self {
-        i64::from_le_bytes(stack.read_8_bytes(addr))
+        i64::from_le_bytes(stack.read_bytes(addr))
     }
     fn write(stack: &mut Stack, addr: usize, v: Self) {
         stack.write_bytes(addr, &v.to_le_bytes());
@@ -126,7 +116,7 @@ impl ReadWrite for i64 {
 
 impl ReadWrite for f32 {
     fn read(stack: &Stack, addr: usize) -> Self {
-        f32::from_le_bytes(stack.read_4_bytes(addr))
+        f32::from_le_bytes(stack.read_bytes(addr))
     }
     fn write(stack: &mut Stack, addr: usize, v: Self) {
         stack.write_bytes(addr, &v.to_le_bytes());
@@ -135,7 +125,7 @@ impl ReadWrite for f32 {
 
 impl ReadWrite for f64 {
     fn read(stack: &Stack, addr: usize) -> Self {
-        f64::from_le_bytes(stack.read_8_bytes(addr))
+        f64::from_le_bytes(stack.read_bytes(addr))
     }
     fn write(stack: &mut Stack, addr: usize, v: Self) {
         stack.write_bytes(addr, &v.to_le_bytes());
@@ -145,7 +135,7 @@ impl ReadWrite for f64 {
 impl Stack {
     pub fn new() -> Self {
         Stack {
-            values: vec![],
+            bytes: vec![],
             types: vec![],
         }
     }
@@ -158,37 +148,25 @@ impl Stack {
 
     fn push_bytes(&mut self, bytes: &[u8], ty: ValType) {
         self.types.push(ty);
-        self.values.extend_from_slice(bytes);
+        self.bytes.extend_from_slice(bytes);
     }
 
     pub fn push<V: StackAccess>(&mut self, v: V) {
         StackAccess::push(self, v);
     }
 
-    fn top_4_bytes(&mut self) -> [u8; 4] {
-        self.values[self.values.len() - 4..]
-            .try_into()
-            .expect("top 4 bytes for 32bits value")
+    fn top_bytes<'a, T>(&'a self) -> T
+    where
+        T: TryFrom<&'a [u8]>,
+        T::Error: fmt::Debug,
+    {
+        let len = self.bytes.len() - size_of::<T>();
+        self.bytes[len..].try_into().expect("top bytes")
     }
 
-    fn pop_4_bytes(&mut self) -> [u8; 4] {
-        let b = self.top_4_bytes();
+    fn erase_top(&mut self, len: usize) {
         self.types.pop();
-        self.values.truncate(self.values.len() - 4);
-        b
-    }
-
-    fn top_8_bytes(&mut self) -> [u8; 8] {
-        self.values[self.values.len() - 8..]
-            .try_into()
-            .expect("top 8 bytes for 64bit value")
-    }
-
-    fn pop_8_bytes(&mut self) -> [u8; 8] {
-        let b = self.top_8_bytes();
-        self.types.pop();
-        self.values.truncate(self.values.len() - 8);
-        b
+        self.bytes.truncate(self.bytes.len() - len);
     }
 
     pub fn pop<V: StackAccess>(&mut self) -> V {
@@ -199,21 +177,19 @@ impl Stack {
         StackAccess::top(self)
     }
 
-    fn read_4_bytes(&self, addr: usize) -> [u8; 4] {
-        self.values[addr..addr + 4]
+    fn read_bytes<'a, T>(&'a self, addr: usize) -> T
+    where
+        T: TryFrom<&'a [u8]>,
+        T::Error: fmt::Debug,
+    {
+        self.bytes[addr..addr + size_of::<T>()]
             .try_into()
-            .expect("read 4 bytes")
-    }
-
-    fn read_8_bytes(&self, addr: usize) -> [u8; 8] {
-        self.values[addr..addr + 8]
-            .try_into()
-            .expect("read 8 bytes")
+            .expect("read bytes")
     }
 
     fn write_bytes(&mut self, addr: usize, bytes: &[u8]) {
         for i in 0..bytes.len() {
-            self.values[addr + i] = bytes[i];
+            self.bytes[addr + i] = bytes[i];
         }
     }
 
@@ -235,7 +211,7 @@ impl Stack {
     }
 
     fn top_addr(&self) -> usize {
-        self.values.len()
+        self.bytes.len()
     }
 
     fn top_idx(&self) -> usize {
@@ -243,7 +219,7 @@ impl Stack {
     }
 
     pub fn restore(&mut self, addr: usize, type_idx: usize) {
-        self.values.truncate(addr);
+        self.bytes.truncate(addr);
         self.types.truncate(type_idx);
     }
 

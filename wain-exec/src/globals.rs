@@ -1,6 +1,8 @@
 use crate::trap::{Result, Trap};
 use crate::value::Value;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
+use std::fmt;
+use std::mem::size_of;
 use wain_ast::{Global, GlobalKind, InsnKind};
 
 pub trait GlobalAccess {
@@ -10,34 +12,34 @@ pub trait GlobalAccess {
 
 impl GlobalAccess for i32 {
     fn set(globals: &mut Globals, idx: u32, v: Self) {
-        globals.set_4_bytes(idx, v.to_le_bytes())
+        globals.set_bytes(idx, &v.to_le_bytes())
     }
     fn get(globals: &Globals, idx: u32) -> Self {
-        Self::from_le_bytes(globals.get_4_bytes(idx))
+        Self::from_le_bytes(globals.get_bytes(idx))
     }
 }
 impl GlobalAccess for i64 {
     fn set(globals: &mut Globals, idx: u32, v: Self) {
-        globals.set_8_bytes(idx, v.to_le_bytes())
+        globals.set_bytes(idx, &v.to_le_bytes())
     }
     fn get(globals: &Globals, idx: u32) -> Self {
-        Self::from_le_bytes(globals.get_8_bytes(idx))
+        Self::from_le_bytes(globals.get_bytes(idx))
     }
 }
 impl GlobalAccess for f32 {
     fn set(globals: &mut Globals, idx: u32, v: Self) {
-        globals.set_4_bytes(idx, v.to_le_bytes())
+        globals.set_bytes(idx, &v.to_le_bytes())
     }
     fn get(globals: &Globals, idx: u32) -> Self {
-        Self::from_le_bytes(globals.get_4_bytes(idx))
+        Self::from_le_bytes(globals.get_bytes(idx))
     }
 }
 impl GlobalAccess for f64 {
     fn set(globals: &mut Globals, idx: u32, v: Self) {
-        globals.set_8_bytes(idx, v.to_le_bytes())
+        globals.set_bytes(idx, &v.to_le_bytes())
     }
     fn get(globals: &Globals, idx: u32) -> Self {
-        Self::from_le_bytes(globals.get_8_bytes(idx))
+        Self::from_le_bytes(globals.get_bytes(idx))
     }
 }
 
@@ -45,7 +47,7 @@ impl GlobalAccess for f64 {
 #[cfg_attr(test, derive(Debug))]
 pub struct Globals {
     values: Box<[u8]>,
-    offsets: Box<[u32]>,
+    offsets: Box<[usize]>,
 }
 
 impl Globals {
@@ -106,18 +108,10 @@ impl Globals {
         })
     }
 
-    fn set_4_bytes(&mut self, idx: u32, bytes: [u8; 4]) {
+    fn set_bytes(&mut self, idx: u32, bytes: &[u8]) {
         assert!((idx as usize) < self.offsets.len());
-        let offset = self.offsets[idx as usize] as usize;
-        for i in 0..4 {
-            self.values[offset + i] = bytes[i];
-        }
-    }
-
-    fn set_8_bytes(&mut self, idx: u32, bytes: [u8; 8]) {
-        assert!((idx as usize) < self.offsets.len());
-        let offset = self.offsets[idx as usize] as usize;
-        for i in 0..8 {
+        let offset = self.offsets[idx as usize];
+        for i in 0..bytes.len() {
             self.values[offset + i] = bytes[i];
         }
     }
@@ -135,20 +129,15 @@ impl Globals {
         }
     }
 
-    fn get_4_bytes(&self, idx: u32) -> [u8; 4] {
-        assert!((idx as usize) < self.offsets.len());
-        let offset = self.offsets[idx as usize] as usize;
-        self.values[offset..offset + 4]
+    fn get_bytes<'a, T>(&'a self, idx: u32) -> T
+    where
+        T: TryFrom<&'a [u8]>,
+        T::Error: fmt::Debug,
+    {
+        let offset = self.offsets[idx as usize];
+        self.values[offset..offset + size_of::<T>()]
             .try_into()
             .expect("4 bytes for i32 or f32 variable")
-    }
-
-    fn get_8_bytes(&self, idx: u32) -> [u8; 8] {
-        assert!((idx as usize) < self.offsets.len());
-        let offset = self.offsets[idx as usize] as usize;
-        self.values[offset..offset + 8]
-            .try_into()
-            .expect("4 bytes for i64 or f64 variable")
     }
 
     pub fn get<V: GlobalAccess>(&self, idx: u32) -> V {
