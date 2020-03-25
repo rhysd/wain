@@ -91,7 +91,7 @@ impl<'m, 'a> Machine<'m, 'a> {
         let (locals, body) = match &func.kind {
             ast::FuncKind::Import(i) => {
                 if i.mod_name.0 == "env" && i.name.0 == "putchar" {
-                    return self.putchar(func.start).map(|_| ExecState::Continue);
+                    return self.putchar().map(|_| ExecState::Continue);
                 } else {
                     return Err(Trap::unknown_import(i, "function", func.start));
                 }
@@ -103,6 +103,10 @@ impl<'m, 'a> Machine<'m, 'a> {
 
         // Push call frame
         let frame = CallFrame::new(&self.stack, &fty.params, locals);
+
+        for l in locals {
+            self.stack.push(Value::default(*l));
+        }
 
         for insn in body.iter() {
             match insn.execute(self, &frame)? {
@@ -146,14 +150,16 @@ impl<'m, 'a> Machine<'m, 'a> {
         Ok(Run::Warning("no entrypoint found. 'start' section nor '_start' exported function is set to the module"))
     }
 
-    fn putchar(&mut self, offset: usize) -> Result<()> {
+    fn putchar(&mut self) -> Result<()> {
         use std::io::Write;
         let v: i32 = self.stack.pop();
         let b = v as u8;
-        match io::stdout().write(&[b]) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Trap::new(TrapReason::IoError(e), offset)),
-        }
+        let ret = match io::stdout().write(&[b]) {
+            Ok(_) => b as i32,
+            Err(_) => -1, // EOF
+        };
+        self.stack.push(ret);
+        Ok(())
     }
 
     fn mem_addr(&mut self, mem: &ast::Mem) -> usize {
@@ -246,18 +252,15 @@ impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for ast::Instruction {
                 machine.stack.pop_label(label);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-loop
-            Loop { ty, body } => {
-                let label = machine.stack.push_label(ty);
-                loop {
-                    match body.execute(machine, frame)? {
-                        ExecState::Continue => {} // next iteration
-                        ExecState::Ret => return Ok(ExecState::Ret),
-                        ExecState::Breaking(0) => break,
-                        ExecState::Breaking(level) => return Ok(ExecState::Breaking(level - 1)),
-                    }
+            Loop { body, .. } => loop {
+                // push_label is not necessary since this loop is never broken
+                match body.execute(machine, frame)? {
+                    ExecState::Continue => {} // next iteration
+                    ExecState::Ret => return Ok(ExecState::Ret),
+                    ExecState::Breaking(0) => continue,
+                    ExecState::Breaking(level) => return Ok(ExecState::Breaking(level - 1)),
                 }
-                machine.stack.pop_label(label);
-            }
+            },
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-if
             If {
                 ty,

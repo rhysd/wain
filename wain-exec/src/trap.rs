@@ -1,5 +1,4 @@
 use std::fmt;
-use std::io;
 use wain_ast::{Import, ValType};
 
 #[cfg_attr(test, derive(Debug))]
@@ -41,7 +40,6 @@ pub enum TrapReason {
         operation: &'static str,
         ty: &'static str,
     },
-    IoError(io::Error),
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -146,7 +144,6 @@ impl fmt::Display for Trap {
                 "cannot {} {} value at 0x{:x} due to out of range of memory. memory size is 0x{:x}",
                 operation, ty, addr, max,
             )?,
-            IoError(e) => write!(f, "I/O error: {}", e)?,
         }
         write!(
             f,

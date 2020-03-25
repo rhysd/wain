@@ -371,7 +371,7 @@ impl InsnKind {
             Drop => "drop",
             Select => "select",
             LocalGet(_) => "local.get",
-            LocalSet(_) => "local.wet",
+            LocalSet(_) => "local.set",
             LocalTee(_) => "local.tee",
             GlobalGet(_) => "global.get",
             GlobalSet(_) => "global.set",
