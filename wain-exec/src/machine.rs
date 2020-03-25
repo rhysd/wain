@@ -189,9 +189,25 @@ impl<'m, 'a> Machine<'m, 'a> {
         self.stack.push(ret);
     }
 
-    // TODO: https://webassembly.github.io/spec/core/exec/instructions.html#exec-testop
-    // TODO: https://webassembly.github.io/spec/core/exec/instructions.html#exec-relop
-    // TODO: https://webassembly.github.io/spec/core/exec/instructions.html#exec-cvtop
+    // https://webassembly.github.io/spec/core/exec/instructions.html#exec-testop
+    fn testop<T: StackAccess, F: FnOnce(T) -> bool>(&mut self, op: F) {
+        let ret = op(self.stack.pop());
+        self.stack.push::<i32>(if ret { 1 } else { 0 });
+    }
+
+    // https://webassembly.github.io/spec/core/exec/instructions.html#exec-relop
+    fn relop<T: StackAccess, F: FnOnce(T, T) -> bool>(&mut self, op: F) {
+        let c2 = self.stack.pop();
+        let c1 = self.stack.pop();
+        let ret = op(c1, c2);
+        self.stack.push::<i32>(if ret { 1 } else { 0 });
+    }
+
+    // https://webassembly.github.io/spec/core/exec/instructions.html#exec-cvtop
+    fn cvtop<T: StackAccess, U: StackAccess, F: FnOnce(T) -> U>(&mut self, op: F) {
+        let ret = op(self.stack.pop());
+        self.stack.push(ret);
+    }
 }
 
 trait Execute<'f, 'm, 'a> {
@@ -466,204 +482,194 @@ impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for ast::Instruction {
             I64Const(i) => machine.stack.push(*i),
             F32Const(f) => machine.stack.push(*f),
             F64Const(f) => machine.stack.push(*f),
-            // i32 operations
+            // Integer operations
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-iclz
             I32Clz => machine.unop::<i32, _>(|v| v.leading_zeros() as i32),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ictz
-            I32Ctz => machine.unop::<i32, _>(|v| v.trailing_zeros() as i32),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ipopcnt
-            I32Popcnt => machine.unop::<i32, _>(|v| v.count_ones() as i32),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-iadd
-            I32Add => machine.binop::<i32, _>(|l, r| l.overflowing_add(r).0),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-isub
-            I32Sub => machine.binop::<i32, _>(|l, r| l.overflowing_sub(r).0),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-imul
-            I32Mul => machine.binop::<i32, _>(|l, r| l.overflowing_mul(r).0),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-idiv-s
-            // Note: overflowing_div is unnecessary since overflow case is undefined behavior
-            I32DivS => machine.binop::<i32, _>(|l, r| l / r),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-idiv-u
-            I32DivU => machine.binop::<i32, _>(|l, r| (l as u32 / r as u32) as i32),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-irem-s
-            I32RemS => machine.binop::<i32, _>(|l, r| l % r),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-irem-u
-            I32RemU => machine.binop::<i32, _>(|l, r| (l as u32 % r as u32) as i32),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-iand
-            I32And => machine.binop::<i32, _>(|l, r| l & r),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ior
-            I32Or => machine.binop::<i32, _>(|l, r| l | r),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ixor
-            I32Xor => machine.binop::<i32, _>(|l, r| l ^ r),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishl
-            I32Shl => machine.binop::<i32, _>(|l, r| l.overflowing_shl(r as u32).0),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishr-s
-            I32ShrS => machine.binop::<i32, _>(|l, r| l.overflowing_shr(r as u32).0),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishr-u
-            I32ShrU => machine.binop::<i32, _>(|l, r| (l as u32 >> r as u32) as i32),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-irotl
-            I32Rotl => machine.binop::<i32, _>(|l, r| l.rotate_left(r as u32)),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-irotr
-            I32Rotr => machine.binop::<i32, _>(|l, r| l.rotate_right(r as u32)),
-            // i64 operations
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-iclz
             I64Clz => machine.unop::<i64, _>(|v| v.leading_zeros() as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ictz
+            I32Ctz => machine.unop::<i32, _>(|v| v.trailing_zeros() as i32),
             I64Ctz => machine.unop::<i64, _>(|v| v.trailing_zeros() as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ipopcnt
+            I32Popcnt => machine.unop::<i32, _>(|v| v.count_ones() as i32),
             I64Popcnt => machine.unop::<i64, _>(|v| v.count_ones() as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-iadd
+            I32Add => machine.binop::<i32, _>(|l, r| l.overflowing_add(r).0),
             I64Add => machine.binop::<i64, _>(|l, r| l.overflowing_add(r).0),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-isub
+            I32Sub => machine.binop::<i32, _>(|l, r| l.overflowing_sub(r).0),
             I64Sub => machine.binop::<i64, _>(|l, r| l.overflowing_sub(r).0),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-imul
+            I32Mul => machine.binop::<i32, _>(|l, r| l.overflowing_mul(r).0),
             I64Mul => machine.binop::<i64, _>(|l, r| l.overflowing_mul(r).0),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-idiv-s
             // Note: overflowing_div is unnecessary since overflow case is undefined behavior
+            I32DivS => machine.binop::<i32, _>(|l, r| l / r),
             I64DivS => machine.binop::<i64, _>(|l, r| l / r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-idiv-u
+            I32DivU => machine.binop::<i32, _>(|l, r| (l as u32 / r as u32) as i32),
             I64DivU => machine.binop::<i64, _>(|l, r| (l as u64 / r as u64) as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irem-s
+            I32RemS => machine.binop::<i32, _>(|l, r| l % r),
             I64RemS => machine.binop::<i64, _>(|l, r| l % r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irem-u
+            I32RemU => machine.binop::<i32, _>(|l, r| (l as u32 % r as u32) as i32),
             I64RemU => machine.binop::<i64, _>(|l, r| (l as u64 % r as u64) as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-iand
+            I32And => machine.binop::<i32, _>(|l, r| l & r),
             I64And => machine.binop::<i64, _>(|l, r| l & r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ior
+            I32Or => machine.binop::<i32, _>(|l, r| l | r),
             I64Or => machine.binop::<i64, _>(|l, r| l | r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ixor
+            I32Xor => machine.binop::<i32, _>(|l, r| l ^ r),
             I64Xor => machine.binop::<i64, _>(|l, r| l ^ r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishl
+            I32Shl => machine.binop::<i32, _>(|l, r| l.overflowing_shl(r as u32).0),
             I64Shl => machine.binop::<i32, _>(|l, r| l.overflowing_shl(r as u32).0),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishr-s
+            I32ShrS => machine.binop::<i32, _>(|l, r| l.overflowing_shr(r as u32).0),
             I64ShrS => machine.binop::<i64, _>(|l, r| l.overflowing_shr(r as u32).0),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishr-u
+            I32ShrU => machine.binop::<i32, _>(|l, r| (l as u32 >> r as u32) as i32),
             I64ShrU => machine.binop::<i64, _>(|l, r| (l as u64 >> r as u64) as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irotl
+            I32Rotl => machine.binop::<i32, _>(|l, r| l.rotate_left(r as u32)),
             I64Rotl => machine.binop::<i64, _>(|l, r| l.rotate_left(r as u32)),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irotr
+            I32Rotr => machine.binop::<i32, _>(|l, r| l.rotate_right(r as u32)),
             I64Rotr => machine.binop::<i64, _>(|l, r| l.rotate_right(r as u32)),
-            // f32 operations
+            // Float number operations
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fabs
             F32Abs => machine.unop::<f32, _>(|f| f.abs()),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fneg
-            F32Neg => machine.unop::<f32, _>(|f| -f),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fceil
-            F32Ceil => machine.unop::<f32, _>(|f| f.ceil()),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ffloor
-            F32Floor => machine.unop::<f32, _>(|f| f.floor()),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ftrunc
-            F32Trunc => machine.unop::<f32, _>(|f| f.trunc()),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fnearest
-            F32Nearest => machine.unop::<f32, _>(|f| f.round()),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fsqrt
-            F32Sqrt => machine.unop::<f32, _>(|f| f.sqrt()),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fadd
-            F32Add => machine.binop::<f32, _>(|l, r| l + r),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fsub
-            F32Sub => machine.binop::<f32, _>(|l, r| l - r),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmul
-            F32Mul => machine.binop::<f32, _>(|l, r| l * r),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fdiv
-            F32Div => machine.binop::<f32, _>(|l, r| l / r),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmin
-            F32Min => machine.binop::<f32, _>(|l, r| l.min(r)),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmax
-            F32Max => machine.binop::<f32, _>(|l, r| l.max(r)),
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fcopysign
-            F32Copysign => machine.binop::<f32, _>(|l, r| l.copysign(r)),
-            // f64 operations
-            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fabs
             F64Abs => machine.unop::<f64, _>(|f| f.abs()),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fneg
+            F32Neg => machine.unop::<f32, _>(|f| -f),
             F64Neg => machine.unop::<f64, _>(|f| -f),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fceil
+            F32Ceil => machine.unop::<f32, _>(|f| f.ceil()),
             F64Ceil => machine.unop::<f64, _>(|f| f.ceil()),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ffloor
+            F32Floor => machine.unop::<f32, _>(|f| f.floor()),
             F64Floor => machine.unop::<f64, _>(|f| f.floor()),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ftrunc
+            F32Trunc => machine.unop::<f32, _>(|f| f.trunc()),
             F64Trunc => machine.unop::<f64, _>(|f| f.trunc()),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fnearest
+            F32Nearest => machine.unop::<f32, _>(|f| f.round()),
             F64Nearest => machine.unop::<f64, _>(|f| f.round()),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fsqrt
+            F32Sqrt => machine.unop::<f32, _>(|f| f.sqrt()),
             F64Sqrt => machine.unop::<f64, _>(|f| f.sqrt()),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fadd
+            F32Add => machine.binop::<f32, _>(|l, r| l + r),
             F64Add => machine.binop::<f64, _>(|l, r| l + r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fsub
+            F32Sub => machine.binop::<f32, _>(|l, r| l - r),
             F64Sub => machine.binop::<f64, _>(|l, r| l - r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmul
+            F32Mul => machine.binop::<f32, _>(|l, r| l * r),
             F64Mul => machine.binop::<f64, _>(|l, r| l * r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fdiv
+            F32Div => machine.binop::<f32, _>(|l, r| l / r),
             F64Div => machine.binop::<f64, _>(|l, r| l / r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmin
+            F32Min => machine.binop::<f32, _>(|l, r| l.min(r)),
             F64Min => machine.binop::<f64, _>(|l, r| l.min(r)),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmax
+            F32Max => machine.binop::<f32, _>(|l, r| l.max(r)),
             F64Max => machine.binop::<f64, _>(|l, r| l.max(r)),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fcopysign
+            F32Copysign => machine.binop::<f32, _>(|l, r| l.copysign(r)),
             F64Copysign => machine.binop::<f64, _>(|l, r| l.copysign(r)),
-            // i32 comparison
-            I32Eqz => unimplemented!("I32Eqz"),
-            I32Eq => unimplemented!("I32Eq"),
-            I32Ne => unimplemented!("I32Ne"),
-            I32LtS => unimplemented!("I32LtS"),
-            I32LtU => unimplemented!("I32LtU"),
-            I32GtS => unimplemented!("I32GtS"),
-            I32GtU => unimplemented!("I32GtU"),
-            I32LeS => unimplemented!("I32LeS"),
-            I32LeU => unimplemented!("I32LeU"),
-            I32GeS => unimplemented!("I32GeS"),
-            I32GeU => unimplemented!("I32GeU"),
-            // i64 comparison
-            I64Eqz => unimplemented!("I64Eqz"),
-            I64Eq => unimplemented!("I64Eq"),
-            I64Ne => unimplemented!("I64Ne"),
-            I64LtS => unimplemented!("I64LtS"),
-            I64LtU => unimplemented!("I64LtU"),
-            I64GtS => unimplemented!("I64GtS"),
-            I64GtU => unimplemented!("I64GtU"),
-            I64LeS => unimplemented!("I64LeS"),
-            I64LeU => unimplemented!("I64LeU"),
-            I64GeS => unimplemented!("I64GeS"),
-            I64GeU => unimplemented!("I64GeU"),
-            // f32 comparison
-            F32Eq => unimplemented!("F32Eq"),
-            F32Ne => unimplemented!("F32Ne"),
-            F32Lt => unimplemented!("F32Lt"),
-            F32Gt => unimplemented!("F32Gt"),
-            F32Le => unimplemented!("F32Le"),
-            F32Ge => unimplemented!("F32Ge"),
-            // f64 comparison
-            F64Eq => unimplemented!("F64Eq"),
-            F64Ne => unimplemented!("F64Ne"),
-            F64Lt => unimplemented!("F64Lt"),
-            F64Gt => unimplemented!("F64Gt"),
-            F64Le => unimplemented!("F64Le"),
-            F64Ge => unimplemented!("F64Ge"),
+            // Integer comparison
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ieqz
+            I32Eqz => machine.testop::<i32, _>(|i| i == 0),
+            I64Eqz => machine.testop::<i64, _>(|i| i == 0),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ieq
+            I32Eq => machine.relop::<i32, _>(|l, r| l == r),
+            I64Eq => machine.relop::<i64, _>(|l, r| l == r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ine
+            I32Ne => machine.relop::<i32, _>(|l, r| l != r),
+            I64Ne => machine.relop::<i64, _>(|l, r| l != r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ilt-s
+            I32LtS => machine.relop::<i32, _>(|l, r| l < r),
+            I64LtS => machine.relop::<i64, _>(|l, r| l < r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ilt-u
+            I32LtU => machine.relop::<i32, _>(|l, r| (l as u32) < r as u32),
+            I64LtU => machine.relop::<i64, _>(|l, r| (l as u64) < r as u64),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-igt-s
+            I32GtS => machine.relop::<i32, _>(|l, r| l > r),
+            I64GtS => machine.relop::<i64, _>(|l, r| l > r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-igt-u
+            I32GtU => machine.relop::<i32, _>(|l, r| l as u32 > r as u32),
+            I64GtU => machine.relop::<i64, _>(|l, r| l as u64 > r as u64),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ile-s
+            I32LeS => machine.relop::<i32, _>(|l, r| l <= r),
+            I64LeS => machine.relop::<i64, _>(|l, r| l <= r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ile-u
+            I32LeU => machine.relop::<i32, _>(|l, r| l as u32 <= r as u32),
+            I64LeU => machine.relop::<i64, _>(|l, r| l as u64 <= r as u64),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ige-s
+            I32GeS => machine.relop::<i32, _>(|l, r| l >= r),
+            I64GeS => machine.relop::<i64, _>(|l, r| l >= r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-ige-u
+            I32GeU => machine.relop::<i32, _>(|l, r| l as u32 >= r as u32),
+            I64GeU => machine.relop::<i64, _>(|l, r| l as u64 >= r as u64),
+            // Float number comparison
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-feq
+            F32Eq => machine.relop::<f32, _>(|l, r| l == r),
+            F64Eq => machine.relop::<f64, _>(|l, r| l == r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fne
+            F32Ne => machine.relop::<f32, _>(|l, r| l != r),
+            F64Ne => machine.relop::<f64, _>(|l, r| l != r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-flt
+            F32Lt => machine.relop::<f32, _>(|l, r| l < r),
+            F64Lt => machine.relop::<f64, _>(|l, r| l < r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fgt
+            F32Gt => machine.relop::<f32, _>(|l, r| l > r),
+            F64Gt => machine.relop::<f64, _>(|l, r| l > r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fle
+            F32Le => machine.relop::<f32, _>(|l, r| l <= r),
+            F64Le => machine.relop::<f64, _>(|l, r| l <= r),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-fge
+            F32Ge => machine.relop::<f32, _>(|l, r| l >= r),
+            F64Ge => machine.relop::<f64, _>(|l, r| l >= r),
             // Conversion
-            I32WrapI64 => unimplemented!("I32WrapI64"),
-            I32TruncF32S => unimplemented!("I32TruncF32S"),
-            I32TruncF32U => unimplemented!("I32TruncF32U"),
-            I32TruncF64S => unimplemented!("I32TruncF64S"),
-            I32TruncF64U => unimplemented!("I32TruncF64U"),
-            I64ExtendI32S => unimplemented!("I64ExtendI32S"),
-            I64ExtendI32U => unimplemented!("I64ExtendI32U"),
-            I64TruncF32S => unimplemented!("I64TruncF32S"),
-            I64TruncF32U => unimplemented!("I64TruncF32U"),
-            I64TruncF64S => unimplemented!("I64TruncF64S"),
-            I64TruncF64U => unimplemented!("I64TruncF64U"),
-            F32ConvertI32S => unimplemented!("F32ConvertI32S"),
-            F32ConvertI32U => unimplemented!("F32ConvertI32U"),
-            F32ConvertI64S => unimplemented!("F32ConvertI64S"),
-            F32ConvertI64U => unimplemented!("F32ConvertI64U"),
-            F32DemoteF64 => unimplemented!("F32DemoteF64"),
-            F64ConvertI32S => unimplemented!("F64ConvertI32S"),
-            F64ConvertI32U => unimplemented!("F64ConvertI32U"),
-            F64ConvertI64S => unimplemented!("F64ConvertI64S"),
-            F64ConvertI64U => unimplemented!("F64ConvertI64U"),
-            F64PromoteF32 => unimplemented!("F64PromoteF32"),
-            I32ReinterpretF32 => unimplemented!("I32ReinterpretF32"),
-            I64ReinterpretF64 => unimplemented!("I64ReinterpretF64"),
-            F32ReinterpretI32 => unimplemented!("F32ReinterpretI32"),
-            F64ReinterpretI64 => unimplemented!("F64ReinterpretI64"),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-extend-u
+            I64ExtendI32U => machine.cvtop::<i32, i64, _>(|v| v as u32 as i64),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-extend-s
+            I64ExtendI32S => machine.cvtop::<i32, i64, _>(|v| v as i64),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-wrap
+            I32WrapI64 => machine.cvtop::<i64, i32, _>(|v| v as i32),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-trunc-u
+            I32TruncF32U => machine.cvtop::<f32, i32, _>(|v| v as u32 as i32),
+            I32TruncF64U => machine.cvtop::<f64, i32, _>(|v| v as u32 as i32),
+            I64TruncF32U => machine.cvtop::<f32, i64, _>(|v| v as u64 as i64),
+            I64TruncF64U => machine.cvtop::<f64, i64, _>(|v| v as u64 as i64),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-trunc-s
+            I32TruncF32S => machine.cvtop::<f32, i32, _>(|v| v as i32),
+            I32TruncF64S => machine.cvtop::<f64, i32, _>(|v| v as i32),
+            I64TruncF32S => machine.cvtop::<f32, i64, _>(|v| v as i64),
+            I64TruncF64S => machine.cvtop::<f64, i64, _>(|v| v as i64),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-promote
+            F64PromoteF32 => machine.cvtop::<f32, f64, _>(|v| v as f64),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-demote
+            F32DemoteF64 => machine.cvtop::<f64, f32, _>(|v| v as f32),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-convert-u
+            F32ConvertI32U => machine.cvtop::<i32, f32, _>(|v| v as u32 as f32),
+            F32ConvertI64U => machine.cvtop::<i64, f32, _>(|v| v as u64 as f32),
+            F64ConvertI32U => machine.cvtop::<i32, f64, _>(|v| v as u32 as f64),
+            F64ConvertI64U => machine.cvtop::<i64, f64, _>(|v| v as u64 as f64),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-convert-s
+            F32ConvertI32S => machine.cvtop::<i32, f32, _>(|v| v as f32),
+            F32ConvertI64S => machine.cvtop::<i64, f32, _>(|v| v as f32),
+            F64ConvertI32S => machine.cvtop::<i32, f64, _>(|v| v as f64),
+            F64ConvertI64S => machine.cvtop::<i64, f64, _>(|v| v as f64),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-reinterpret
+            I32ReinterpretF32 => machine.cvtop::<f32, i32, _>(|v| v as i32),
+            I64ReinterpretF64 => machine.cvtop::<f64, i64, _>(|v| v as i64),
+            F32ReinterpretI32 => machine.cvtop::<i32, f32, _>(|v| v as f32),
+            F64ReinterpretI64 => machine.cvtop::<i64, f64, _>(|v| v as f64),
         }
         Ok(ExecState::Continue)
     }
