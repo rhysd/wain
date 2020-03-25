@@ -3,7 +3,7 @@ use crate::memory::Memory;
 use crate::stack::{CallFrame, Stack};
 use crate::table::Table;
 use crate::trap::{Result, Trap, TrapReason};
-use crate::value::Value;
+use crate::value::{LittleEndian, Value};
 use std::io;
 use wain_ast as ast;
 
@@ -154,6 +154,25 @@ impl<'m, 'a> Machine<'m, 'a> {
             Ok(_) => Ok(()),
             Err(e) => Err(Trap::new(TrapReason::IoError(e), offset)),
         }
+    }
+
+    fn mem_addr(&mut self, mem: &ast::Mem) -> usize {
+        let mut addr = self.stack.pop::<i32>() as usize;
+        if let Some(off) = mem.offset {
+            addr += off as usize;
+        }
+        addr
+    }
+
+    fn load<V: LittleEndian>(&mut self, mem: &ast::Mem, at: usize) -> Result<V> {
+        let addr = self.mem_addr(mem);
+        Ok(self.memory.load(addr, at)?)
+    }
+
+    fn store<V: LittleEndian>(&mut self, mem: &ast::Mem, v: V, at: usize) -> Result<()> {
+        let addr = self.mem_addr(mem);
+        self.memory.store(addr, v, at)?;
+        Ok(())
     }
 }
 
@@ -321,29 +340,101 @@ impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-global-set
             GlobalSet(globalidx) => machine.globals.set_any(*globalidx, machine.stack.top()),
             // Memory instructions
-            I32Load(mem) => unimplemented!("I32Load"),
-            I64Load(mem) => unimplemented!("I64Load"),
-            F32Load(mem) => unimplemented!("F32Load"),
-            F64Load(mem) => unimplemented!("F64Load"),
-            I32Load8S(mem) => unimplemented!("I32Load8S"),
-            I32Load8U(mem) => unimplemented!("I32Load8U"),
-            I32Load16S(mem) => unimplemented!("I32Load16S"),
-            I32Load16U(mem) => unimplemented!("I32Load16U"),
-            I64Load8S(mem) => unimplemented!("I64Load8S"),
-            I64Load8U(mem) => unimplemented!("I64Load8U"),
-            I64Load16S(mem) => unimplemented!("I64Load16S"),
-            I64Load16U(mem) => unimplemented!("I64Load16U"),
-            I64Load32S(mem) => unimplemented!("I64Load32S"),
-            I64Load32U(mem) => unimplemented!("I64Load32U"),
-            I32Store(mem) => unimplemented!("I32Store"),
-            I64Store(mem) => unimplemented!("I64Store"),
-            F32Store(mem) => unimplemented!("F32Store"),
-            F64Store(mem) => unimplemented!("F64Store"),
-            I32Store8(mem) => unimplemented!("I32Store8"),
-            I32Store16(mem) => unimplemented!("I32Store16"),
-            I64Store8(mem) => unimplemented!("I64Store8"),
-            I64Store16(mem) => unimplemented!("I64Store16"),
-            I64Store32(mem) => unimplemented!("I64Store32"),
+            // https://webassembly.github.io/spec/core/exec/instructions.html#and
+            I32Load(mem) => {
+                let v: i32 = machine.load(mem, self.start)?;
+                machine.stack.push(v);
+            }
+            I64Load(mem) => {
+                let v: i64 = machine.load(mem, self.start)?;
+                machine.stack.push(v);
+            }
+            F32Load(mem) => {
+                let v: f32 = machine.load(mem, self.start)?;
+                machine.stack.push(v);
+            }
+            F64Load(mem) => {
+                let v: f64 = machine.load(mem, self.start)?;
+                machine.stack.push(v);
+            }
+            I32Load8S(mem) => {
+                let v: i8 = machine.load(mem, self.start)?;
+                machine.stack.push(v as i32);
+            }
+            I32Load8U(mem) => {
+                let v: u8 = machine.load(mem, self.start)?;
+                machine.stack.push(v as i32);
+            }
+            I32Load16S(mem) => {
+                let v: i16 = machine.load(mem, self.start)?;
+                machine.stack.push(v as i32);
+            }
+            I32Load16U(mem) => {
+                let v: u16 = machine.load(mem, self.start)?;
+                machine.stack.push(v as i32);
+            }
+            I64Load8S(mem) => {
+                let v: i8 = machine.load(mem, self.start)?;
+                machine.stack.push(v as i64);
+            }
+            I64Load8U(mem) => {
+                let v: u8 = machine.load(mem, self.start)?;
+                machine.stack.push(v as i64);
+            }
+            I64Load16S(mem) => {
+                let v: i16 = machine.load(mem, self.start)?;
+                machine.stack.push(v as i64);
+            }
+            I64Load16U(mem) => {
+                let v: u16 = machine.load(mem, self.start)?;
+                machine.stack.push(v as i64);
+            }
+            I64Load32S(mem) => {
+                let v: i32 = machine.load(mem, self.start)?;
+                machine.stack.push(v as i64);
+            }
+            I64Load32U(mem) => {
+                let v: u32 = machine.load(mem, self.start)?;
+                machine.stack.push(v as i64);
+            }
+            // https://webassembly.github.io/spec/core/exec/instructions.html#exec-storen
+            I32Store(mem) => {
+                let v: i32 = machine.stack.pop();
+                machine.store(mem, v, self.start)?;
+            }
+            I64Store(mem) => {
+                let v: i64 = machine.stack.pop();
+                machine.store(mem, v, self.start)?;
+            }
+            F32Store(mem) => {
+                let v: f32 = machine.stack.pop();
+                machine.store(mem, v, self.start)?;
+            }
+            F64Store(mem) => {
+                let v: f64 = machine.stack.pop();
+                machine.store(mem, v, self.start)?;
+            }
+            I32Store8(mem) => {
+                let v: i32 = machine.stack.pop();
+                machine.store(mem, v as i8, self.start)?;
+            }
+            I32Store16(mem) => {
+                let v: i32 = machine.stack.pop();
+                machine.store(mem, v as i16, self.start)?;
+            }
+            I64Store8(mem) => {
+                let v: i64 = machine.stack.pop();
+                machine.store(mem, v as i8, self.start)?;
+            }
+            I64Store16(mem) => {
+                let v: i64 = machine.stack.pop();
+                machine.store(mem, v as i16, self.start)?;
+            }
+            I64Store32(mem) => {
+                let v: i64 = machine.stack.pop();
+                machine.store(mem, v as i32, self.start)?;
+            }
+            // https://webassembly.github.io/spec/core/exec/instructions.html#exec-memory-size
             MemorySize => machine.stack.push(machine.memory.size() as i32),
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-memory-grow
             MemoryGrow => {

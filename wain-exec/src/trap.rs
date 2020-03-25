@@ -34,6 +34,13 @@ pub enum TrapReason {
         actual_params: Vec<ValType>,
         actual_results: Vec<ValType>,
     },
+    // 10. https://webassembly.github.io/spec/core/exec/instructions.html#and
+    LoadMemoryOutOfRange {
+        max: usize,
+        addr: usize,
+        operation: &'static str,
+        ty: &'static str,
+    },
     IoError(io::Error),
 }
 
@@ -133,6 +140,11 @@ impl fmt::Display for Trap {
                 JoinWritable(expected_results, " "),
                 JoinWritable(actual_params, " "),
                 JoinWritable(actual_results, " "),
+            )?,
+            LoadMemoryOutOfRange { max, addr, operation, ty } => write!(
+                f,
+                "cannot {} {} value at 0x{:x} due to out of range of memory. memory size is 0x{:x}",
+                operation, ty, addr, max,
             )?,
             IoError(e) => write!(f, "I/O error: {}", e)?,
         }

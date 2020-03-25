@@ -1,4 +1,4 @@
-use crate::value::{ReadWrite, Value};
+use crate::value::{LittleEndian, Value};
 use std::convert::{TryFrom, TryInto};
 use std::f32;
 use std::f64;
@@ -136,12 +136,12 @@ impl Stack {
         StackAccess::top(self)
     }
 
-    pub fn write<V: ReadWrite>(&mut self, addr: usize, v: V) {
-        ReadWrite::write(&mut self.bytes, addr, v)
+    pub fn write<V: LittleEndian>(&mut self, addr: usize, v: V) {
+        LittleEndian::write(&mut self.bytes, addr, v)
     }
 
-    pub fn read<V: ReadWrite>(&self, addr: usize) -> V {
-        ReadWrite::read(&self.bytes, addr)
+    pub fn read<V: LittleEndian>(&self, addr: usize) -> V {
+        LittleEndian::read(&self.bytes, addr)
     }
 
     pub fn write_any(&mut self, addr: usize, v: Value) {

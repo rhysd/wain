@@ -1,5 +1,5 @@
 use crate::trap::{Result, Trap};
-use crate::value::{ReadWrite, Value};
+use crate::value::{LittleEndian, Value};
 use wain_ast::{Global, GlobalKind, InsnKind};
 
 // Fixed-size any values store indexed in advance
@@ -67,10 +67,10 @@ impl Globals {
         })
     }
 
-    pub fn set<V: ReadWrite>(&mut self, idx: u32, v: V) {
+    pub fn set<V: LittleEndian>(&mut self, idx: u32, v: V) {
         assert!((idx as usize) < self.offsets.len());
         let offset = self.offsets[idx as usize];
-        ReadWrite::write(&mut self.bytes, offset, v);
+        LittleEndian::write(&mut self.bytes, offset, v);
     }
 
     pub fn set_any(&mut self, idx: u32, val: Value) {
@@ -82,10 +82,10 @@ impl Globals {
         }
     }
 
-    pub fn get<V: ReadWrite>(&self, idx: u32) -> V {
+    pub fn get<V: LittleEndian>(&self, idx: u32) -> V {
         assert!((idx as usize) < self.offsets.len());
         let offset = self.offsets[idx as usize];
-        ReadWrite::read(&self.bytes, offset)
+        LittleEndian::read(&self.bytes, offset)
     }
 }
 

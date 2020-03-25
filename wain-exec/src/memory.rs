@@ -1,5 +1,8 @@
 use crate::globals::Globals;
 use crate::trap::{Result, Trap, TrapReason};
+use crate::value::LittleEndian;
+use std::any;
+use std::mem::size_of;
 use wain_ast as ast;
 
 const PAGE_SIZE: usize = 65536; // 64Ki
@@ -100,5 +103,38 @@ impl Memory {
         let next_len = (next as usize) * PAGE_SIZE;
         self.data.resize(next_len, 0);
         prev as i32
+    }
+
+    fn check_addr<V: LittleEndian>(
+        &self,
+        addr: usize,
+        at: usize,
+        operation: &'static str,
+    ) -> Result<()> {
+        if addr + size_of::<V>() > self.data.len() {
+            Err(Trap::new(
+                TrapReason::LoadMemoryOutOfRange {
+                    max: self.data.len(),
+                    addr,
+                    operation,
+                    ty: any::type_name::<V>(),
+                },
+                at,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    // https://webassembly.github.io/spec/core/exec/instructions.html#and
+    pub fn load<V: LittleEndian>(&self, addr: usize, at: usize) -> Result<V> {
+        self.check_addr::<V>(addr, at, "load")?;
+        Ok(LittleEndian::read(&self.data, addr))
+    }
+
+    // https://webassembly.github.io/spec/core/exec/instructions.html#and
+    pub fn store<V: LittleEndian>(&mut self, addr: usize, v: V, at: usize) -> Result<()> {
+        self.check_addr::<V>(addr, at, "store")?;
+        Ok(LittleEndian::write(&mut self.data, addr, v))
     }
 }

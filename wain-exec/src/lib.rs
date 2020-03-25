@@ -8,7 +8,7 @@ mod table;
 mod trap;
 mod value;
 
-use machine::{Machine, Run};
+pub use machine::{Machine, Run};
 use trap::Result;
 use wain_ast::Module;
 

@@ -10,7 +10,7 @@ pub enum Value {
     F64(f64),
 }
 
-pub trait ReadWrite {
+pub trait LittleEndian {
     fn read(buf: &[u8], addr: usize) -> Self;
     fn write(buf: &mut [u8], addr: usize, v: Self);
 }
@@ -31,35 +31,32 @@ fn write_bytes(buf: &mut [u8], addr: usize, bytes: &[u8]) {
     }
 }
 
-impl ReadWrite for i32 {
+macro_rules! impl_le_rw {
+    ($t:ty) => {
+        impl LittleEndian for $t {
+            fn read(buf: &[u8], addr: usize) -> Self {
+                <$t>::from_le_bytes(read_bytes(buf, addr))
+            }
+            fn write(buf: &mut [u8], addr: usize, v: Self) {
+                write_bytes(buf, addr, &v.to_le_bytes());
+            }
+        }
+    };
+}
+
+impl_le_rw!(i8);
+impl_le_rw!(i16);
+impl_le_rw!(i32);
+impl_le_rw!(i64);
+impl_le_rw!(f32);
+impl_le_rw!(f64);
+impl LittleEndian for u8 {
     fn read(buf: &[u8], addr: usize) -> Self {
-        i32::from_le_bytes(read_bytes(buf, addr))
+        buf[addr]
     }
     fn write(buf: &mut [u8], addr: usize, v: Self) {
-        write_bytes(buf, addr, &v.to_le_bytes());
+        buf[addr] = v;
     }
 }
-impl ReadWrite for f32 {
-    fn read(buf: &[u8], addr: usize) -> Self {
-        f32::from_le_bytes(read_bytes(buf, addr))
-    }
-    fn write(buf: &mut [u8], addr: usize, v: Self) {
-        write_bytes(buf, addr, &v.to_le_bytes());
-    }
-}
-impl ReadWrite for i64 {
-    fn read(buf: &[u8], addr: usize) -> Self {
-        i64::from_le_bytes(read_bytes(buf, addr))
-    }
-    fn write(buf: &mut [u8], addr: usize, v: Self) {
-        write_bytes(buf, addr, &v.to_le_bytes());
-    }
-}
-impl ReadWrite for f64 {
-    fn read(buf: &[u8], addr: usize) -> Self {
-        f64::from_le_bytes(read_bytes(buf, addr))
-    }
-    fn write(buf: &mut [u8], addr: usize, v: Self) {
-        write_bytes(buf, addr, &v.to_le_bytes());
-    }
-}
+impl_le_rw!(u16);
+impl_le_rw!(u32);
