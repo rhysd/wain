@@ -267,10 +267,15 @@ impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for ast::Instruction {
                 machine.stack.pop_label(label);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-loop
-            Loop { body, .. } => loop {
-                // push_label is not necessary since this loop is never broken
+            Loop { ty, body } => loop {
+                // Note: Difference between block and loop is the position on breaking. When reaching
+                // to the end of instruction sequence, loop instruction ends execution of subsequence.
+                let label = machine.stack.push_label(ty);
                 match body.execute(machine, frame)? {
-                    ExecState::Continue => {} // next iteration
+                    ExecState::Continue => {
+                        machine.stack.pop_label(label);
+                        break;
+                    }
                     ExecState::Ret => return Ok(ExecState::Ret),
                     ExecState::Breaking(0) => continue,
                     ExecState::Breaking(level) => return Ok(ExecState::Breaking(level - 1)),
