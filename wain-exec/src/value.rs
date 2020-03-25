@@ -50,6 +50,7 @@ impl_le_rw!(i32);
 impl_le_rw!(i64);
 impl_le_rw!(f32);
 impl_le_rw!(f64);
+// unsigned integers for load/store instructions
 impl LittleEndian for u8 {
     fn read(buf: &[u8], addr: usize) -> Self {
         buf[addr]
