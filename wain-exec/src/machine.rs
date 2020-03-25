@@ -48,7 +48,7 @@ impl<'m, 'a> Machine<'m, 'a> {
         // 6.2 allocate functions
         for func in module.funcs.iter() {
             if let ast::FuncKind::Import(i) = &func.kind {
-                if i.mod_name.0 != "env" || i.name.0 != "putchar" {
+                if i.mod_name.0 != "env" || i.name.0 != "putchar" && i.name.0 != "getchar" {
                     return Err(Trap::unknown_import(i, "function", func.start));
                 }
             }
@@ -90,11 +90,15 @@ impl<'m, 'a> Machine<'m, 'a> {
         // Call this function with params
         let (locals, body) = match &func.kind {
             ast::FuncKind::Import(i) => {
-                if i.mod_name.0 == "env" && i.name.0 == "putchar" {
-                    return self.putchar().map(|_| ExecState::Continue);
-                } else {
-                    return Err(Trap::unknown_import(i, "function", func.start));
+                if i.mod_name.0 == "env" {
+                    if i.name.0 == "putchar" {
+                        return self.putchar().map(|_| ExecState::Continue);
+                    }
+                    if i.name.0 == "getchar" {
+                        return self.getchar().map(|_| ExecState::Continue);
+                    }
                 }
+                return Err(Trap::unknown_import(i, "function", func.start));
             }
             ast::FuncKind::Body { locals, expr } => (locals, expr),
         };
@@ -159,6 +163,17 @@ impl<'m, 'a> Machine<'m, 'a> {
             Err(_) => -1, // EOF
         };
         self.stack.push(ret);
+        Ok(())
+    }
+
+    fn getchar(&mut self) -> Result<()> {
+        use std::io::Read;
+        let mut buf = [0u8];
+        let v = match io::stdin().read_exact(&mut buf) {
+            Ok(()) => buf[0] as i32,
+            Err(_) => -1, // EOF
+        };
+        self.stack.push(v);
         Ok(())
     }
 
