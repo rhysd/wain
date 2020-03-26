@@ -4,7 +4,7 @@ use crate::stack::{CallFrame, Stack, StackAccess};
 use crate::table::Table;
 use crate::trap::{Result, Trap, TrapReason};
 use crate::value::{LittleEndian, Value};
-use std::io;
+use std::io::{Read, Write};
 use wain_ast as ast;
 
 // Note: This implementation currently ignores Wasm's thread model since MVP does not support multiple
@@ -26,17 +26,19 @@ enum ExecState {
 type ExecResult = Result<ExecState>;
 
 // State of abtract machine to run wasm code. This struct contains both store and stack
-pub struct Machine<'module, 'source> {
+pub struct Machine<'module, 'source, R: Read, W: Write> {
     module: &'module ast::Module<'source>,
     table: Table, // Only one table is allowed for MVP
     stack: Stack,
     memory: Memory, // Only one memory is allowed for MVP
     globals: Globals,
+    stdout: W,
+    stdin: R,
 }
 
-impl<'m, 'a> Machine<'m, 'a> {
+impl<'m, 'a, R: Read, W: Write> Machine<'m, 'a, R, W> {
     // https://webassembly.github.io/spec/core/exec/modules.html#instantiation
-    pub fn instantiate(module: &'m ast::Module<'a>) -> Result<Self> {
+    pub fn instantiate(module: &'m ast::Module<'a>, stdin: R, stdout: W) -> Result<Self> {
         // TODO: 2., 3., 4. Validate external values before instantiate globals
 
         // 5. global initialization values determined by module and externval
@@ -80,7 +82,13 @@ impl<'m, 'a> Machine<'m, 'a> {
             stack,
             memory,
             globals,
+            stdin,
+            stdout,
         })
+    }
+
+    pub fn stdout(&mut self) -> &mut W {
+        &mut self.stdout
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#function-calls
@@ -155,10 +163,9 @@ impl<'m, 'a> Machine<'m, 'a> {
     }
 
     fn putchar(&mut self) -> Result<()> {
-        use std::io::Write;
         let v: i32 = self.stack.pop();
         let b = v as u8;
-        let ret = match io::stdout().write(&[b]) {
+        let ret = match self.stdout.write(&[b]) {
             Ok(_) => b as i32,
             Err(_) => -1, // EOF
         };
@@ -167,9 +174,8 @@ impl<'m, 'a> Machine<'m, 'a> {
     }
 
     fn getchar(&mut self) -> Result<()> {
-        use std::io::Read;
         let mut buf = [0u8];
-        let v = match io::stdin().read_exact(&mut buf) {
+        let v = match self.stdin.read_exact(&mut buf) {
             Ok(()) => buf[0] as i32,
             Err(_) => -1, // EOF
         };
@@ -231,13 +237,13 @@ impl<'m, 'a> Machine<'m, 'a> {
     }
 }
 
-trait Execute<'f, 'm, 'a> {
-    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &CallFrame<'f>) -> ExecResult;
+trait Execute<'f, 'm, 'a, R: Read, W: Write> {
+    fn execute(&self, machine: &mut Machine<'m, 'a, R, W>, frame: &CallFrame<'f>) -> ExecResult;
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html#blocks
-impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for Vec<ast::Instruction> {
-    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &CallFrame<'f>) -> ExecResult {
+impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for Vec<ast::Instruction> {
+    fn execute(&self, machine: &mut Machine<'m, 'a, R, W>, frame: &CallFrame<'f>) -> ExecResult {
         // Run instruction sequence as block
         for insn in self.iter() {
             match insn.execute(machine, frame)? {
@@ -250,8 +256,8 @@ impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for Vec<ast::Instruction> {
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html
-impl<'f, 'm, 'a> Execute<'f, 'm, 'a> for ast::Instruction {
-    fn execute(&self, machine: &mut Machine<'m, 'a>, frame: &CallFrame<'f>) -> ExecResult {
+impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for ast::Instruction {
+    fn execute(&self, machine: &mut Machine<'m, 'a, R, W>, frame: &CallFrame<'f>) -> ExecResult {
         use ast::InsnKind::*;
         match &self.kind {
             // Control instructions
