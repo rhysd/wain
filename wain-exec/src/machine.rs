@@ -12,6 +12,8 @@ use wain_ast as ast;
 
 // TODO: Handle external values for imports and exports
 
+#[derive(PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum Run {
     Success,
     Warning(&'static str),
@@ -701,5 +703,68 @@ impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for ast::Instructi
             F64ReinterpretI64 => machine.cvtop::<i64, f64, _>(|v| v as f64),
         }
         Ok(ExecState::Continue)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fmt;
+    use std::fs;
+    use std::io::{self, Read};
+    use std::path::PathBuf;
+    use std::result;
+    use wain_syntax_text::parse;
+    use wain_validate::validate;
+
+    struct Discard;
+
+    impl Read for Discard {
+        fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
+            Ok(b.len())
+        }
+    }
+
+    #[test]
+    fn hello_world() {
+        fn unwrap<T, E: fmt::Display>(res: result::Result<T, E>) -> T {
+            match res {
+                Ok(x) => x,
+                Err(e) => panic!("unwrap failed with error message:\n{}", e),
+            }
+        }
+
+        fn exec(file: PathBuf) -> (Run, Vec<u8>) {
+            let source = fs::read_to_string(file).unwrap();
+            let ast = unwrap(parse(&source));
+            unwrap(validate(&ast));
+            let mut stdout = vec![];
+            let mut machine = unwrap(Machine::instantiate(&ast.module, Discard, &mut stdout));
+            let run = unwrap(machine.execute());
+            (run, stdout)
+        }
+
+        let mut dir = env::current_dir().unwrap();
+        dir.pop();
+        dir.push("examples");
+        dir.push("hello");
+        let dir = dir;
+
+        let (run, stdout) = exec(dir.join("hello.wat"));
+        assert_eq!(run, Run::Success);
+        assert_eq!(stdout, b"Hello, world\n");
+
+        let (run, stdout) = exec(dir.join("hello_global.wat"));
+        assert_eq!(run, Run::Success);
+        assert_eq!(stdout, b"Hello, world\n");
+
+        let (run, stdout) = exec(dir.join("hello_indirect_call.wat"));
+        assert_eq!(run, Run::Success);
+        assert_eq!(stdout, b"Hello, world\n");
+
+        let (run, stdout) = exec(dir.join("hello_struct.wat"));
+        assert_eq!(run, Run::Success);
+        assert_eq!(stdout, b"Hello, world\n");
     }
 }

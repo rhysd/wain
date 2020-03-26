@@ -8,3 +8,7 @@ edition = "2018"
 
 [dependencies]
 wain-ast = { path = "../wain-ast", version = "0.0.0" }
+
+[dev-dependencies]
+wain-syntax-text = { path = "../wain-syntax-text", version = "0.0.0" }
+wain-validate = { path = "../wain-validate", version = "0.0.0" }
