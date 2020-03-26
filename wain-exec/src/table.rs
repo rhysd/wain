@@ -64,7 +64,7 @@ impl Table {
             }
         }
 
-        if self.elems.len() <= end_idx {
+        if self.elems.len() < end_idx {
             return Err(Trap::new(
                 TrapReason::ElemSegmentLargerThanTable {
                     segment_end: end_idx,
