@@ -184,6 +184,12 @@ impl Stack {
             self.restore(label.addr, label.type_idx);
         }
     }
+
+    pub fn extend_zero_values(&mut self, types: &[ValType]) {
+        self.types.extend_from_slice(types);
+        let bytes = types.iter().fold(0, |acc, t| acc + t.bytes());
+        self.bytes.resize(self.bytes.len() + bytes, 0);
+    }
 }
 
 // Activations of function frames

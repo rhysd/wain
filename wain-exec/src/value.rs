@@ -1,7 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::mem::size_of;
-use wain_ast::ValType;
 
 #[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum Value {
@@ -9,17 +8,6 @@ pub enum Value {
     I64(i64),
     F32(f32),
     F64(f64),
-}
-
-impl Value {
-    pub fn default(ty: ValType) -> Self {
-        match ty {
-            ValType::I32 => Value::I32(0),
-            ValType::I64 => Value::I64(0),
-            ValType::F32 => Value::F32(0.0),
-            ValType::F64 => Value::F64(0.0),
-        }
-    }
 }
 
 pub trait LittleEndian {

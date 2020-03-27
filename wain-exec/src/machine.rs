@@ -118,9 +118,7 @@ impl<'m, 'a, R: Read, W: Write> Machine<'m, 'a, R, W> {
         // Push call frame
         let frame = CallFrame::new(&self.stack, &fty.params, locals);
 
-        for l in locals {
-            self.stack.push(Value::default(*l));
-        }
+        self.stack.extend_zero_values(&locals);
 
         for insn in body.iter() {
             match insn.execute(self, &frame)? {
