@@ -3,6 +3,7 @@ use crate::leb128::Leb128;
 use crate::source::BinarySource;
 use std::borrow::Cow;
 use std::convert::TryInto;
+use std::marker::PhantomData;
 use std::str;
 use wain_ast::*;
 
@@ -22,6 +23,46 @@ fn section_name(id: u8) -> &'static str {
         10 => "code section",
         11 => "data section",
         _ => unreachable!(),
+    }
+}
+
+// An iterator to iterate vec(P)
+// https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec
+struct ParseVec<'p, 's, P: Parse<'s>> {
+    parser: &'p mut Parser<'s>,
+    count: usize,
+    phantom: PhantomData<P>, // Without this, P is not constrainted in Iterator implementation
+}
+
+impl<'p, 's, P: Parse<'s>> ParseVec<'p, 's, P> {
+    fn new(parser: &'p mut Parser<'s>, count: usize) -> Self {
+        Self {
+            parser,
+            count,
+            phantom: PhantomData,
+        }
+    }
+
+    // Helper method to collect as Vec<P>. Without this, type must be specified for ? operator as bellow
+    //   parser.parse_vec()?.collect::<Result<'_, _>>()
+    fn vec(self) -> Result<'s, Vec<P>> {
+        self.collect()
+    }
+}
+
+impl<'p, 's, P: Parse<'s>> Iterator for ParseVec<'p, 's, P> {
+    type Item = Result<'s, P>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count == 0 {
+            return None;
+        }
+        self.count -= 1;
+        Some(self.parser.parse())
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.count, Some(self.count))
     }
 }
 
@@ -48,11 +89,13 @@ impl<'s> Parser<'s> {
         self.input = &self.input[bytes..];
     }
 
-    fn peek(&self, expected: &'static str) -> Result<'s, u8> {
+    fn consume(&mut self, expected: &'static str) -> Result<'s, u8> {
         if self.input.is_empty() {
             Err(self.error(ErrorKind::UnexpectedEof { expected }))
         } else {
-            Ok(self.input[0])
+            let b = self.input[0];
+            self.input = &self.input[1..];
+            Ok(b)
         }
     }
 
@@ -62,6 +105,21 @@ impl<'s> Parser<'s> {
 
     fn error(&self, kind: ErrorKind) -> Box<Error<'s>> {
         let pos = self.current_pos();
+        Error::new(kind, pos, self.source)
+    }
+
+    fn magic_mismatch<T: AsRef<[u8]>>(
+        &self,
+        expected: T,
+        got: u8,
+        what: &'static str,
+    ) -> Box<Error<'s>> {
+        let pos = self.current_pos() - 1; // Unget one character for magic
+        let kind = ErrorKind::MagicMismatch {
+            expected: expected.as_ref().iter().copied().collect(),
+            got,
+            what,
+        };
         Error::new(kind, pos, self.source)
     }
 
@@ -118,33 +176,31 @@ impl<'s> Parser<'s> {
         Ok(())
     }
 
-    fn parse_magic(&mut self, byte: u8, what: &'static str) -> Result<'s, ()> {
-        let top = self.peek(what)?;
-        if top == byte {
-            self.eat(1);
+    fn parse_flag(&mut self, byte: u8, what: &'static str) -> Result<'s, ()> {
+        let b = self.consume(what)?;
+        if b == byte {
             Ok(())
         } else {
-            Err(self.error(ErrorKind::MagicMismatch {
-                expected: byte,
-                got: top,
-                what,
-            }))
+            Err(self.magic_mismatch([byte], b, what))
         }
     }
 
     // https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec
-    fn parse_vec<P: Parse<'s>>(&mut self) -> Result<'s, Vec<P>> {
+    fn parse_vec<P: Parse<'s>>(&mut self) -> Result<'s, ParseVec<'_, 's, P>> {
         let size: u32 = self.parse_int()?;
-        let mut vec = Vec::with_capacity(size as usize);
-        for _ in 0..size {
-            vec.push(self.parse()?);
-        }
-        Ok(vec)
+        Ok(ParseVec::new(self, size as usize))
     }
 }
 
 pub trait Parse<'source>: Sized {
     fn parse(parser: &mut Parser<'source>) -> Result<'source, Self>;
+}
+
+// Parse u32 for typeidx, funcidx, memidx, ...
+impl<'s> Parse<'s> for u32 {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        parser.parse_int()
+    }
 }
 
 impl<'s> Parse<'s> for Root<'s, BinarySource<'s>> {
@@ -162,7 +218,7 @@ impl<'s> Parse<'s> for Module<'s> {
         fn parse_section<'s, P: Parse<'s>>(parser: &mut Parser<'s>, id: u8) -> Result<'s, Vec<P>> {
             if parser.input.starts_with(&[id]) {
                 let mut inner = parser.section_parser()?;
-                inner.parse_vec()
+                inner.parse_vec()?.vec()
             } else {
                 Ok(vec![])
             }
@@ -172,7 +228,7 @@ impl<'s> Parse<'s> for Module<'s> {
 
         match parser.input {
             [0x00, 0x61, 0x73, 0x6d, ..] => parser.eat(4),
-            _ => return Err(parser.error(ErrorKind::MagicNotFound)),
+            _ => return Err(parser.error(ErrorKind::WasmMagicNotFound)),
         }
 
         match parser.input {
@@ -186,6 +242,7 @@ impl<'s> Parse<'s> for Module<'s> {
 
         parser.ignore_custom_sections()?;
 
+        // Type section
         let types = parse_section(parser, 0x01)?;
 
         parser.ignore_custom_sections()?;
@@ -195,11 +252,11 @@ impl<'s> Parse<'s> for Module<'s> {
         let mut memories = vec![];
         let mut globals = vec![];
 
+        // Import section
         if let [0x02, ..] = parser.input {
             let mut inner = parser.section_parser()?;
-            let size: u32 = inner.parse_int()?;
-            for _ in 0..size {
-                match inner.parse()? {
+            for desc in inner.parse_vec()? {
+                match desc? {
                     ImportDesc::Func(f) => funcs.push(f),
                     ImportDesc::Table(t) => tables.push(t),
                     ImportDesc::Memory(m) => memories.push(m),
@@ -209,6 +266,48 @@ impl<'s> Parse<'s> for Module<'s> {
         }
 
         parser.ignore_custom_sections()?;
+
+        // Function section
+        // https://webassembly.github.io/spec/core/binary/modules.html#binary-funcsec
+        // Only type indices are stored in function section. Locals and bodies are stored in code section
+        let func_indices: Vec<u32> = parse_section(parser, 0x03)?;
+        funcs.reserve(func_indices.len());
+
+        parser.ignore_custom_sections()?;
+
+        // Table section
+        if let [0x04, ..] = parser.input {
+            let mut inner = parser.section_parser()?;
+            let vec = inner.parse_vec()?;
+            tables.reserve(vec.count);
+            for table in vec {
+                tables.push(table?);
+            }
+        }
+
+        parser.ignore_custom_sections()?;
+
+        // Memory section
+        if let [0x05, ..] = parser.input {
+            let mut inner = parser.section_parser()?;
+            let vec = inner.parse_vec()?;
+            memories.reserve(vec.count);
+            for memory in vec {
+                memories.push(memory?);
+            }
+        }
+
+        parser.ignore_custom_sections()?;
+
+        // Global section
+        if let [0x06, ..] = parser.input {
+            let mut inner = parser.section_parser()?;
+            let vec = inner.parse_vec()?;
+            globals.reserve(vec.count);
+            for global in vec {
+                globals.push(global?);
+            }
+        }
 
         // TODO
 
@@ -247,9 +346,9 @@ impl<'s> Parse<'s> for Name<'s> {
 impl<'s> Parse<'s> for FuncType {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.current_pos();
-        parser.parse_magic(0x60, "function type")?;
-        let params = parser.parse_vec()?;
-        let results = parser.parse_vec()?;
+        parser.parse_flag(0x60, "function type")?;
+        let params = parser.parse_vec()?.vec()?;
+        let results = parser.parse_vec()?.vec()?;
         Ok(FuncType {
             start,
             params,
@@ -261,15 +360,13 @@ impl<'s> Parse<'s> for FuncType {
 // https://webassembly.github.io/spec/core/binary/types.html#binary-valtype
 impl<'s> Parse<'s> for ValType {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        let t = match parser.peek("value type")? {
-            0x7f => ValType::I32,
-            0x7e => ValType::I64,
-            0x7d => ValType::F32,
-            0x7c => ValType::F64,
-            b => return Err(parser.error(ErrorKind::UnexpectedValType(b))),
-        };
-        parser.eat(1);
-        Ok(t)
+        match parser.consume("value type")? {
+            0x7f => Ok(ValType::I32),
+            0x7e => Ok(ValType::I64),
+            0x7d => Ok(ValType::F32),
+            0x7c => Ok(ValType::F64),
+            b => Err(parser.magic_mismatch([0x7f, 0x7e, 0x7d, 0x7c], b, "value type")),
+        }
     }
 }
 
@@ -287,24 +384,427 @@ impl<'s> Parse<'s> for ImportDesc<'s> {
             mod_name: parser.parse()?,
             name: parser.parse()?,
         };
-        match parser.peek("import description")? {
+        match parser.consume("import description")? {
             0x00 => Ok(ImportDesc::Func(Func {
                 start,
-                idx: parser.parse_int()?,
+                idx: parser.parse()?,
                 kind: FuncKind::Import(import),
             })),
             0x01 => Ok(ImportDesc::Table(Table {
                 start,
-                ty: unimplemented!(),
+                ty: parser.parse()?,
                 import: Some(import),
             })),
             0x02 => Ok(ImportDesc::Memory(Memory {
                 start,
-                ty: unimplemented!(),
+                ty: parser.parse()?,
                 import: Some(import),
             })),
-            0x03 => unimplemented!(),
-            b => Err(parser.error(ErrorKind::UnexpectedImportDesc(b))),
+            0x03 => {
+                let GlobalType(mutable, ty) = parser.parse()?;
+                Ok(ImportDesc::Global(Global {
+                    start,
+                    mutable,
+                    ty,
+                    kind: GlobalKind::Import(import),
+                }))
+            }
+            b => Err(parser.magic_mismatch([0x00, 0x01, 0x02, 0x03], b, "import description")),
         }
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/types.html#binary-tabletype
+impl<'s> Parse<'s> for TableType {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        parser.parse_flag(0x70, "funcref of table type")?;
+        Ok(TableType {
+            limit: parser.parse()?,
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/types.html#binary-limits
+impl<'s> Parse<'s> for Limits {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        match parser.consume("limit")? {
+            0x00 => Ok(Limits::From(parser.parse_int()?)),
+            0x01 => Ok(Limits::Range(parser.parse_int()?, parser.parse_int()?)),
+            b => Err(parser.magic_mismatch([0x00, 0x01], b, "limit")),
+        }
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/types.html#memory-types
+impl<'s> Parse<'s> for MemType {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        Ok(MemType {
+            limit: parser.parse()?,
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/types.html#global-types
+struct GlobalType(bool, ValType);
+impl<'s> Parse<'s> for GlobalType {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let ty = parser.parse()?;
+        let mutable = match parser.consume("mutability of global type")? {
+            0x00 => false,
+            0x01 => true,
+            b => return Err(parser.magic_mismatch([0x00, 0x01], b, "mutability of global type")),
+        };
+        Ok(GlobalType(mutable, ty))
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/modules.html#binary-tablesec
+impl<'s> Parse<'s> for Table<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        Ok(Table {
+            start: parser.current_pos(),
+            ty: parser.parse()?,
+            import: None,
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/modules.html#binary-memsec
+impl<'s> Parse<'s> for Memory<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        Ok(Memory {
+            start: parser.current_pos(),
+            ty: parser.parse()?,
+            import: None,
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/modules.html#binary-globalsec
+impl<'s> Parse<'s> for Global<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let start = parser.current_pos();
+        let GlobalType(mutable, ty) = parser.parse()?;
+        let Expr(insns) = parser.parse()?;
+        Ok(Global {
+            start,
+            mutable,
+            ty,
+            kind: GlobalKind::Init(insns),
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/instructions.html#expressions
+struct Expr(Vec<Instruction>);
+impl<'s> Parse<'s> for Expr {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let mut insns = vec![];
+        loop {
+            if let [0x0b, ..] = parser.input {
+                parser.eat(1);
+                return Ok(Expr(insns));
+            }
+            insns.push(parser.parse()?);
+        }
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/types.html#binary-blocktype
+struct BlockType(Option<ValType>);
+impl<'s> Parse<'s> for BlockType {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        if let [0x40, ..] = parser.input {
+            return Ok(BlockType(None));
+        }
+        Ok(BlockType(Some(parser.parse()?)))
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/instructions.html#instructions
+impl<'s> Parse<'s> for Instruction {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        use InsnKind::*;
+        let start = parser.current_pos();
+        let kind = match parser.consume("instruction")? {
+            // Control instructions
+            // https://webassembly.github.io/spec/core/binary/instructions.html#control-instructions
+            0x00 => Unreachable,
+            0x01 => Nop,
+            0x02 => {
+                let BlockType(ty) = parser.parse()?;
+                let Expr(body) = parser.parse()?;
+                Block { ty, body }
+            }
+            0x03 => {
+                let BlockType(ty) = parser.parse()?;
+                let Expr(body) = parser.parse()?;
+                Loop { ty, body }
+            }
+            0x04 => {
+                let BlockType(ty) = parser.parse()?;
+
+                let mut then_body = vec![];
+                let has_else = loop {
+                    match parser.input {
+                        [0x05, ..] => break true,
+                        [0x0b, ..] => break false,
+                        _ => then_body.push(parser.parse()?),
+                    }
+                };
+                parser.eat(1);
+
+                let else_body = if has_else {
+                    let Expr(insns) = parser.parse()?;
+                    insns
+                } else {
+                    vec![]
+                };
+
+                If {
+                    ty,
+                    then_body,
+                    else_body,
+                }
+            }
+            0x0c => Br(parser.parse()?),
+            0x0d => BrIf(parser.parse()?),
+            0x0e => BrTable {
+                labels: parser.parse_vec()?.vec()?,
+                default_label: parser.parse()?,
+            },
+            0x0f => Return,
+            0x10 => Call(parser.parse()?),
+            0x11 => {
+                let insn = CallIndirect(parser.parse()?);
+                parser.parse_flag(0x00, "reserved byte in call_indirect")?;
+                insn
+            }
+            // Parametric instructions
+            // https://webassembly.github.io/spec/core/binary/instructions.html#parametric-instructions
+            0x1a => Drop,
+            0x1b => Select,
+            // Variable instructions
+            // https://webassembly.github.io/spec/core/binary/instructions.html#variable-instructions
+            0x20 => LocalGet(parser.parse()?),
+            0x21 => LocalSet(parser.parse()?),
+            0x22 => LocalTee(parser.parse()?),
+            0x23 => GlobalGet(parser.parse()?),
+            0x24 => GlobalSet(parser.parse()?),
+            // Memory instructions
+            // https://webassembly.github.io/spec/core/binary/instructions.html#memory-instructions
+            0x28 => I32Load(parser.parse()?),
+            0x29 => I64Load(parser.parse()?),
+            0x2a => F32Load(parser.parse()?),
+            0x2b => F64Load(parser.parse()?),
+            0x2c => I32Load8S(parser.parse()?),
+            0x2d => I32Load8U(parser.parse()?),
+            0x2e => I32Load16S(parser.parse()?),
+            0x2f => I32Load16U(parser.parse()?),
+            0x30 => I64Load8S(parser.parse()?),
+            0x31 => I64Load8U(parser.parse()?),
+            0x32 => I64Load16S(parser.parse()?),
+            0x33 => I64Load16U(parser.parse()?),
+            0x34 => I64Load32S(parser.parse()?),
+            0x35 => I64Load32U(parser.parse()?),
+            0x36 => I32Store(parser.parse()?),
+            0x37 => I64Store(parser.parse()?),
+            0x38 => F32Store(parser.parse()?),
+            0x39 => F64Store(parser.parse()?),
+            0x3a => I32Store8(parser.parse()?),
+            0x3b => I32Store16(parser.parse()?),
+            0x3c => I64Store8(parser.parse()?),
+            0x3d => I64Store16(parser.parse()?),
+            0x3e => I64Store32(parser.parse()?),
+            0x3f => {
+                parser.parse_flag(0x00, "reserved byte in memory.size")?;
+                MemorySize
+            }
+            0x40 => {
+                parser.parse_flag(0x00, "reserved byte in memory.grow")?;
+                MemoryGrow
+            }
+            // Numeric instructions
+            // constants
+            0x41 => I32Const(parser.parse_int()?),
+            0x42 => I64Const(parser.parse_int()?),
+            0x43 => F32Const(parser.parse()?),
+            0x44 => F64Const(parser.parse()?),
+            // test and relation operators
+            0x45 => I32Eqz,
+            0x46 => I32Eq,
+            0x47 => I32Ne,
+            0x48 => I32LtS,
+            0x49 => I32LtU,
+            0x4a => I32GtS,
+            0x4b => I32GtU,
+            0x4c => I32LeS,
+            0x4d => I32LeU,
+            0x4e => I32GeS,
+            0x4f => I32GeU,
+            0x50 => I64Eqz,
+            0x51 => I64Eq,
+            0x52 => I64Ne,
+            0x53 => I64LtS,
+            0x54 => I64LtU,
+            0x55 => I64GtS,
+            0x56 => I64GtU,
+            0x57 => I64LeS,
+            0x58 => I64LeU,
+            0x59 => I64GeS,
+            0x5a => I64GeU,
+            0x5b => F32Eq,
+            0x5c => F32Ne,
+            0x5d => F32Lt,
+            0x5e => F32Gt,
+            0x5f => F32Le,
+            0x60 => F32Ge,
+            0x61 => F64Eq,
+            0x62 => F64Ne,
+            0x63 => F64Lt,
+            0x64 => F64Gt,
+            0x65 => F64Le,
+            0x66 => F64Ge,
+            // i32 operations
+            0x67 => I32Clz,
+            0x68 => I32Ctz,
+            0x69 => I32Popcnt,
+            0x6a => I32Add,
+            0x6b => I32Sub,
+            0x6c => I32Mul,
+            0x6d => I32DivS,
+            0x6e => I32DivU,
+            0x6f => I32RemS,
+            0x70 => I32RemU,
+            0x71 => I32And,
+            0x72 => I32Or,
+            0x73 => I32Xor,
+            0x74 => I32Shl,
+            0x75 => I32ShrS,
+            0x76 => I32ShrU,
+            0x77 => I32Rotl,
+            0x78 => I32Rotr,
+            // i64 operations
+            0x79 => I64Clz,
+            0x7a => I64Ctz,
+            0x7b => I64Popcnt,
+            0x7c => I64Add,
+            0x7d => I64Sub,
+            0x7e => I64Mul,
+            0x7f => I64DivS,
+            0x80 => I64DivU,
+            0x81 => I64RemS,
+            0x82 => I64RemU,
+            0x83 => I64And,
+            0x84 => I64Or,
+            0x85 => I64Xor,
+            0x86 => I64Shl,
+            0x87 => I64ShrS,
+            0x88 => I64ShrU,
+            0x89 => I64Rotl,
+            0x8a => I64Rotr,
+            // f32 operations
+            0x8b => F32Abs,
+            0x8c => F32Neg,
+            0x8d => F32Ceil,
+            0x8e => F32Floor,
+            0x8f => F32Trunc,
+            0x90 => F32Nearest,
+            0x91 => F32Sqrt,
+            0x92 => F32Add,
+            0x93 => F32Sub,
+            0x94 => F32Mul,
+            0x95 => F32Div,
+            0x96 => F32Min,
+            0x97 => F32Max,
+            0x98 => F32Copysign,
+            // f64 operations
+            0x99 => F64Abs,
+            0x9a => F64Neg,
+            0x9b => F64Ceil,
+            0x9c => F64Floor,
+            0x9d => F64Trunc,
+            0x9e => F64Nearest,
+            0x9f => F64Sqrt,
+            0xa0 => F64Add,
+            0xa1 => F64Sub,
+            0xa2 => F64Mul,
+            0xa3 => F64Div,
+            0xa4 => F64Min,
+            0xa5 => F64Max,
+            0xa6 => F64Copysign,
+            // conversions
+            0xa7 => I32WrapI64,
+            0xa8 => I32TruncF32S,
+            0xa9 => I32TruncF32U,
+            0xaa => I32TruncF64S,
+            0xab => I32TruncF64U,
+            0xac => I64ExtendI32S,
+            0xad => I64ExtendI32U,
+            0xae => I64TruncF32S,
+            0xaf => I64TruncF32U,
+            0xb0 => I64TruncF64S,
+            0xb1 => I64TruncF64U,
+            0xb2 => F32ConvertI32S,
+            0xb3 => F32ConvertI32U,
+            0xb4 => F32ConvertI64S,
+            0xb5 => F32ConvertI64U,
+            0xb6 => F32DemoteF64,
+            0xb7 => F64ConvertI32S,
+            0xb8 => F64ConvertI32U,
+            0xb9 => F64ConvertI64S,
+            0xba => F64ConvertI64U,
+            0xbb => F64PromoteF32,
+            0xbc => I32ReinterpretF32,
+            0xbd => I64ReinterpretF64,
+            0xbe => F32ReinterpretI32,
+            0xbf => F64ReinterpretI64,
+            // https://webassembly.github.io/spec/core/binary/instructions.html#numeric-instructions
+            b => return Err(parser.magic_mismatch([], b, "instruction")),
+        };
+        Ok(Instruction { start, kind })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/instructions.html#binary-memarg
+impl<'s> Parse<'s> for Mem {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let align: u32 = parser.parse_int()?;
+        let offset = parser.parse_int()?;
+        let align = if align == 0 { None } else { Some(align as u8) };
+        let offset = if offset == 0 { None } else { Some(offset) };
+        Ok(Mem { align, offset })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/values.html#floating-point
+impl<'s> Parse<'s> for f32 {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let buf: [u8; 4] = match parser.input.try_into() {
+            Ok(b) => b,
+            Err(_) => {
+                return Err(parser.error(ErrorKind::UnexpectedEof {
+                    expected: "32bit floating point number",
+                }))
+            }
+        };
+        parser.eat(buf.len());
+        Ok(f32::from_le_bytes(buf))
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/values.html#floating-point
+impl<'s> Parse<'s> for f64 {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let buf: [u8; 8] = match parser.input.try_into() {
+            Ok(b) => b,
+            Err(_) => {
+                return Err(parser.error(ErrorKind::UnexpectedEof {
+                    expected: "32bit floating point number",
+                }))
+            }
+        };
+        parser.eat(buf.len());
+        Ok(f64::from_le_bytes(buf))
     }
 }

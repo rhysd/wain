@@ -11,7 +11,7 @@ pub enum ErrorKind {
     UnexpectedEof {
         expected: &'static str,
     },
-    MagicNotFound,
+    WasmMagicNotFound,
     VersionMismatch([u8; 4]),
     LengthOutOfInput {
         input: usize,
@@ -23,12 +23,10 @@ pub enum ErrorKind {
         error: Utf8Error,
     },
     MagicMismatch {
-        expected: u8,
+        expected: Vec<u8>,
         got: u8,
         what: &'static str,
     },
-    UnexpectedValType(u8),
-    UnexpectedImportDesc(u8),
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -42,16 +40,12 @@ impl<'s> Error<'s> {
     pub(crate) fn new(kind: ErrorKind, pos: usize, source: &'s [u8]) -> Box<Error<'s>> {
         Box::new(Error { kind, pos, source })
     }
-
-    pub(crate) fn err<T>(kind: ErrorKind, pos: usize, source: &'s [u8]) -> Result<'s, T> {
-        Err(Self::new(kind, pos, source))
-    }
 }
 
 impl<'s> fmt::Display for Error<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ErrorKind::*;
-        match self.kind {
+        match &self.kind {
             IntOverflow { ty, got: Some(got) } => write!(
                 f,
                 "LEB128-encoded integer '{:x}' is too large for {} value",
@@ -65,7 +59,7 @@ impl<'s> fmt::Display for Error<'s> {
                 "expected {} but reached end of current section or input",
                 expected
             )?,
-            MagicNotFound => write!(
+            WasmMagicNotFound => write!(
                 f,
                 "WebAssembly binary must start with magic 0x00 0x61 0x73 0x6d"
             )?,
@@ -84,21 +78,32 @@ impl<'s> fmt::Display for Error<'s> {
                 expected,
                 got,
                 what,
-            } => write!(
+            } if expected.is_empty() => write!(f, "unexpected byte 0x{:x} at {}", got, what,)?,
+            MagicMismatch {
+                expected,
+                got,
+                what,
+            } if expected.len() == 1 => write!(
                 f,
-                "magic byte 0x{:x} is expected for {} but got 0x{:x}",
-                expected, what, got
+                "expected 0x{:x} for {} but got 0x{:x}",
+                expected[0], what, got
             )?,
-            UnexpectedValType(byte) => write!(
-                f,
-                "expected one of 0x7f, 0x7e, 0x7d, 0x7c for value type but got 0x{:x}",
-                byte
-            )?,
-            UnexpectedImportDesc(byte) => write!(
-                f,
-                "expected one of 0x00, 0x01, 0x02, 0x03 for import description but got 0x{:x}",
-                byte
-            )?,
+            MagicMismatch {
+                expected,
+                got,
+                what,
+            } => {
+                f.write_str("expected one of ")?;
+                let mut first = true;
+                for b in expected.iter() {
+                    if !first {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "0x{:x}", b)?;
+                    first = false;
+                }
+                write!(f, " for {} but got 0x{:x}", what, got)?;
+            }
         }
         describe_position(f, self.source, self.pos)
     }
