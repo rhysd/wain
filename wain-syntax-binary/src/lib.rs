@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 mod error;
 mod leb128;
 mod parser;

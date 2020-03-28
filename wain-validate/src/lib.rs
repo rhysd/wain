@@ -1,6 +1,8 @@
 // Module validation for Wasm module
 // - https://webassembly.github.io/spec/core/valid/index.html
 // - https://webassembly.github.io/spec/core/appendix/algorithm.html#algo-valid
+#![deny(unsafe_code)]
+
 extern crate wain_ast;
 
 mod error;

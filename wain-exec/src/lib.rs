@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 extern crate wain_ast;
 
 mod globals;
