@@ -10,5 +10,5 @@ use wain_ast::Root;
 
 pub fn parse<'s>(input: &'s [u8]) -> Result<'s, Root<'s, BinarySource>> {
     let mut parser = Parser::new(input);
-    unimplemented!()
+    parser.parse()
 }

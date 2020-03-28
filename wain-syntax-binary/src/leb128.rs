@@ -4,7 +4,7 @@
 
 use crate::error::ErrorKind;
 
-type Result<'s, T> = ::std::result::Result<T, Box<ErrorKind<'s>>>;
+type Result<T> = ::std::result::Result<T, Box<ErrorKind>>;
 
 // Note: Self must be Sized because trait function returns Self
 pub trait Leb128: Sized {
@@ -37,7 +37,7 @@ impl Leb128 for i32 {
     }
 }
 
-fn read_64<'s>(bytes: &[u8], signed: bool) -> Result<'s, (u64, usize)> {
+fn read_64(bytes: &[u8], signed: bool) -> Result<(u64, usize)> {
     let mut ret = 0;
     let mut idx = 0;
 
@@ -76,7 +76,7 @@ fn read_64<'s>(bytes: &[u8], signed: bool) -> Result<'s, (u64, usize)> {
     }
 }
 
-fn read_32<'s>(bytes: &[u8], signed: bool) -> Result<'s, (u32, usize)> {
+fn read_32(bytes: &[u8], signed: bool) -> Result<(u32, usize)> {
     let mut ret = 0;
     let mut idx = 0;
 
