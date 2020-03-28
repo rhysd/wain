@@ -166,7 +166,7 @@ impl Stack {
         self.types.truncate(type_idx);
     }
 
-    pub fn push_label(&self, ty: &Option<ValType>) -> Label {
+    pub fn push_label(&self, ty: Option<ValType>) -> Label {
         Label {
             addr: self.top_addr(),
             type_idx: self.top_idx(),

@@ -257,13 +257,15 @@ impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for Vec<ast::Instr
 
 // https://webassembly.github.io/spec/core/exec/instructions.html
 impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for ast::Instruction {
+    #[allow(clippy::cognitive_complexity)]
     fn execute(&self, machine: &mut Machine<'m, 'a, R, W>, frame: &CallFrame<'f>) -> ExecResult {
         use ast::InsnKind::*;
+        #[allow(clippy::float_cmp)]
         match &self.kind {
             // Control instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-block
             Block { ty, body } => {
-                let label = machine.stack.push_label(ty);
+                let label = machine.stack.push_label(*ty);
                 match body.execute(machine, frame)? {
                     ExecState::Continue => {}
                     ExecState::Ret => return Ok(ExecState::Ret),
@@ -276,7 +278,7 @@ impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for ast::Instructi
             Loop { ty, body } => loop {
                 // Note: Difference between block and loop is the position on breaking. When reaching
                 // to the end of instruction sequence, loop instruction ends execution of subsequence.
-                let label = machine.stack.push_label(ty);
+                let label = machine.stack.push_label(*ty);
                 match body.execute(machine, frame)? {
                     ExecState::Continue => {
                         machine.stack.pop_label(label);
@@ -294,7 +296,7 @@ impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for ast::Instructi
                 else_body,
             } => {
                 let cond: i32 = machine.stack.pop();
-                let label = machine.stack.push_label(ty);
+                let label = machine.stack.push_label(*ty);
                 let insns = if cond != 0 { then_body } else { else_body };
                 match insns.execute(machine, frame)? {
                     ExecState::Continue => {}

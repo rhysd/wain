@@ -25,7 +25,7 @@ use wain_ast::Module;
 ///
 /// If the behavior is not acceptable, please make an abstract machine instance with
 /// Machine::instantiate and execute by Machine::execute method.
-pub fn execute<'a>(module: Module<'a>) -> Result<Run> {
+pub fn execute(module: Module<'_>) -> Result<Run> {
     let stdin = io::BufReader::new(io::stdin());
     let stdout = io::BufWriter::new(io::stdout());
     let mut machine = Machine::instantiate(&module, stdin, stdout)?;

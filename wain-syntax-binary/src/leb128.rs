@@ -92,7 +92,7 @@ fn read_32(bytes: &[u8], signed: bool) -> Result<(u32, usize)> {
         //   Next byte must be <= 0b1111
         // signed:
         //   Next byte must be <= 0b0111 for positive values and >= 0b1111000 for negative values
-        if idx == 4 && (!signed && b > 0b1111 || signed && b > 0b0111 && b < 0b1111000) {
+        if idx == 4 && (!signed && b > 0b1111 || signed && b > 0b0111 && b < 0b111_1000) {
             let ty = if signed { "i32" } else { "u32" };
             return Err(Box::new(ErrorKind::IntOverflow { ty, got: None }));
         }

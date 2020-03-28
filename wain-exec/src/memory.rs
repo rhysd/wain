@@ -30,9 +30,7 @@ impl Memory {
                     vec![]
                 } else {
                     let len = (min as usize) * PAGE_SIZE;
-                    let mut v = Vec::with_capacity(len);
-                    v.resize(len, 0);
-                    v
+                    vec![0; len]
                 };
                 Ok(Self { max, data })
             }
@@ -135,6 +133,7 @@ impl Memory {
     // https://webassembly.github.io/spec/core/exec/instructions.html#and
     pub fn store<V: LittleEndian>(&mut self, addr: usize, v: V, at: usize) -> Result<()> {
         self.check_addr::<V>(addr, at, "store")?;
-        Ok(LittleEndian::write(&mut self.data, addr, v))
+        LittleEndian::write(&mut self.data, addr, v);
+        Ok(())
     }
 }
