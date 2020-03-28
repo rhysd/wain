@@ -4,13 +4,29 @@ use std::io;
 use std::io::Read;
 use std::process::exit;
 
+enum InputFile {
+    Text(String),
+    Binary(String),
+    Stdin,
+}
+
+impl InputFile {
+    fn filename(&self) -> Option<&str> {
+        match self {
+            InputFile::Text(f) => Some(f),
+            InputFile::Binary(f) => Some(f),
+            InputFile::Stdin => None,
+        }
+    }
+}
+
 struct Options {
-    file: Option<String>,
+    file: InputFile,
     help: bool,
 }
 
 fn parse_args() -> Result<Options, String> {
-    let mut file = None;
+    let mut file = InputFile::Stdin;
     let mut help = false;
 
     for arg in env::args().skip(1) {
@@ -18,16 +34,21 @@ fn parse_args() -> Result<Options, String> {
             help = true;
             break;
         }
-        if !arg.ends_with(".wat") {
-            return Err(format!("File '{}' does not end with '.wat'. Currently only text format wasm file is supported. See --help", arg));
-        }
-        if let Some(f) = file {
+
+        if let Some(f) = file.filename() {
             return Err(format!(
                 "Only one file can be specified for now. But '{}' and '{}' are specified. See --help",
                 f, arg
             ));
         }
-        file = Some(arg);
+
+        if arg.ends_with(".wasm") {
+            file = InputFile::Binary(arg);
+        } else if arg.ends_with(".wat") {
+            file = InputFile::Text(arg);
+        } else {
+            return Err(format!("File '{}' does not end with '.wat'. Currently only text format wasm file is supported. See --help", arg));
+        }
     }
 
     Ok(Options { file, help })
@@ -65,14 +86,9 @@ fn unwrap<T, E: std::fmt::Display>(phase: &'static str, result: Result<T, E>) ->
     }
 }
 
-fn read_source(file: &Option<String>) -> Result<String, io::Error> {
-    if let Some(file) = file {
-        fs::read_to_string(file)
-    } else {
-        let mut stdin = String::new();
-        io::stdin().read_to_string(&mut stdin)?;
-        Ok(stdin)
-    }
+fn run<'s, S: wain_ast::source::Source>(ast: wain_ast::Root<'s, S>) -> wain_exec::Run {
+    unwrap("validation", wain_validate::validate(&ast));
+    unwrap("running wasm", wain_exec::execute(ast.module))
 }
 
 fn main() {
@@ -82,12 +98,26 @@ fn main() {
         help();
     }
 
-    let source = unwrap("reading input", read_source(&opts.file));
-    let ast = unwrap("parsing", wain_syntax_text::parse(&source));
-    unwrap("validation", wain_validate::validate(&ast));
-    let run = unwrap("running wasm", wain_exec::execute(ast.module));
+    let result = match opts.file {
+        InputFile::Binary(file) => {
+            let source = unwrap("reading .wasm file", fs::read(file));
+            let ast = unwrap("parsing", wain_syntax_binary::parse(&source));
+            run(ast)
+        }
+        InputFile::Text(file) => {
+            let source = unwrap("reading .wat file", fs::read_to_string(file));
+            let ast = unwrap("parsing", wain_syntax_text::parse(&source));
+            run(ast)
+        }
+        InputFile::Stdin => {
+            let mut stdin = String::new();
+            unwrap("reading stdin", io::stdin().read_to_string(&mut stdin));
+            let ast = unwrap("parsing", wain_syntax_text::parse(&stdin));
+            run(ast)
+        }
+    };
 
-    if let wain_exec::Run::Warning(msg) = run {
+    if let wain_exec::Run::Warning(msg) = result {
         eprintln!("Warning: {}", msg);
     }
 }
