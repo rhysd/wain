@@ -81,10 +81,6 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn end(&self) -> bool {
-        self.input.is_empty()
-    }
-
     fn eat(&mut self, bytes: usize) {
         self.input = &self.input[bytes..];
     }
@@ -108,14 +104,14 @@ impl<'s> Parser<'s> {
         Error::new(kind, pos, self.source)
     }
 
-    fn magic_mismatch<T: AsRef<[u8]>>(
+    fn unexpected_byte<T: AsRef<[u8]>>(
         &self,
         expected: T,
         got: u8,
         what: &'static str,
     ) -> Box<Error<'s>> {
         let pos = self.current_pos() - 1; // Unget one character for magic
-        let kind = ErrorKind::MagicMismatch {
+        let kind = ErrorKind::UnexpectedByte {
             expected: expected.as_ref().iter().copied().collect(),
             got,
             what,
@@ -181,7 +177,7 @@ impl<'s> Parser<'s> {
         if b == byte {
             Ok(())
         } else {
-            Err(self.magic_mismatch([byte], b, what))
+            Err(self.unexpected_byte([byte], b, what))
         }
     }
 
@@ -309,20 +305,72 @@ impl<'s> Parse<'s> for Module<'s> {
             }
         }
 
-        // TODO
+        parser.ignore_custom_sections()?;
+
+        let exports = parse_section(parser, 0x07)?;
+
+        parser.ignore_custom_sections()?;
+
+        // Start function section
+        let entrypoint = if let [0x08, ..] = parser.input {
+            let mut inner = parser.section_parser()?;
+            Some(inner.parse()?)
+        } else {
+            None
+        };
+
+        parser.ignore_custom_sections()?;
+
+        // Element segments section
+        let elems = parse_section(parser, 0x09)?;
+
+        parser.ignore_custom_sections()?;
+
+        // Code section
+        if let [0x10, ..] = parser.input {
+            let mut inner = parser.section_parser()?;
+            let codes = inner.parse_vec::<Code>()?;
+            if codes.count != func_indices.len() {
+                return Err(codes.parser.error(ErrorKind::FuncCodeLengthMismatch {
+                    num_funcs: func_indices.len(),
+                    num_codes: codes.count as usize,
+                }));
+            }
+            for (code, typeidx) in codes.zip(func_indices.into_iter()) {
+                let code = code?;
+                funcs.push(Func {
+                    start: code.start,
+                    idx: typeidx,
+                    kind: FuncKind::Body {
+                        locals: code.locals,
+                        expr: code.expr,
+                    },
+                });
+            }
+        }
+
+        parser.ignore_custom_sections()?;
+
+        let data = parse_section(parser, 0x11)?;
+
+        parser.ignore_custom_sections()?;
+
+        if !parser.input.is_empty() {
+            return Err(parser.error(ErrorKind::ExpectedEof(parser.input[0])));
+        }
 
         Ok(Module {
             start,
             id: None,
             types,
-            exports: unimplemented!(),
+            exports,
             funcs,
-            elems: unimplemented!(),
+            elems,
             tables,
-            data: unimplemented!(),
+            data,
             memories,
             globals,
-            entrypoint: unimplemented!(),
+            entrypoint,
         })
     }
 }
@@ -365,7 +413,7 @@ impl<'s> Parse<'s> for ValType {
             0x7e => Ok(ValType::I64),
             0x7d => Ok(ValType::F32),
             0x7c => Ok(ValType::F64),
-            b => Err(parser.magic_mismatch([0x7f, 0x7e, 0x7d, 0x7c], b, "value type")),
+            b => Err(parser.unexpected_byte([0x7f, 0x7e, 0x7d, 0x7c], b, "value type")),
         }
     }
 }
@@ -409,7 +457,7 @@ impl<'s> Parse<'s> for ImportDesc<'s> {
                     kind: GlobalKind::Import(import),
                 }))
             }
-            b => Err(parser.magic_mismatch([0x00, 0x01, 0x02, 0x03], b, "import description")),
+            b => Err(parser.unexpected_byte([0x00, 0x01, 0x02, 0x03], b, "import description")),
         }
     }
 }
@@ -430,7 +478,7 @@ impl<'s> Parse<'s> for Limits {
         match parser.consume("limit")? {
             0x00 => Ok(Limits::From(parser.parse_int()?)),
             0x01 => Ok(Limits::Range(parser.parse_int()?, parser.parse_int()?)),
-            b => Err(parser.magic_mismatch([0x00, 0x01], b, "limit")),
+            b => Err(parser.unexpected_byte([0x00, 0x01], b, "limit")),
         }
     }
 }
@@ -452,7 +500,7 @@ impl<'s> Parse<'s> for GlobalType {
         let mutable = match parser.consume("mutability of global type")? {
             0x00 => false,
             0x01 => true,
-            b => return Err(parser.magic_mismatch([0x00, 0x01], b, "mutability of global type")),
+            b => return Err(parser.unexpected_byte([0x00, 0x01], b, "mutability of global type")),
         };
         Ok(GlobalType(mutable, ty))
     }
@@ -760,7 +808,7 @@ impl<'s> Parse<'s> for Instruction {
             0xbe => F32ReinterpretI32,
             0xbf => F64ReinterpretI64,
             // https://webassembly.github.io/spec/core/binary/instructions.html#numeric-instructions
-            b => return Err(parser.magic_mismatch([], b, "instruction")),
+            b => return Err(parser.unexpected_byte([], b, "instruction")),
         };
         Ok(Instruction { start, kind })
     }
@@ -806,5 +854,124 @@ impl<'s> Parse<'s> for f64 {
         };
         parser.eat(buf.len());
         Ok(f64::from_le_bytes(buf))
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/modules.html#binary-export
+impl<'s> Parse<'s> for Export<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let start = parser.current_pos();
+        let name = parser.parse()?;
+        let kind = match parser.consume("export description")? {
+            0x00 => ExportKind::Func(parser.parse()?),
+            0x01 => ExportKind::Table(parser.parse()?),
+            0x02 => ExportKind::Memory(parser.parse()?),
+            0x03 => ExportKind::Global(parser.parse()?),
+            b => {
+                return Err(parser.unexpected_byte(
+                    [0x00, 0x01, 0x02, 0x03],
+                    b,
+                    "export description",
+                ));
+            }
+        };
+        Ok(Export { start, name, kind })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/modules.html#start-section
+impl<'s> Parse<'s> for StartFunction {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        Ok(StartFunction {
+            start: parser.current_pos(),
+            idx: parser.parse()?,
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/modules.html#binary-elem
+impl<'s> Parse<'s> for ElemSegment {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let start = parser.current_pos();
+        let idx = parser.parse()?;
+        let Expr(offset) = parser.parse()?;
+        let init = parser.parse_vec()?.vec()?;
+        Ok(ElemSegment {
+            start,
+            idx,
+            offset,
+            init,
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/modules.html#binary-code
+struct Code {
+    start: usize,
+    locals: Vec<ValType>,
+    expr: Vec<Instruction>,
+}
+impl<'s> Parse<'s> for Code {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let start = parser.current_pos();
+        let size = parser.parse_int::<u32>()?;
+        // Parsing code section out of the size is malformed. To check it,
+        // here we parse the subsequence with nested parser.
+        let mut parser = parser.sub_parser(size as usize, "code section")?;
+
+        let mut locals = vec![];
+        for loc in parser.parse_vec::<Locals>()? {
+            let loc = loc?;
+            locals.resize(locals.len() + loc.count as usize, loc.ty);
+        }
+
+        let Expr(expr) = parser.parse()?;
+        Ok(Code {
+            start,
+            locals,
+            expr,
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/modules.html#binary-local
+struct Locals {
+    count: u32,
+    ty: ValType,
+}
+impl<'s> Parse<'s> for Locals {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        Ok(Locals {
+            count: parser.parse_int()?,
+            ty: parser.parse()?,
+        })
+    }
+}
+
+// https://webassembly.github.io/spec/core/binary/modules.html#binary-data
+impl<'s> Parse<'s> for DataSegment<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let start = parser.current_pos();
+        let idx = parser.parse()?;
+        let Expr(offset) = parser.parse()?;
+
+        // Parse vec(byte) with zero allocation
+        let size = parser.parse_int::<u32>()? as usize;
+        if size > parser.input.len() {
+            return Err(parser.error(ErrorKind::LengthOutOfInput {
+                input: parser.input.len(),
+                specified: size,
+                what: "byte buffer in data segment",
+            }));
+        }
+        let data = &parser.input[..size];
+        parser.eat(size);
+
+        Ok(DataSegment {
+            start,
+            idx,
+            offset,
+            data: Cow::Borrowed(data),
+        })
     }
 }

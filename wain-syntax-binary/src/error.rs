@@ -22,11 +22,16 @@ pub enum ErrorKind {
         what: &'static str,
         error: Utf8Error,
     },
-    MagicMismatch {
+    UnexpectedByte {
         expected: Vec<u8>,
         got: u8,
         what: &'static str,
     },
+    FuncCodeLengthMismatch {
+        num_funcs: usize,
+        num_codes: usize,
+    },
+    ExpectedEof(u8),
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -74,21 +79,21 @@ impl<'s> fmt::Display for Error<'s> {
                 what, specified, input
             )?,
             InvalidUtf8 { what, error } => write!(f, "{} must be UTF-8 sequence: {}", what, error)?,
-            MagicMismatch {
+            UnexpectedByte {
                 expected,
                 got,
                 what,
             } if expected.is_empty() => write!(f, "unexpected byte 0x{:x} at {}", got, what,)?,
-            MagicMismatch {
+            UnexpectedByte {
                 expected,
                 got,
                 what,
             } if expected.len() == 1 => write!(
                 f,
-                "expected 0x{:x} for {} but got 0x{:x}",
+                "expected byte 0x{:x} for {} but got 0x{:x}",
                 expected[0], what, got
             )?,
-            MagicMismatch {
+            UnexpectedByte {
                 expected,
                 got,
                 what,
@@ -102,8 +107,21 @@ impl<'s> fmt::Display for Error<'s> {
                     write!(f, "0x{:x}", b)?;
                     first = false;
                 }
-                write!(f, " for {} but got 0x{:x}", what, got)?;
+                write!(f, " for {} but got byte 0x{:x}", what, got)?;
             }
+            FuncCodeLengthMismatch {
+                num_funcs,
+                num_codes,
+            } => write!(
+                f,
+                "number of function sections '{}' does not match to number of code sections '{}'",
+                num_funcs, num_codes,
+            )?,
+            ExpectedEof(b) => write!(
+                f,
+                "expected end of input but byte 0x{:x} is still following",
+                b
+            )?,
         }
         describe_position(f, self.source, self.pos)
     }
