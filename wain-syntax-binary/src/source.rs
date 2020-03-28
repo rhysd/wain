@@ -17,7 +17,7 @@ pub(crate) fn describe_position(
         };
         write!(f, " caused at byte offset {}\n\n ...", pos)?;
         for b in source {
-            write!(f, " {:2x}", b)?;
+            write!(f, " {:02x}", b)?;
         }
         f.write_str("\n     ^\n     starts from here")
     }

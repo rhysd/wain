@@ -39,11 +39,22 @@ pub struct Error<'source> {
     pub kind: ErrorKind,
     pub pos: usize,
     pub source: &'source [u8],
+    pub when: &'static str,
 }
 
 impl<'s> Error<'s> {
-    pub(crate) fn new(kind: ErrorKind, pos: usize, source: &'s [u8]) -> Box<Error<'s>> {
-        Box::new(Error { kind, pos, source })
+    pub(crate) fn new(
+        kind: ErrorKind,
+        pos: usize,
+        source: &'s [u8],
+        when: &'static str,
+    ) -> Box<Error<'s>> {
+        Box::new(Error {
+            kind,
+            pos,
+            source,
+            when,
+        })
     }
 }
 
@@ -83,14 +94,14 @@ impl<'s> fmt::Display for Error<'s> {
                 expected,
                 got,
                 what,
-            } if expected.is_empty() => write!(f, "unexpected byte 0x{:x} at {}", got, what,)?,
+            } if expected.is_empty() => write!(f, "unexpected byte 0x{:02x} at {}", got, what,)?,
             UnexpectedByte {
                 expected,
                 got,
                 what,
             } if expected.len() == 1 => write!(
                 f,
-                "expected byte 0x{:x} for {} but got 0x{:x}",
+                "expected byte 0x{:02x} for {} but got 0x{:02x}",
                 expected[0], what, got
             )?,
             UnexpectedByte {
@@ -104,10 +115,10 @@ impl<'s> fmt::Display for Error<'s> {
                     if !first {
                         f.write_str(", ")?;
                     }
-                    write!(f, "0x{:x}", b)?;
+                    write!(f, "0x{:02x}", b)?;
                     first = false;
                 }
-                write!(f, " for {} but got byte 0x{:x}", what, got)?;
+                write!(f, " for {} but got byte 0x{:02x}", what, got)?;
             }
             FuncCodeLengthMismatch {
                 num_funcs,
@@ -119,10 +130,11 @@ impl<'s> fmt::Display for Error<'s> {
             )?,
             ExpectedEof(b) => write!(
                 f,
-                "expected end of input but byte 0x{:x} is still following",
+                "expected end of input but byte 0x{:02x} is still following",
                 b
             )?,
         }
+        write!(f, " while parsing {}", self.when)?;
         describe_position(f, self.source, self.pos)
     }
 }

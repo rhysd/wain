@@ -70,6 +70,8 @@ pub struct Parser<'source> {
     source: &'source [u8],
     input: &'source [u8],
     rest_len: usize,
+    // What is being parsed for better error message
+    parsing: &'static str,
 }
 
 impl<'s> Parser<'s> {
@@ -78,6 +80,7 @@ impl<'s> Parser<'s> {
             source: input,
             input,
             rest_len: 0,
+            parsing: "module",
         }
     }
 
@@ -101,7 +104,7 @@ impl<'s> Parser<'s> {
 
     fn error(&self, kind: ErrorKind) -> Box<Error<'s>> {
         let pos = self.current_pos();
-        Error::new(kind, pos, self.source)
+        Error::new(kind, pos, self.source, self.parsing)
     }
 
     fn unexpected_byte<T: AsRef<[u8]>>(
@@ -116,7 +119,7 @@ impl<'s> Parser<'s> {
             got,
             what,
         };
-        Error::new(kind, pos, self.source)
+        Error::new(kind, pos, self.source, self.parsing)
     }
 
     pub fn parse<P: Parse<'s>>(&mut self) -> Result<'s, P> {
@@ -151,6 +154,7 @@ impl<'s> Parser<'s> {
             source: self.source,
             rest_len: self.input.len() - sub_len,
             input: &self.input[..sub_len],
+            parsing: what,
         })
     }
 
@@ -166,8 +170,11 @@ impl<'s> Parser<'s> {
     // Note: Custom section is a pair of name and bytes payload. Currently custom section is simply
     // ignored since it is not necessary to execute wasm binary.
     fn ignore_custom_sections(&mut self) -> Result<'s, ()> {
-        while let [0x00, ..] = self.input {
-            self.section_parser()?; // Generating section parser eats the entire section
+        while let [0, ..] = self.input {
+            self.eat(1); // Eat section ID
+            let size = self.parse_int::<u32>()? as usize;
+            self.check_len(size, "custom section")?;
+            self.eat(size);
         }
         Ok(())
     }
@@ -239,7 +246,7 @@ impl<'s> Parse<'s> for Module<'s> {
         parser.ignore_custom_sections()?;
 
         // Type section
-        let types = parse_section(parser, 0x01)?;
+        let types = parse_section(parser, 1)?;
 
         parser.ignore_custom_sections()?;
 
@@ -249,7 +256,7 @@ impl<'s> Parse<'s> for Module<'s> {
         let mut globals = vec![];
 
         // Import section
-        if let [0x02, ..] = parser.input {
+        if let [2, ..] = parser.input {
             let mut inner = parser.section_parser()?;
             for desc in inner.parse_vec()? {
                 match desc? {
@@ -266,7 +273,7 @@ impl<'s> Parse<'s> for Module<'s> {
         // Function section
         // https://webassembly.github.io/spec/core/binary/modules.html#binary-funcsec
         // Only type indices are stored in function section. Locals and bodies are stored in code section
-        let func_indices: Vec<u32> = parse_section(parser, 0x03)?;
+        let func_indices: Vec<u32> = parse_section(parser, 3)?;
         funcs.reserve(func_indices.len());
 
         parser.ignore_custom_sections()?;
@@ -307,12 +314,12 @@ impl<'s> Parse<'s> for Module<'s> {
 
         parser.ignore_custom_sections()?;
 
-        let exports = parse_section(parser, 0x07)?;
+        let exports = parse_section(parser, 7)?;
 
         parser.ignore_custom_sections()?;
 
         // Start function section
-        let entrypoint = if let [0x08, ..] = parser.input {
+        let entrypoint = if let [8, ..] = parser.input {
             let mut inner = parser.section_parser()?;
             Some(inner.parse()?)
         } else {
@@ -322,12 +329,12 @@ impl<'s> Parse<'s> for Module<'s> {
         parser.ignore_custom_sections()?;
 
         // Element segments section
-        let elems = parse_section(parser, 0x09)?;
+        let elems = parse_section(parser, 9)?;
 
         parser.ignore_custom_sections()?;
 
         // Code section
-        if let [0x10, ..] = parser.input {
+        if let [10, ..] = parser.input {
             let mut inner = parser.section_parser()?;
             let codes = inner.parse_vec::<Code>()?;
             if codes.count != func_indices.len() {
@@ -351,7 +358,7 @@ impl<'s> Parse<'s> for Module<'s> {
 
         parser.ignore_custom_sections()?;
 
-        let data = parse_section(parser, 0x11)?;
+        let data = parse_section(parser, 11)?;
 
         parser.ignore_custom_sections()?;
 
@@ -381,7 +388,10 @@ impl<'s> Parse<'s> for Name<'s> {
         let size = parser.parse_int::<u32>()? as usize;
         parser.check_len(size, "name")?;
         match str::from_utf8(&parser.input[..size]) {
-            Ok(name) => Ok(Name(Cow::Borrowed(name))),
+            Ok(name) => {
+                parser.eat(size);
+                Ok(Name(Cow::Borrowed(name)))
+            }
             Err(error) => Err(parser.error(ErrorKind::InvalidUtf8 {
                 what: "name",
                 error,
@@ -563,6 +573,7 @@ struct BlockType(Option<ValType>);
 impl<'s> Parse<'s> for BlockType {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         if let [0x40, ..] = parser.input {
+            parser.eat(1);
             return Ok(BlockType(None));
         }
         Ok(BlockType(Some(parser.parse()?)))
@@ -914,18 +925,19 @@ struct Code {
 impl<'s> Parse<'s> for Code {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.current_pos();
-        let size = parser.parse_int::<u32>()?;
+        let size = parser.parse_int::<u32>()? as usize;
         // Parsing code section out of the size is malformed. To check it,
         // here we parse the subsequence with nested parser.
-        let mut parser = parser.sub_parser(size as usize, "code section")?;
+        let mut inner = parser.sub_parser(size, "code section")?;
+        parser.eat(size);
 
         let mut locals = vec![];
-        for loc in parser.parse_vec::<Locals>()? {
+        for loc in inner.parse_vec::<Locals>()? {
             let loc = loc?;
             locals.resize(locals.len() + loc.count as usize, loc.ty);
         }
 
-        let Expr(expr) = parser.parse()?;
+        let Expr(expr) = inner.parse()?;
         Ok(Code {
             start,
             locals,
@@ -973,5 +985,145 @@ impl<'s> Parse<'s> for DataSegment<'s> {
             offset,
             data: Cow::Borrowed(data),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+
+    fn unwrap<'s, T>(res: Result<'s, T>) -> T {
+        match res {
+            Ok(x) => x,
+            Err(e) => panic!("unexpected error: {}", e),
+        }
+    }
+
+    fn read_hello_file(name: &'static str) -> Vec<u8> {
+        let mut dir = env::current_dir().unwrap();
+        dir.pop();
+        dir.push("examples");
+        dir.push("hello");
+        dir.push(name);
+        fs::read(dir).unwrap()
+    }
+
+    // From examples
+    #[test]
+    fn hello_world() {
+        let bin = read_hello_file("hello.wasm");
+
+        let mut parser = Parser::new(&bin);
+        let root: Root<'_, _> = unwrap(parser.parse());
+
+        let t = &root.module.types;
+        assert_eq!(t.len(), 3);
+        assert_eq!(&t[0].params, &[ValType::I32]);
+        assert_eq!(&t[0].results, &[ValType::I32]);
+        assert_eq!(&t[1].params, &[ValType::I32]);
+        assert_eq!(&t[1].results, &[]);
+        assert_eq!(&t[2].params, &[]);
+        assert_eq!(&t[2].results, &[]);
+
+        let f = &root.module.funcs;
+        assert_eq!(f.len(), 3);
+        assert!(matches!(&f[0], Func {
+            idx: 0,
+            kind: FuncKind::Import(Import {
+                mod_name: Name(n1),
+                name: Name(n2),
+            }),
+            ..
+        } if n1 == "env" && n2 == "putchar"));
+        assert!(matches!(&f[1], Func {
+            idx: 1,
+            kind: FuncKind::Body{..},
+            ..
+        }));
+        assert!(matches!(&f[2], Func {
+            idx: 2,
+            kind: FuncKind::Body{..},
+            ..
+        }));
+
+        let e = &root.module.exports;
+        assert_eq!(e.len(), 2);
+        assert!(matches!(&e[0], Export {
+            name: Name(n),
+            kind: ExportKind::Memory(0),
+            ..
+        } if n == "memory"));
+        assert!(matches!(&e[1], Export {
+            name: Name(n),
+            kind: ExportKind::Func(2),
+            ..
+        } if n == "_start"));
+
+        assert!(root.module.elems.is_empty());
+
+        let t = &root.module.tables;
+        assert_eq!(t.len(), 1);
+        assert!(matches!(&t[0], Table {
+            ty: TableType {
+                limit: Limits::Range(1, 1),
+            },
+            import: None,
+            ..
+        }));
+
+        let m = &root.module.memories;
+        assert_eq!(m.len(), 1);
+        assert!(matches!(&m[0], Memory {
+            ty: MemType {
+                limit: Limits::From(2),
+            },
+            import: None,
+            ..
+        }));
+
+        let d = &root.module.data;
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].idx, 0);
+        assert!(matches!(
+            d[0].offset.as_slice(),
+            [Instruction {
+                kind: InsnKind::I32Const(1024),
+                ..
+            }]
+        ));
+        assert_eq!(d[0].data.as_ref(), b"Hello, world\n\0".as_ref());
+
+        let g = &root.module.globals;
+        assert_eq!(g.len(), 1);
+        assert!(matches!(&g[0], Global {
+            mutable: true,
+            ty: ValType::I32,
+            kind: GlobalKind::Init(expr),
+            ..
+        } if matches!(
+            expr.as_slice(),
+            [
+                Instruction {
+                    kind: InsnKind::I32Const(66576),
+                    ..
+                }
+            ]
+        )));
+
+        assert!(root.module.entrypoint.is_none());
+
+        let bin = read_hello_file("hello_global.wasm");
+        let mut parser = Parser::new(&bin);
+        let _: Root<'_, _> = unwrap(parser.parse());
+
+        let bin = read_hello_file("hello_indirect_call.wasm");
+        let mut parser = Parser::new(&bin);
+        let _: Root<'_, _> = unwrap(parser.parse());
+
+        let bin = read_hello_file("hello_struct.wasm");
+        let mut parser = Parser::new(&bin);
+        let _: Root<'_, _> = unwrap(parser.parse());
     }
 }
