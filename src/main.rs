@@ -66,8 +66,8 @@ OPTIONS:
     --help | -h : Show this help
 
 ARGUMENTS:
-    Currently one '.wat' file can be specified. If not specified, STDIN will be
-    interpreted as text format wasm file.
+    Currently one '.wat' file or '.wasm' file can be specified. If not
+    specified, STDIN will be interpreted as text format wasm file.
 
 REPOSITORY:
     https://github.com/rhysd/wain
