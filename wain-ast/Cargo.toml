@@ -3,7 +3,21 @@ name = "wain-ast"
 version = "0.0.0"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2018"
+description = "WebAssembly abstract syntax tree definition used by both binary format and text format for wain project"
+license = "MIT"
+homepage = "https://github.com/rhysd/wain/tree/master/wain-ast"
+repository = "https://github.com/rhysd/wain"
+readme = "README.md"
+include = ["src/**/*.rs", "Cargo.toml"]
+keywords = ["wasm", "webassembly", "wat", "syntax-tree"]
+categories = ["wasm"]
+
+[package.metadata.release]
+no-dev-version = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+
+[badges]
+maintenance = { status = "actively-developed" }

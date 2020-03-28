@@ -3,13 +3,27 @@ name = "wain"
 version = "0.0.0"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2018"
-description = "WIP"
+description = "WebAssembly interpreter written in Safe Rust with zero dependency"
 license = "MIT"
+homepage = "https://github.com/rhysd/wain"
+repository = "https://github.com/rhysd/wain"
+readme = "README.md"
+include = ["src/**/*.rs", "Cargo.toml"]
+keywords = ["wasm", "webassembly", "interpreter", "wat"]
+categories = ["wasm"]
+
+[package.metadata.release]
+no-dev-version = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
 name = "wain"
+
+[profile.release]
+debug = 1
+lto = true
+panic = "abort"
 
 [features]
 default = ["binary", "text"]
@@ -32,3 +46,6 @@ members = [
     "wain-validate",
     "wain-exec",
 ]
+
+[badges]
+maintenance = { status = "actively-developed" }

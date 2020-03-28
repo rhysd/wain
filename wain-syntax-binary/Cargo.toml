@@ -3,8 +3,22 @@ name = "wain-syntax-binary"
 version = "0.0.0"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2018"
+description = "WebAssembly binary format parser for wain project"
+license = "MIT"
+homepage = "https://github.com/rhysd/wain/tree/master/wain-syntax-binary"
+repository = "https://github.com/rhysd/wain"
+readme = "README.md"
+include = ["src/**/*.rs", "Cargo.toml"]
+keywords = ["wasm", "webassembly", "parser"]
+categories = ["wasm", "parser-implementations"]
+
+[package.metadata.release]
+no-dev-version = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wain-ast = { path = "../wain-ast", version = "0.0.0" }
+wain-ast = { path = "../wain-ast" }
+
+[badges]
+maintenance = { status = "actively-developed" }
