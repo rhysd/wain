@@ -44,6 +44,12 @@ $ cargo install wain
 $ wain --help
 ```
 
+If you don't want to run text format code, it can be omitted:
+
+```
+# Only run binary format files
+$ cargo install wain --no-default-features --features binary
+```
 
 ## Usage
 
@@ -95,7 +101,7 @@ wain consists of multiple crates.
 
 ## How it works
 
-Here I note some key points on each phase of interpretation.
+Here I note some points on each phase of interpretation.
 
 ### Parsing
 

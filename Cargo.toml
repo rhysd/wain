@@ -11,10 +11,15 @@ license = "MIT"
 [[bin]]
 name = "wain"
 
+[features]
+default = ["binary", "text"]
+binary = ["wain-syntax-binary"]
+text = ["wain-syntax-text"]
+
 [dependencies]
 wain-ast = { path = "./wain-ast" }
-wain-syntax-text = { path = "./wain-syntax-text" }
-wain-syntax-binary = { path = "./wain-syntax-binary" }
+wain-syntax-text = { path = "./wain-syntax-text", optional = true }
+wain-syntax-binary = { path = "./wain-syntax-binary", optional = true }
 wain-validate = { path = "./wain-validate" }
 wain-exec = { path = "./wain-exec" }
 

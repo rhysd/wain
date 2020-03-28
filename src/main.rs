@@ -4,18 +4,32 @@ use std::io;
 use std::io::Read;
 use std::process::exit;
 
+#[allow(dead_code)]
 enum InputFile {
     Text(String),
     Binary(String),
     Stdin,
 }
 
+#[allow(dead_code)]
 impl InputFile {
     fn filename(&self) -> Option<&str> {
         match self {
             InputFile::Text(f) => Some(f),
             InputFile::Binary(f) => Some(f),
             InputFile::Stdin => None,
+        }
+    }
+
+    fn read_text(&self) -> io::Result<String> {
+        match self {
+            InputFile::Text(f) => fs::read_to_string(f),
+            InputFile::Stdin => {
+                let mut stdin = String::new();
+                io::stdin().read_to_string(&mut stdin)?;
+                Ok(stdin)
+            }
+            InputFile::Binary(_) => unreachable!(),
         }
     }
 }
@@ -43,12 +57,25 @@ fn parse_args() -> Result<Options, String> {
         }
 
         if arg.ends_with(".wasm") {
-            file = InputFile::Binary(arg);
-        } else if arg.ends_with(".wat") {
-            file = InputFile::Text(arg);
-        } else {
-            return Err(format!("File '{}' does not end with '.wat'. Currently only text format wasm file is supported. See --help", arg));
+            #[cfg(feature = "binary")]
+            {
+                file = InputFile::Binary(arg);
+                continue;
+            }
         }
+
+        if arg.ends_with(".wat") {
+            #[cfg(feature = "text")]
+            {
+                file = InputFile::Text(arg);
+                continue;
+            }
+        }
+
+        return Err(format!(
+            "File '{}' does not end with '.wasm' nor '.wat'. See --help",
+            arg
+        ));
     }
 
     Ok(Options { file, help })
@@ -91,6 +118,28 @@ fn run<S: wain_ast::source::Source>(ast: wain_ast::Root<'_, S>) -> wain_exec::Ru
     unwrap("running wasm", wain_exec::execute(ast.module))
 }
 
+#[cfg(feature = "binary")]
+fn run_binary(file: &str) -> wain_exec::Run {
+    let source = unwrap("reading .wasm file", fs::read(file));
+    let ast = unwrap("parsing", wain_syntax_binary::parse(&source));
+    run(ast)
+}
+#[cfg(not(feature = "binary"))]
+fn run_binary(_: &str) -> wain_exec::Run {
+    unreachable!()
+}
+
+#[cfg(feature = "text")]
+fn run_text(file: InputFile) -> wain_exec::Run {
+    let source = unwrap("reading text file", file.read_text());
+    let ast = unwrap("parsing", wain_syntax_text::parse(&source));
+    run(ast)
+}
+#[cfg(not(feature = "text"))]
+fn run_text(_: InputFile) -> wain_exec::Run {
+    unreachable!()
+}
+
 fn main() {
     let opts = unwrap("parsing command line", parse_args());
 
@@ -98,23 +147,10 @@ fn main() {
         help();
     }
 
-    let result = match opts.file {
-        InputFile::Binary(file) => {
-            let source = unwrap("reading .wasm file", fs::read(file));
-            let ast = unwrap("parsing", wain_syntax_binary::parse(&source));
-            run(ast)
-        }
-        InputFile::Text(file) => {
-            let source = unwrap("reading .wat file", fs::read_to_string(file));
-            let ast = unwrap("parsing", wain_syntax_text::parse(&source));
-            run(ast)
-        }
-        InputFile::Stdin => {
-            let mut stdin = String::new();
-            unwrap("reading stdin", io::stdin().read_to_string(&mut stdin));
-            let ast = unwrap("parsing", wain_syntax_text::parse(&stdin));
-            run(ast)
-        }
+    let result = match &opts.file {
+        InputFile::Binary(file) => run_binary(file),
+        InputFile::Text(_) => run_text(opts.file),
+        InputFile::Stdin => run_text(opts.file),
     };
 
     if let wain_exec::Run::Warning(msg) = result {
