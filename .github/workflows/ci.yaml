@@ -4,7 +4,11 @@ on: [push, pull_request]
 jobs:
   unit-test:
     name: Unit tests
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
       - name: Install Rust toolchain
