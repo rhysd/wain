@@ -839,15 +839,13 @@ impl<'s> Parse<'s> for Mem {
 // https://webassembly.github.io/spec/core/binary/values.html#floating-point
 impl<'s> Parse<'s> for f32 {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        let buf: [u8; 4] = match parser.input.try_into() {
-            Ok(b) => b,
-            Err(_) => {
-                return Err(parser.error(ErrorKind::UnexpectedEof {
-                    expected: "32bit floating point number",
-                }))
-            }
-        };
-        parser.eat(buf.len());
+        if parser.input.len() < 4 {
+            return Err(parser.error(ErrorKind::UnexpectedEof {
+                expected: "32bit floating point number",
+            }));
+        }
+        let buf: [u8; 4] = parser.input[..4].try_into().unwrap();
+        parser.eat(4);
         Ok(f32::from_le_bytes(buf))
     }
 }
@@ -855,15 +853,13 @@ impl<'s> Parse<'s> for f32 {
 // https://webassembly.github.io/spec/core/binary/values.html#floating-point
 impl<'s> Parse<'s> for f64 {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        let buf: [u8; 8] = match parser.input.try_into() {
-            Ok(b) => b,
-            Err(_) => {
-                return Err(parser.error(ErrorKind::UnexpectedEof {
-                    expected: "32bit floating point number",
-                }))
-            }
-        };
-        parser.eat(buf.len());
+        if parser.input.len() < 8 {
+            return Err(parser.error(ErrorKind::UnexpectedEof {
+                expected: "32bit floating point number",
+            }));
+        }
+        let buf: [u8; 8] = parser.input[..8].try_into().unwrap();
+        parser.eat(8);
         Ok(f64::from_le_bytes(buf))
     }
 }
