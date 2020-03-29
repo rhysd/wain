@@ -56,7 +56,7 @@ impl<'m, 'a, I: Importer> Machine<'m, 'a, I> {
         let mut memory = Memory::allocate(&module.memories)?;
 
         // 7. and 8. push empty frame (unnecessary for now)
-        let stack = Stack::new();
+        let stack = Stack::default();
 
         // 9. add element segments to table
         for elem in module.elems.iter() {

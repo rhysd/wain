@@ -31,7 +31,7 @@ use wain_ast::Module;
 /// You will need importer for initializing Machine struct. Please use DefaultImporter::with_stdio()
 /// or make your own importer struct which implements Importer trait.
 pub fn execute(module: Module<'_>) -> Result<Run> {
-    let importer = DefaultImporter::new();
+    let importer = DefaultImporter::default();
     let mut machine = Machine::instantiate(&module, importer)?;
     machine.execute()
 }

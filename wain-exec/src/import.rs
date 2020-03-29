@@ -21,8 +21,8 @@ pub struct DefaultImporter<R: Read, W: Write> {
     stdin: R,
 }
 
-impl DefaultImporter<io::BufReader<io::Stdin>, io::BufWriter<io::Stdout>> {
-    pub fn new() -> Self {
+impl Default for DefaultImporter<io::BufReader<io::Stdin>, io::BufWriter<io::Stdout>> {
+    fn default() -> Self {
         let stdin = io::BufReader::new(io::stdin());
         let stdout = io::BufWriter::new(io::stdout());
         Self { stdin, stdout }

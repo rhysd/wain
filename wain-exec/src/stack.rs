@@ -9,6 +9,7 @@ use wain_ast::ValType;
 // Vec<Value> consumes too much space since its element size is always 64bits.
 // To use space more efficiently, here use u32 for storing values as bytes.
 
+#[derive(Default)]
 pub struct Stack {
     bytes: Vec<u8>,      // Bytes buffer for actual values
     types: Vec<ValType>, // this stack is necessary to pop arbitrary value
@@ -92,13 +93,6 @@ impl StackAccess for Value {
 }
 
 impl Stack {
-    pub fn new() -> Self {
-        Stack {
-            bytes: vec![],
-            types: vec![],
-        }
-    }
-
     // Note: Here I don't use std::slice::from_raw since its unsafe
 
     fn top_type(&self) -> ValType {
@@ -260,7 +254,7 @@ mod tests {
 
     #[test]
     fn i32_value() {
-        let mut s = Stack::new();
+        let mut s = Stack::default();
         s.push(0i32);
         assert_eq!(s.top::<i32>(), 0);
         s.push(1i32);
@@ -277,7 +271,7 @@ mod tests {
 
     #[test]
     fn i64_value() {
-        let mut s = Stack::new();
+        let mut s = Stack::default();
         s.push(0i64);
         s.push(1i64);
         s.push(-1i64);
@@ -297,7 +291,7 @@ mod tests {
 
     #[test]
     fn f32_value() {
-        let mut s = Stack::new();
+        let mut s = Stack::default();
         s.push(0.0f32);
         assert_eq!(s.top::<f32>(), 0.0);
         s.push(3.14f32);
@@ -316,7 +310,7 @@ mod tests {
 
     #[test]
     fn f64_value() {
-        let mut s = Stack::new();
+        let mut s = Stack::default();
         s.push(0.0f64);
         assert_eq!(s.top::<f64>(), 0.0f64);
         s.push(3.14f64);
@@ -348,7 +342,7 @@ mod tests {
         let f32_s = [0.0, 3.14, -1.0, f32::INFINITY, f32::NEG_INFINITY, f32::NAN];
         let f64_s = [0.0, 3.14, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN];
 
-        let mut s = Stack::new();
+        let mut s = Stack::default();
         for (((i32v, i64v), f32v), f64v) in i32_s
             .iter()
             .cycle()
