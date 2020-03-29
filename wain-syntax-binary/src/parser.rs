@@ -13,7 +13,7 @@ fn section_name(id: u8) -> &'static str {
         0 => "custom section",
         1 => "type section",
         2 => "import section",
-        3 => "import section",
+        3 => "function section",
         4 => "table section",
         5 => "memory section",
         6 => "global section",
