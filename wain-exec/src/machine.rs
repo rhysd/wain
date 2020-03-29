@@ -1,10 +1,10 @@
 use crate::globals::Globals;
+use crate::import::{ImportError, Importer};
 use crate::memory::Memory;
 use crate::stack::{CallFrame, Stack, StackAccess};
 use crate::table::Table;
 use crate::trap::{Result, Trap, TrapReason};
 use crate::value::{LittleEndian, Value};
-use std::io::{Read, Write};
 use wain_ast as ast;
 
 // Note: This implementation currently ignores Wasm's thread model since MVP does not support multiple
@@ -28,19 +28,18 @@ enum ExecState {
 type ExecResult = Result<ExecState>;
 
 // State of abtract machine to run wasm code. This struct contains both store and stack
-pub struct Machine<'module, 'source, R: Read, W: Write> {
+pub struct Machine<'module, 'source, I: Importer> {
     module: &'module ast::Module<'source>,
     table: Table, // Only one table is allowed for MVP
     stack: Stack,
     memory: Memory, // Only one memory is allowed for MVP
     globals: Globals,
-    stdout: W,
-    stdin: R,
+    importer: I,
 }
 
-impl<'m, 'a, R: Read, W: Write> Machine<'m, 'a, R, W> {
+impl<'m, 'a, I: Importer> Machine<'m, 'a, I> {
     // https://webassembly.github.io/spec/core/exec/modules.html#instantiation
-    pub fn instantiate(module: &'m ast::Module<'a>, stdin: R, stdout: W) -> Result<Self> {
+    pub fn instantiate(module: &'m ast::Module<'a>, importer: I) -> Result<Self> {
         // TODO: 2., 3., 4. Validate external values before instantiate globals
 
         // 5. global initialization values determined by module and externval
@@ -49,14 +48,7 @@ impl<'m, 'a, R: Read, W: Write> Machine<'m, 'a, R, W> {
         // 6. a new module instance allocated from module in store S
         // https://webassembly.github.io/spec/core/exec/modules.html#alloc-module
 
-        // 6.2 allocate functions
-        for func in module.funcs.iter() {
-            if let ast::FuncKind::Import(i) = &func.kind {
-                if i.mod_name.0 != "env" || i.name.0 != "putchar" && i.name.0 != "getchar" {
-                    return Err(Trap::unknown_import(i, "function", func.start));
-                }
-            }
-        }
+        // 6.2 allocate functions (nothing to do since we run abstract tree directly)
 
         // 6.3 allocate table
         let mut table = Table::allocate(&module.tables)?;
@@ -84,13 +76,31 @@ impl<'m, 'a, R: Read, W: Write> Machine<'m, 'a, R, W> {
             stack,
             memory,
             globals,
-            stdin,
-            stdout,
+            importer,
         })
     }
 
-    pub fn stdout(&mut self) -> &mut W {
-        &mut self.stdout
+    fn invoke_import(&mut self, import: &ast::Import<'a>, pos: usize) -> ExecResult {
+        if import.mod_name.0 == "env" {
+            match self
+                .importer
+                .call(&import.name.0, &mut self.stack, &mut self.memory)
+            {
+                Ok(()) => return Ok(ExecState::Continue),
+                Err(ImportError::NotFound) => { /* fallthrough */ }
+                Err(ImportError::Fatal { message }) => {
+                    return Err(Trap::new(
+                        TrapReason::ImportFuncCallFail {
+                            mod_name: import.mod_name.0.to_string(),
+                            name: import.name.0.to_string(),
+                            msg: message,
+                        },
+                        pos,
+                    ))
+                }
+            }
+        }
+        Err(Trap::unknown_import(import, "function", pos))
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#function-calls
@@ -99,17 +109,7 @@ impl<'m, 'a, R: Read, W: Write> Machine<'m, 'a, R, W> {
 
         // Call this function with params
         let (locals, body) = match &func.kind {
-            ast::FuncKind::Import(i) => {
-                if i.mod_name.0 == "env" {
-                    if i.name.0 == "putchar" {
-                        return self.putchar().map(|_| ExecState::Continue);
-                    }
-                    if i.name.0 == "getchar" {
-                        return self.getchar().map(|_| ExecState::Continue);
-                    }
-                }
-                return Err(Trap::unknown_import(i, "function", func.start));
-            }
+            ast::FuncKind::Import(i) => return self.invoke_import(i, func.start),
             ast::FuncKind::Body { locals, expr } => (locals, expr),
         };
 
@@ -160,27 +160,6 @@ impl<'m, 'a, R: Read, W: Write> Machine<'m, 'a, R, W> {
         }
 
         Ok(Run::Warning("no entrypoint found. 'start' section nor '_start' exported function is set to the module"))
-    }
-
-    fn putchar(&mut self) -> Result<()> {
-        let v: i32 = self.stack.pop();
-        let b = v as u8;
-        let ret = match self.stdout.write(&[b]) {
-            Ok(_) => b as i32,
-            Err(_) => -1, // EOF
-        };
-        self.stack.push(ret);
-        Ok(())
-    }
-
-    fn getchar(&mut self) -> Result<()> {
-        let mut buf = [0u8];
-        let v = match self.stdin.read_exact(&mut buf) {
-            Ok(()) => buf[0] as i32,
-            Err(_) => -1, // EOF
-        };
-        self.stack.push(v);
-        Ok(())
     }
 
     fn mem_addr(&mut self, mem: &ast::Mem) -> usize {
@@ -237,13 +216,13 @@ impl<'m, 'a, R: Read, W: Write> Machine<'m, 'a, R, W> {
     }
 }
 
-trait Execute<'f, 'm, 'a, R: Read, W: Write> {
-    fn execute(&self, machine: &mut Machine<'m, 'a, R, W>, frame: &CallFrame<'f>) -> ExecResult;
+trait Execute<'f, 'm, 'a, I: Importer> {
+    fn execute(&self, machine: &mut Machine<'m, 'a, I>, frame: &CallFrame<'f>) -> ExecResult;
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html#blocks
-impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for Vec<ast::Instruction> {
-    fn execute(&self, machine: &mut Machine<'m, 'a, R, W>, frame: &CallFrame<'f>) -> ExecResult {
+impl<'f, 'm, 'a, I: Importer> Execute<'f, 'm, 'a, I> for Vec<ast::Instruction> {
+    fn execute(&self, machine: &mut Machine<'m, 'a, I>, frame: &CallFrame<'f>) -> ExecResult {
         // Run instruction sequence as block
         for insn in self.iter() {
             match insn.execute(machine, frame)? {
@@ -256,9 +235,9 @@ impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for Vec<ast::Instr
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html
-impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for ast::Instruction {
+impl<'f, 'm, 'a, I: Importer> Execute<'f, 'm, 'a, I> for ast::Instruction {
     #[allow(clippy::cognitive_complexity)]
-    fn execute(&self, machine: &mut Machine<'m, 'a, R, W>, frame: &CallFrame<'f>) -> ExecResult {
+    fn execute(&self, machine: &mut Machine<'m, 'a, I>, frame: &CallFrame<'f>) -> ExecResult {
         use ast::InsnKind::*;
         #[allow(clippy::float_cmp)]
         match &self.kind {
@@ -709,6 +688,7 @@ impl<'f, 'm, 'a, R: Read, W: Write> Execute<'f, 'm, 'a, R, W> for ast::Instructi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::import::DefaultImporter;
     use std::env;
     use std::fmt;
     use std::fs;
@@ -740,8 +720,11 @@ mod tests {
             let ast = unwrap(parse(&source));
             unwrap(validate(&ast));
             let mut stdout = vec![];
-            let mut machine = unwrap(Machine::instantiate(&ast.module, Discard, &mut stdout));
-            let run = unwrap(machine.execute());
+            let run = {
+                let importer = DefaultImporter::with_stdio(Discard, &mut stdout);
+                let mut machine = unwrap(Machine::instantiate(&ast.module, importer));
+                unwrap(machine.execute())
+            };
             (run, stdout)
         }
 

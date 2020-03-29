@@ -3,16 +3,18 @@
 extern crate wain_ast;
 
 mod globals;
-pub mod machine;
+mod import;
+mod machine;
 mod memory;
 mod stack;
 mod table;
 mod trap;
 mod value;
 
+pub use import::{DefaultImporter, ImportError, Importer};
 pub use machine::{Machine, Run};
-use std::io;
-use std::io::Write;
+pub use memory::Memory;
+
 use trap::Result;
 use wain_ast::Module;
 
@@ -25,11 +27,11 @@ use wain_ast::Module;
 ///
 /// If the behavior is not acceptable, please make an abstract machine instance with
 /// Machine::instantiate and execute by Machine::execute method.
+///
+/// You will need importer for initializing Machine struct. Please use DefaultImporter::with_stdio()
+/// or make your own importer struct which implements Importer trait.
 pub fn execute(module: Module<'_>) -> Result<Run> {
-    let stdin = io::BufReader::new(io::stdin());
-    let stdout = io::BufWriter::new(io::stdout());
-    let mut machine = Machine::instantiate(&module, stdin, stdout)?;
-    let run = machine.execute()?;
-    machine.stdout().flush().unwrap();
-    Ok(run)
+    let importer = DefaultImporter::new();
+    let mut machine = Machine::instantiate(&module, importer)?;
+    machine.execute()
 }

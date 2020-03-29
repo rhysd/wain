@@ -40,6 +40,11 @@ pub enum TrapReason {
         operation: &'static str,
         ty: &'static str,
     },
+    ImportFuncCallFail {
+        mod_name: String,
+        name: String,
+        msg: String,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -143,6 +148,11 @@ impl fmt::Display for Trap {
                 f,
                 "cannot {} {} value at 0x{:x} due to out of range of memory. memory size is 0x{:x}",
                 operation, ty, addr, max,
+            )?,
+            ImportFuncCallFail { mod_name, name, msg } => write!(
+                f,
+                "calling imported function '{}' in module '{}': {}",
+                name, mod_name, msg,
             )?,
         }
         write!(

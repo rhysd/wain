@@ -136,4 +136,12 @@ impl Memory {
         LittleEndian::write(&mut self.data, addr, v);
         Ok(())
     }
+
+    pub fn data(&self) -> &'_ [u8] {
+        &self.data
+    }
+
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
 }
