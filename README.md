@@ -6,13 +6,13 @@ wain
 [wain][proj] is a **W**eb**A**ssembly **IN**terpreter written in Rust from scratch with zero dependency.
 An implementation of [WebAssembly][wasm-spec].
 
-![screencast](https://github.com/rhysd/ss/blob/master/wain/main.gif?raw=true)
+<img width=438 height=257 src="https://github.com/rhysd/ss/blob/master/wain/main.gif?raw=true" alt="screencast">
 
 **Features:**
 
 - No unsafe code. Memory safety and no undefined behavior are guaranteed
 - No external crate dependencies
-- Efficiency. Avoid unnecessary allocations and run instructions as much as possible
+- Efficiency. Avoid unnecessary allocations and run instructions as fast as possible without unsafe code
 - Modular implementation. Binary format parser, text format parser, validator, executor are
   developed as separate libraries
 
@@ -69,17 +69,16 @@ $ wain examples/hello/hello.wat
 Hello, world
 ```
 
-For examples wain can execute, please see [examples](./examples).
+Please see [examples directory](./examples) for more examples.
 
 Current restrictions are as follows:
 
-- Only `int putchar(int)` and `int getchar()` are implemented as external functions
+- Only `int putchar(int)` and `int getchar()` are implemented as external functions by default
 - wain can run only one module at once. It means that importing things from other modules does not
   work yet
 - Many extensions like threads, WASI support, SIMD support, ... are not implemented yet
 
-
-## Structure
+### As libraries
 
 wain consists of multiple crates.
 
@@ -98,6 +97,73 @@ wain consists of multiple crates.
   of [Wasm execution spec][wasm-spec-exec]. It directly interprets a syntax tree for now, but it
   would translate it into an internal representation and execute it for efficiency in the future
 
+`wain-*` crates are libraries as modular implementation of WebAssembly.
+
+Here is an example code to run the interpreter from Rust.
+
+```rust
+extern crate wain_syntax_binary;
+extern crate wain_validate;
+extern crate wain_exec;
+
+use std::fs;
+use std::process::exit;
+use wain_syntax_binary::parse;
+use wain_validate::validate;
+use wain_exec::{execute, Run};
+
+let source = fs::read("foo.wasm").unwrap();
+let tree = parse(&source).unwrap();
+
+if let Err(err) = validate(&tree) {
+    eprintln!("This .wasm file is invalid!: {}", err);
+    exit(1);
+}
+
+match execute(tree.module) {
+    Ok(run) => {
+        if let Run::Warning(msg) = run {
+            eprintln!("Warning: {}, msg);
+        }
+    }
+    Err(trap) => eprintln!("Execution was trapped: {}", trap),
+}
+```
+
+By default, only `putchar` and `getchar` in `env` module are supported as external functions.
+But you can implement your own struct which implements `wain_exec::Importer` for defining external
+functions from Rust side.
+
+```rust
+extern crate wain_exec;
+use wain_exec::{Machine, Stack, Memory, Importer}
+
+struct YourOwnImporter {
+    // ...
+}
+
+impl Importer for YourOwnImporter {
+    fn call(&mut self, name: &str, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportError> {
+        // Implement your own function call. `name` is a name of function and you have full access
+        // to stack and linear memory. Pop values from stack for getting arguments and push value to
+        // set return value.
+        // Note: Consistensy between imported function signature and implementation of this method
+        // is your responsibility.
+    };
+}
+
+let ast = ...; // Parse abstract syntax tree and validate it
+
+let mut machine = Machine::instantiate(&ast.module, YourOwnImporter{ /* ... */ }).unwrap();
+let run = machine.execute().unwrap();
+```
+
+## Future works
+
+- WASI support
+- Wasm features after MVP support (threads, SIMD, multiple return values, ...)
+- Compare benchmarks with other Wasm implementations
+
 
 ## How it works
 
@@ -105,7 +171,7 @@ Here I note some points on each phase of interpretation.
 
 ### Parsing
 
-![Sequence to parse Wasm](https://github.com/rhysd/ss/blob/master/wain/parsing-diagram.png?raw=true)
+<img width=644 height=433 src="https://github.com/rhysd/ss/blob/master/wain/parsing-diagram.png?raw=true" alt="Sequence to parse Wasm">
 
 [wain-syntax-binary](./wain-syntax-binary) parses `.wasm` binary file into `wain_ast::Root` abstract
 syntax tree following [binary format spec][wasm-spec-bin]. Wasm binary format is designed to be

@@ -68,6 +68,34 @@ of `Result`.
 the future). If this behavior is not acceptable, please specify your `io::Write`/`io::Read` values
 for stdout/stdin at `wain_exec::Machine::new()`. Then run the module by `wain_exec::Machine::execute()`.
 
+By default, only `putchar` and `getchar` in `env` module are supported as external functions.
+But you can implement your own struct which implements `wain_exec::Importer` for defining external
+functions from Rust side.
+
+```rust
+extern crate wain_exec;
+use wain_exec::{Machine, Stack, Memory, Importer}
+
+struct YourOwnImporter {
+    // ...
+}
+
+impl Importer for YourOwnImporter {
+    fn call(&mut self, name: &str, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportError> {
+        // Implement your own function call. `name` is a name of function and you have full access
+        // to stack and linear memory. Pop values from stack for getting arguments and push value to
+        // set return value.
+        // Note: Consistensy between imported function signature and implementation of this method
+        // is your responsibility.
+    };
+}
+
+let ast = ...; // Parse abstract syntax tree and validate it
+
+let mut machine = Machine::instantiate(&ast.module, YourOwnImporter{ /* ... */ }).unwrap();
+let run = machine.execute().unwrap();
+```
+
 Please read documentation (not yet) for details.
 
 

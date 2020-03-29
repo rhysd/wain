@@ -14,6 +14,7 @@ mod value;
 pub use import::{DefaultImporter, ImportError, Importer};
 pub use machine::{Machine, Run};
 pub use memory::Memory;
+pub use stack::Stack;
 
 use trap::Result;
 use wain_ast::Module;
