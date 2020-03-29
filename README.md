@@ -147,7 +147,7 @@ impl Importer for YourOwnImporter {
         // Implement your own function call. `name` is a name of function and you have full access
         // to stack and linear memory. Pop values from stack for getting arguments and push value to
         // set return value.
-        // Note: Consistensy between imported function signature and implementation of this method
+        // Note: Consistency between imported function signature and implementation of this method
         // is your responsibility.
     };
 }
@@ -163,6 +163,7 @@ let run = machine.execute().unwrap();
 - WASI support
 - Wasm features after MVP support (threads, SIMD, multiple return values, ...)
 - Compare benchmarks with other Wasm implementations
+- Self-hosting interpreter. Compile wain into Wasm and run it by itself
 
 
 ## How it works
@@ -184,7 +185,7 @@ parses `.wat` text file into `wain_ast::Root` abstract syntax tree following [te
 1. Lex and parse `.wat` file into WAT sytnax tree which is dedicated for text format resolving many
    syntax sugars. Since multiple modules can be put in `.wat` file, it can be parsed into multiple trees
 2. Translate the WAT syntax trees into common Wasm syntax trees (`wain_ast::Root`) resolving identifiers.
-   Identifiers may refer things not defined yet (foward references) so `.wat` file cannot be parsed
+   Identifiers may refer things not defined yet (forward references) so `.wat` file cannot be parsed
    into common Wasm syntax trees directly
 3. Compose a single module from the multiple Wasm syntax trees following
    [spec](https://webassembly.github.io/spec/core/text/modules.html#text-module)

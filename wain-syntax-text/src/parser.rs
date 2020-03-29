@@ -3272,7 +3272,7 @@ mod tests {
         );
 
         // typeuse has special abbreviation and it affects entire module. It means that assert_parse!
-        // is not avaiable
+        // is not available
         {
             let input = r#"
                 (module

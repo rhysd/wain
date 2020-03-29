@@ -82,7 +82,7 @@ Please read documentation (not yet) for details.
 1. Lex and parse `.wat` file into WAT sytnax tree which is dedicated for text format resolving many
    syntax sugars. Since multiple modules can be put in `.wat` file, it can be parsed into multiple trees
 2. Translate the WAT syntax trees into common Wasm syntax trees (`wain_ast::Root`) resolving identifiers.
-   Identifiers may refer things not defined yet (foward references) so `.wat` file cannot be parsed
+   Identifiers may refer things not defined yet (forward references) so `.wat` file cannot be parsed
    into common Wasm syntax trees directly
 3. Compose a single module from the multiple Wasm syntax trees following
    [spec](https://webassembly.github.io/spec/core/text/modules.html#text-module)

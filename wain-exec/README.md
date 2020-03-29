@@ -85,7 +85,7 @@ impl Importer for YourOwnImporter {
         // Implement your own function call. `name` is a name of function and you have full access
         // to stack and linear memory. Pop values from stack for getting arguments and push value to
         // set return value.
-        // Note: Consistensy between imported function signature and implementation of this method
+        // Note: Consistency between imported function signature and implementation of this method
         // is your responsibility.
     };
 }
