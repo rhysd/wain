@@ -27,7 +27,6 @@ pub enum ErrorKind {
         ty: ValType,
         idx: u32,
     },
-    AlignNotPowerOf2(u8),
     TooLargeAlign {
         align: u8,
         bits: u8,
@@ -118,7 +117,6 @@ impl<S: Source> fmt::Display for Error<S> {
                  control frame is op_stack[{}]", op, frame_start, idx_in_op_stack)?,
             LabelStackEmpty { op } => write!(f, "label stack for control instructions is unexpectedly empty at '{}' instruction", op)?,
             SetImmutableGlobal{ ty, idx } => write!(f, "{} value cannot be set to immutable global variable {}", ty, idx)?,
-            AlignNotPowerOf2(align) => write!(f, "align must be the exponent of a power of 2 but got {}", align)?,
             TooLargeAlign { align, bits } => write!(f, "align {} must not be larger than {}bits / 8", align, bits)?,
             InvalidLimitRange(min, max) => write!(f, "range for limits {}..{} is invalid", min, max)?,
             LimitsOutOfRange { value, min, max, what } => write!(f, "limit {} is out of range {}..{} at {}", value, min, max, what)?,

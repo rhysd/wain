@@ -6,9 +6,9 @@ version = "0.1.0"
 dependencies = [
  "wain-ast 0.1.0",
  "wain-exec 0.1.0",
- "wain-syntax-binary 0.1.0",
+ "wain-syntax-binary 0.1.1",
  "wain-syntax-text 0.1.0",
- "wain-validate 0.1.0",
+ "wain-validate 0.1.1",
 ]
 
 [[package]]
@@ -21,12 +21,12 @@ version = "0.1.0"
 dependencies = [
  "wain-ast 0.1.0",
  "wain-syntax-text 0.1.0",
- "wain-validate 0.1.0",
+ "wain-validate 0.1.1",
 ]
 
 [[package]]
 name = "wain-syntax-binary"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "wain-ast 0.1.0",
 ]
@@ -40,7 +40,7 @@ dependencies = [
 
 [[package]]
 name = "wain-validate"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "wain-ast 0.1.0",
 ]

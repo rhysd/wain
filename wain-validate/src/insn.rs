@@ -186,9 +186,6 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             .memory_from_idx(0, self.current_op, self.current_offset)?;
         // The alignment must not be larger than the bit width of t divided by 8.
         if let Some(align) = mem.align {
-            if align.count_ones() != 1 {
-                return self.error(ErrorKind::AlignNotPowerOf2(align));
-            }
             if align > bits / 8 {
                 return self.error(ErrorKind::TooLargeAlign { align, bits });
             }
