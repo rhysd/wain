@@ -2,46 +2,46 @@
 # It is not intended for manual editing.
 [[package]]
 name = "wain"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
- "wain-ast 0.0.0",
- "wain-exec 0.0.0",
- "wain-syntax-binary 0.0.0",
- "wain-syntax-text 0.0.0",
- "wain-validate 0.0.0",
+ "wain-ast 0.1.0",
+ "wain-exec 0.1.0",
+ "wain-syntax-binary 0.1.0",
+ "wain-syntax-text 0.1.0",
+ "wain-validate 0.1.0",
 ]
 
 [[package]]
 name = "wain-ast"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "wain-exec"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
- "wain-ast 0.0.0",
- "wain-syntax-text 0.0.0",
- "wain-validate 0.0.0",
+ "wain-ast 0.1.0",
+ "wain-syntax-text 0.1.0",
+ "wain-validate 0.1.0",
 ]
 
 [[package]]
 name = "wain-syntax-binary"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
- "wain-ast 0.0.0",
+ "wain-ast 0.1.0",
 ]
 
 [[package]]
 name = "wain-syntax-text"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
- "wain-ast 0.0.0",
+ "wain-ast 0.1.0",
 ]
 
 [[package]]
 name = "wain-validate"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
- "wain-ast 0.0.0",
+ "wain-ast 0.1.0",
 ]
 

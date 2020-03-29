@@ -1,6 +1,6 @@
 [package]
 name = "wain"
-version = "0.0.0"
+version = "0.1.0"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2018"
 description = "WebAssembly interpreter written in Safe Rust with zero dependency"
@@ -31,11 +31,11 @@ binary = ["wain-syntax-binary"]
 text = ["wain-syntax-text"]
 
 [dependencies]
-wain-ast = { path = "./wain-ast" }
-wain-syntax-text = { path = "./wain-syntax-text", optional = true }
-wain-syntax-binary = { path = "./wain-syntax-binary", optional = true }
-wain-validate = { path = "./wain-validate" }
-wain-exec = { path = "./wain-exec" }
+wain-ast = { path = "./wain-ast", version = "0.1" }
+wain-syntax-text = { path = "./wain-syntax-text", version = "0.1", optional = true }
+wain-syntax-binary = { path = "./wain-syntax-binary", version = "0.1", optional = true }
+wain-validate = { path = "./wain-validate", version = "0.1" }
+wain-exec = { path = "./wain-exec", version = "0.1" }
 
 [workspace]
 members = [

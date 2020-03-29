@@ -1,6 +1,6 @@
 [package]
 name = "wain-exec"
-version = "0.0.0"
+version = "0.1.0"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2018"
 description = "WebAssembly syntax tree executor for wain project"
@@ -18,11 +18,11 @@ no-dev-version = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wain-ast = { path = "../wain-ast" }
+wain-ast = { path = "../wain-ast", version = "0.1" }
 
 [dev-dependencies]
-wain-syntax-text = { path = "../wain-syntax-text" }
-wain-validate = { path = "../wain-validate" }
+wain-syntax-text = { path = "../wain-syntax-text", version = "0.1" }
+wain-validate = { path = "../wain-validate", version = "0.1" }
 
 [badges]
 maintenance = { status = "actively-developed" }
