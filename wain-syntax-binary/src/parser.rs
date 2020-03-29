@@ -28,13 +28,13 @@ fn section_name(id: u8) -> &'static str {
 
 // An iterator to iterate vec(P)
 // https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec
-struct ParseVec<'p, 's, P: Parse<'s>> {
+struct VecItems<'p, 's, P: Parse<'s>> {
     parser: &'p mut Parser<'s>,
     count: usize,
     phantom: PhantomData<P>, // Without this, P is not constrainted in Iterator implementation
 }
 
-impl<'p, 's, P: Parse<'s>> ParseVec<'p, 's, P> {
+impl<'p, 's, P: Parse<'s>> VecItems<'p, 's, P> {
     fn new(parser: &'p mut Parser<'s>, count: usize) -> Self {
         Self {
             parser,
@@ -45,12 +45,12 @@ impl<'p, 's, P: Parse<'s>> ParseVec<'p, 's, P> {
 
     // Helper method to collect as Vec<P>. Without this, type must be specified for ? operator as bellow
     //   parser.parse_vec()?.collect::<Result<'_, _>>()
-    fn vec(self) -> Result<'s, Vec<P>> {
+    fn into_vec(self) -> Result<'s, Vec<P>> {
         self.collect()
     }
 }
 
-impl<'p, 's, P: Parse<'s>> Iterator for ParseVec<'p, 's, P> {
+impl<'p, 's, P: Parse<'s>> Iterator for VecItems<'p, 's, P> {
     type Item = Result<'s, P>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -189,9 +189,9 @@ impl<'s> Parser<'s> {
     }
 
     // https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec
-    fn parse_vec<P: Parse<'s>>(&mut self) -> Result<'s, ParseVec<'_, 's, P>> {
+    fn parse_vec<P: Parse<'s>>(&mut self) -> Result<'s, VecItems<'_, 's, P>> {
         let size: u32 = self.parse_int()?;
-        Ok(ParseVec::new(self, size as usize))
+        Ok(VecItems::new(self, size as usize))
     }
 }
 
@@ -221,7 +221,7 @@ impl<'s> Parse<'s> for Module<'s> {
         fn parse_section<'s, P: Parse<'s>>(parser: &mut Parser<'s>, id: u8) -> Result<'s, Vec<P>> {
             if parser.input.starts_with(&[id]) {
                 let mut inner = parser.section_parser()?;
-                inner.parse_vec()?.vec()
+                inner.parse_vec()?.into_vec()
             } else {
                 Ok(vec![])
             }
@@ -405,8 +405,8 @@ impl<'s> Parse<'s> for FuncType {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.current_pos();
         parser.parse_flag(0x60, "function type")?;
-        let params = parser.parse_vec()?.vec()?;
-        let results = parser.parse_vec()?.vec()?;
+        let params = parser.parse_vec()?.into_vec()?;
+        let results = parser.parse_vec()?.into_vec()?;
         Ok(FuncType {
             start,
             params,
@@ -629,7 +629,7 @@ impl<'s> Parse<'s> for Instruction {
             0x0c => Br(parser.parse()?),
             0x0d => BrIf(parser.parse()?),
             0x0e => BrTable {
-                labels: parser.parse_vec()?.vec()?,
+                labels: parser.parse_vec()?.into_vec()?,
                 default_label: parser.parse()?,
             },
             0x0f => Return,
@@ -906,7 +906,7 @@ impl<'s> Parse<'s> for ElemSegment {
         let start = parser.current_pos();
         let idx = parser.parse()?;
         let Expr(offset) = parser.parse()?;
-        let init = parser.parse_vec()?.vec()?;
+        let init = parser.parse_vec()?.into_vec()?;
         Ok(ElemSegment {
             start,
             idx,
