@@ -10,17 +10,17 @@ use crate::source::describe_position;
 use std::fmt;
 use wain_ast::*;
 
-pub struct ComposeError<'a> {
-    dest_mod_id: Option<&'a str>,
+pub struct ComposeError<'source> {
+    dest_mod_id: Option<&'source str>,
     dest_mod_offset: usize,
-    src_mod_id: Option<&'a str>,
+    src_mod_id: Option<&'source str>,
     src_mod_offset: usize,
     offset: usize,
-    source: &'a str,
+    source: &'source str,
     msg: String,
 }
 
-impl<'a> fmt::Display for ComposeError<'a> {
+impl<'s> fmt::Display for ComposeError<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("module ")?;
         if let Some(id) = self.src_mod_id {
@@ -41,18 +41,18 @@ impl<'a> fmt::Display for ComposeError<'a> {
     }
 }
 
-type Result<'a, T> = ::std::result::Result<T, Box<ComposeError<'a>>>;
+type Result<'s, T> = ::std::result::Result<T, Box<ComposeError<'s>>>;
 
-pub(crate) struct Composer<'a> {
-    source: &'a str,
-    target: Module<'a>,
-    composed_mod_id: Option<&'a str>,
+pub(crate) struct Composer<'source> {
+    source: &'source str,
+    target: Module<'source>,
+    composed_mod_id: Option<&'source str>,
     composed_mod_offset: usize,
     composing_imports: bool,
 }
 
-impl<'a> Composer<'a> {
-    pub(crate) fn new(target: Module<'a>, source: &'a str) -> Self {
+impl<'s> Composer<'s> {
+    pub(crate) fn new(target: Module<'s>, source: &'s str) -> Self {
         Composer {
             source,
             target,
@@ -62,7 +62,7 @@ impl<'a> Composer<'a> {
         }
     }
 
-    pub(crate) fn error<T>(&self, msg: String, offset: usize) -> Result<'a, T> {
+    pub(crate) fn error<T>(&self, msg: String, offset: usize) -> Result<'s, T> {
         Err(Box::new(ComposeError {
             dest_mod_id: self.target.id,
             dest_mod_offset: self.target.start,
@@ -74,7 +74,7 @@ impl<'a> Composer<'a> {
         }))
     }
 
-    pub(crate) fn compose(mut self, mut composed: Module<'a>) -> Result<Module<'a>> {
+    pub(crate) fn compose(mut self, mut composed: Module<'s>) -> Result<Module<'s>> {
         self.composed_mod_id = composed.id;
         self.composed_mod_offset = composed.start;
 
@@ -146,18 +146,18 @@ impl<'a> Composer<'a> {
 // Indices of functions, tables, memories, globals and types are module local things. When two modules
 // are composed, these indices in the merged module need to be updated.
 // This visitor also checks the condition of composing two modules.
-trait Adjust<'a>: Sized {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()>;
+trait Adjust<'s>: Sized {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()>;
 }
 
-impl<'a, A: Adjust<'a>> Adjust<'a> for Vec<A> {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s, A: Adjust<'s>> Adjust<'s> for Vec<A> {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         self.iter_mut().map(|a| a.adjust(composer)).collect()
     }
 }
 
-impl<'a, A: Adjust<'a>> Adjust<'a> for Option<A> {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s, A: Adjust<'s>> Adjust<'s> for Option<A> {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         match self {
             Some(node) => node.adjust(composer),
             None => Ok(()),
@@ -165,8 +165,8 @@ impl<'a, A: Adjust<'a>> Adjust<'a> for Option<A> {
     }
 }
 
-impl<'a> Adjust<'a> for Module<'a> {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s> Adjust<'s> for Module<'s> {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         self.entrypoint.adjust(composer)?;
         self.exports.adjust(composer)?;
         self.funcs.adjust(composer)?;
@@ -181,15 +181,15 @@ impl<'a> Adjust<'a> for Module<'a> {
     }
 }
 
-impl<'a> Adjust<'a> for StartFunction {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s> Adjust<'s> for StartFunction {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         composer.adjust_func_idx(&mut self.idx);
         Ok(())
     }
 }
 
-impl<'a> Adjust<'a> for Func<'a> {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s> Adjust<'s> for Func<'s> {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         composer.adjust_type_idx(&mut self.idx);
         match &mut self.kind {
             FuncKind::Import(_) => composer.saw_import(true),
@@ -199,8 +199,8 @@ impl<'a> Adjust<'a> for Func<'a> {
     }
 }
 
-impl<'a> Adjust<'a> for Instruction {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s> Adjust<'s> for Instruction {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         use InsnKind::*;
         match &mut self.kind {
             Block { body, .. } => body.adjust(composer)?,
@@ -223,8 +223,8 @@ impl<'a> Adjust<'a> for Instruction {
     }
 }
 
-impl<'a> Adjust<'a> for Export<'a> {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s> Adjust<'s> for Export<'s> {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         match &mut self.kind {
             ExportKind::Func(idx) => composer.adjust_func_idx(idx),
             ExportKind::Table(idx) => composer.adjust_table_idx(idx),
@@ -235,8 +235,8 @@ impl<'a> Adjust<'a> for Export<'a> {
     }
 }
 
-impl<'a> Adjust<'a> for ElemSegment {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s> Adjust<'s> for ElemSegment {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         composer.adjust_table_idx(&mut self.idx);
         for idx in self.init.iter_mut() {
             composer.adjust_func_idx(idx);
@@ -245,22 +245,22 @@ impl<'a> Adjust<'a> for ElemSegment {
     }
 }
 
-impl<'a> Adjust<'a> for DataSegment<'a> {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s> Adjust<'s> for DataSegment<'s> {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         composer.adjust_mem_idx(&mut self.idx);
         self.offset.adjust(composer)
     }
 }
 
-impl<'a> Adjust<'a> for Memory<'a> {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s> Adjust<'s> for Memory<'s> {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         composer.saw_import(self.import.is_some());
         Ok(())
     }
 }
 
-impl<'a> Adjust<'a> for Global<'a> {
-    fn adjust(&mut self, composer: &mut Composer) -> Result<'a, ()> {
+impl<'s> Adjust<'s> for Global<'s> {
+    fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
         match &mut self.kind {
             GlobalKind::Import(_) => composer.saw_import(true),
             GlobalKind::Init(init) => init.adjust(composer)?,

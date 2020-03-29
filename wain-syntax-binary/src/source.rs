@@ -24,10 +24,10 @@ pub(crate) fn describe_position(
 }
 
 #[derive(Clone)]
-pub struct BinarySource<'a>(pub(crate) &'a [u8]);
+pub struct BinarySource<'source>(pub(crate) &'source [u8]);
 
-impl<'a> Source for BinarySource<'a> {
-    type Raw = &'a [u8];
+impl<'s> Source for BinarySource<'s> {
+    type Raw = &'s [u8];
 
     fn describe(&self, f: &mut fmt::Formatter<'_>, offset: usize) -> fmt::Result {
         describe_position(f, self.0, offset)

@@ -54,8 +54,8 @@ pub struct Trap {
 }
 
 impl Trap {
-    pub(crate) fn unknown_import<'a>(
-        import: &Import<'a>,
+    pub(crate) fn unknown_import<'s>(
+        import: &Import<'s>,
         kind: &'static str,
         offset: usize,
     ) -> Box<Self> {

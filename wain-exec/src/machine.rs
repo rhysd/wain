@@ -37,9 +37,9 @@ pub struct Machine<'module, 'source, I: Importer> {
     importer: I,
 }
 
-impl<'m, 'a, I: Importer> Machine<'m, 'a, I> {
+impl<'m, 's, I: Importer> Machine<'m, 's, I> {
     // https://webassembly.github.io/spec/core/exec/modules.html#instantiation
-    pub fn instantiate(module: &'m ast::Module<'a>, importer: I) -> Result<Self> {
+    pub fn instantiate(module: &'m ast::Module<'s>, importer: I) -> Result<Self> {
         // TODO: 2., 3., 4. Validate external values before instantiate globals
 
         // 5. global initialization values determined by module and externval
@@ -80,7 +80,7 @@ impl<'m, 'a, I: Importer> Machine<'m, 'a, I> {
         })
     }
 
-    fn invoke_import(&mut self, import: &ast::Import<'a>, pos: usize) -> ExecResult {
+    fn invoke_import(&mut self, import: &ast::Import<'s>, pos: usize) -> ExecResult {
         if import.mod_name.0 == "env" {
             match self
                 .importer
@@ -216,13 +216,13 @@ impl<'m, 'a, I: Importer> Machine<'m, 'a, I> {
     }
 }
 
-trait Execute<'f, 'm, 'a, I: Importer> {
-    fn execute(&self, machine: &mut Machine<'m, 'a, I>, frame: &CallFrame<'f>) -> ExecResult;
+trait Execute<'f, 'm, 's, I: Importer> {
+    fn execute(&self, machine: &mut Machine<'m, 's, I>, frame: &CallFrame<'f>) -> ExecResult;
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html#blocks
-impl<'f, 'm, 'a, I: Importer> Execute<'f, 'm, 'a, I> for Vec<ast::Instruction> {
-    fn execute(&self, machine: &mut Machine<'m, 'a, I>, frame: &CallFrame<'f>) -> ExecResult {
+impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for Vec<ast::Instruction> {
+    fn execute(&self, machine: &mut Machine<'m, 's, I>, frame: &CallFrame<'f>) -> ExecResult {
         // Run instruction sequence as block
         for insn in self.iter() {
             match insn.execute(machine, frame)? {
@@ -235,9 +235,9 @@ impl<'f, 'm, 'a, I: Importer> Execute<'f, 'm, 'a, I> for Vec<ast::Instruction> {
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html
-impl<'f, 'm, 'a, I: Importer> Execute<'f, 'm, 'a, I> for ast::Instruction {
+impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
     #[allow(clippy::cognitive_complexity)]
-    fn execute(&self, machine: &mut Machine<'m, 'a, I>, frame: &CallFrame<'f>) -> ExecResult {
+    fn execute(&self, machine: &mut Machine<'m, 's, I>, frame: &CallFrame<'f>) -> ExecResult {
         use ast::InsnKind::*;
         #[allow(clippy::float_cmp)]
         match &self.kind {

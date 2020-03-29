@@ -7,10 +7,10 @@ use std::str;
 
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone)]
-pub enum LexErrorKind<'a> {
+pub enum LexErrorKind<'source> {
     UnterminatedBlockComment,
     UnterminatedString,
-    ReservedName(&'a str),
+    ReservedName(&'source str),
     UnexpectedCharacter(char),
 }
 
@@ -18,14 +18,14 @@ pub enum LexErrorKind<'a> {
 
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone)]
-pub struct LexError<'a> {
-    kind: LexErrorKind<'a>,
+pub struct LexError<'source> {
+    kind: LexErrorKind<'source>,
     offset: usize,
-    source: &'a str,
+    source: &'source str,
 }
 
-impl<'a> LexError<'a> {
-    pub fn kind(&self) -> &LexErrorKind<'a> {
+impl<'s> LexError<'s> {
+    pub fn kind(&self) -> &LexErrorKind<'s> {
         &self.kind
     }
 
@@ -33,12 +33,12 @@ impl<'a> LexError<'a> {
         self.offset
     }
 
-    pub fn source(&self) -> &'a str {
+    pub fn source(&self) -> &'s str {
         self.source
     }
 }
 
-impl<'a> fmt::Display for LexError<'a> {
+impl<'s> fmt::Display for LexError<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use LexErrorKind::*;
         match &self.kind {
@@ -53,7 +53,7 @@ impl<'a> fmt::Display for LexError<'a> {
     }
 }
 
-type Result<'a, T> = ::std::result::Result<T, Box<LexError<'a>>>;
+type Result<'s, T> = ::std::result::Result<T, Box<LexError<'s>>>;
 
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, Copy, PartialEq)]
@@ -106,30 +106,30 @@ impl NumBase {
 // https://webassembly.github.io/spec/core/text/values.html#floating-point
 #[cfg_attr(test, derive(Debug, PartialEq))]
 #[derive(Clone)]
-pub enum Float<'a> {
-    Nan(Option<&'a str>),
+pub enum Float<'source> {
+    Nan(Option<&'source str>),
     Inf,
     Val {
         base: NumBase,
-        frac: &'a str,
-        exp: Option<(Sign, &'a str)>,
+        frac: &'source str,
+        exp: Option<(Sign, &'source str)>,
     },
 }
 
 // https://webassembly.github.io/spec/core/text/lexical.html#tokens
 #[cfg_attr(test, derive(Debug, PartialEq))]
 #[derive(Clone)]
-pub enum Token<'a> {
+pub enum Token<'source> {
     LParen,
     RParen,
-    Keyword(&'a str), // Too many keywords so it's not pragmatic to define `Keyword` enum in terms of maintenance
-    Int(Sign, NumBase, &'a str),
-    Float(Sign, Float<'a>),
-    String(&'a str), // Should parse the literal into Vec<u8>?
-    Ident(&'a str),
+    Keyword(&'source str), // Too many keywords so it'source not pragmatic to define `Keyword` enum in terms of maintenance
+    Int(Sign, NumBase, &'source str),
+    Float(Sign, Float<'source>),
+    String(&'source str), // Should parse the literal into Vec<u8>?
+    Ident(&'source str),
 }
 
-impl<'a> fmt::Display for Token<'a> {
+impl<'s> fmt::Display for Token<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Token::LParen => f.write_str("paren '('"),
@@ -175,15 +175,15 @@ impl<'a> fmt::Display for Token<'a> {
     }
 }
 
-type Lexed<'a> = Option<(Token<'a>, usize)>;
-type LexResult<'a> = Result<'a, Lexed<'a>>;
+type Lexed<'s> = Option<(Token<'s>, usize)>;
+type LexResult<'s> = Result<'s, Lexed<'s>>;
 
-pub struct Lexer<'a> {
-    chars: iter::Peekable<str::CharIndices<'a>>, // LL(1)
-    source: &'a str,
+pub struct Lexer<'source> {
+    chars: iter::Peekable<str::CharIndices<'source>>, // LL(1)
+    source: &'source str,
 }
 
-impl<'a> Lexer<'a> {
+impl<'s> Lexer<'s> {
     pub fn new(source: &str) -> Lexer<'_> {
         Lexer {
             source,
@@ -191,7 +191,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn lex(&mut self) -> LexResult<'a> {
+    pub fn lex(&mut self) -> LexResult<'s> {
         while self.eat_whitespace()? {}
 
         // https://webassembly.github.io/spec/core/text/lexical.html#tokens
@@ -214,7 +214,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_paren(&mut self) -> Lexed<'a> {
+    fn lex_paren(&mut self) -> Lexed<'s> {
         if let Some(offset) = self.eat_char('(') {
             Some((Token::LParen, offset))
         } else if let Some(offset) = self.eat_char(')') {
@@ -224,7 +224,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_string(&mut self) -> LexResult<'a> {
+    fn lex_string(&mut self) -> LexResult<'s> {
         // https://webassembly.github.io/spec/core/text/values.html#strings
         let start = match self.eat_char('"') {
             Some(offset) => offset,
@@ -245,7 +245,7 @@ impl<'a> Lexer<'a> {
         self.fail(LexErrorKind::UnterminatedString, start)
     }
 
-    fn lex_idchars(&mut self) -> LexResult<'a> {
+    fn lex_idchars(&mut self) -> LexResult<'s> {
         fn is_idchar(c: char) -> bool {
             // https://webassembly.github.io/spec/core/text/values.html#text-idchar
             match c {
@@ -324,7 +324,7 @@ impl<'a> Lexer<'a> {
         !prev_underscore
     }
 
-    fn lex_unsigned_number(idchars: &'a str, sign: Sign, base: NumBase) -> Option<Token<'a>> {
+    fn lex_unsigned_number(idchars: &'s str, sign: Sign, base: NumBase) -> Option<Token<'s>> {
         // https://webassembly.github.io/spec/core/text/values.html#integers
         // https://webassembly.github.io/spec/core/text/values.html#floating-point
 
@@ -406,7 +406,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_number_from_idchars(idchars: &'a str, start: usize) -> Lexed<'a> {
+    fn lex_number_from_idchars(idchars: &'s str, start: usize) -> Lexed<'s> {
         let (sign, idchars) = match idchars.chars().next() {
             Some('+') => (Sign::Plus, &idchars[1..]),
             Some('-') => (Sign::Minus, &idchars[1..]),
@@ -433,7 +433,7 @@ impl<'a> Lexer<'a> {
         token.map(|t| (t, start))
     }
 
-    fn lex_ident_or_keyword_from_idchars(idchars: &'a str, start: usize) -> Lexed<'a> {
+    fn lex_ident_or_keyword_from_idchars(idchars: &'s str, start: usize) -> Lexed<'s> {
         // https://webassembly.github.io/spec/core/text/lexical.html#tokens
         match idchars.chars().next() {
             Some('$') if idchars.len() > 1 => Some((Token::Ident(idchars), start)), // https://webassembly.github.io/spec/core/text/values.html#text-id
@@ -442,7 +442,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn eat_whitespace(&mut self) -> Result<'a, bool> {
+    fn eat_whitespace(&mut self) -> Result<'s, bool> {
         // https://webassembly.github.io/spec/core/text/lexical.html#white-space
         fn is_ws_char(c: char) -> bool {
             match c {
@@ -468,7 +468,7 @@ impl<'a> Lexer<'a> {
         true
     }
 
-    fn eat_block_comment(&mut self) -> Result<'a, bool> {
+    fn eat_block_comment(&mut self) -> Result<'s, bool> {
         // blockcomment https://webassembly.github.io/spec/core/text/lexical.html#comments
         let start = if let Some(offset) = self.eat_str("(;") {
             offset
@@ -529,7 +529,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn fail<T>(&self, kind: LexErrorKind<'a>, offset: usize) -> Result<'a, T> {
+    fn fail<T>(&self, kind: LexErrorKind<'s>, offset: usize) -> Result<'s, T> {
         Err(Box::new(LexError {
             kind,
             offset,
@@ -538,8 +538,8 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<'a, (Token<'a>, usize)>;
+impl<'s> Iterator for Lexer<'s> {
+    type Item = Result<'s, (Token<'s>, usize)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.lex().transpose()
@@ -550,7 +550,7 @@ impl<'a> Iterator for Lexer<'a> {
 mod tests {
     use super::*;
 
-    fn lex_all<'a>(s: &'a str) -> Result<'a, Vec<(Token<'a>, usize)>> {
+    fn lex_all<'s>(s: &'s str) -> Result<'s, Vec<(Token<'s>, usize)>> {
         Lexer::new(s).collect()
     }
 

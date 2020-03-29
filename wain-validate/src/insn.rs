@@ -38,10 +38,10 @@ struct CtrlFrame {
 }
 
 // https://webassembly.github.io/spec/core/valid/conventions.html#context
-struct FuncBodyContext<'outer, 'm: 'outer, 'a: 'm, S: Source> {
+struct FuncBodyContext<'outer, 'module: 'outer, 'source: 'module, S: Source> {
     current_op: &'static str,
     current_offset: usize,
-    outer: &'outer OuterContext<'m, 'a, S>,
+    outer: &'outer OuterContext<'module, 'source, S>,
     // Types on stack to check operands of instructions such as unreachable, br, table_br
     op_stack: Vec<Type>,
     // Index of current control frame
@@ -58,7 +58,7 @@ struct FuncBodyContext<'outer, 'm: 'outer, 'a: 'm, S: Source> {
     unreachable: bool,
 }
 
-impl<'outer, 'm, 'a, S: Source> FuncBodyContext<'outer, 'm, 'a, S> {
+impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
     fn error<T>(&self, kind: ErrorKind) -> Result<T, S> {
         self.outer.error(kind, self.current_op, self.current_offset)
     }
@@ -217,11 +217,11 @@ impl<'outer, 'm, 'a, S: Source> FuncBodyContext<'outer, 'm, 'a, S> {
     }
 }
 
-pub(crate) fn validate_func_body<'outer, 'm, 'a, S: Source>(
+pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
     body: &'outer [Instruction],
     func_ty: &'outer FuncType,
     locals: &'outer [ValType],
-    outer: &'outer OuterContext<'m, 'a, S>,
+    outer: &'outer OuterContext<'m, 's, S>,
     start: usize,
 ) -> Result<(), S> {
     // FuncType validated func_ty has at most one result type
@@ -250,14 +250,14 @@ pub(crate) fn validate_func_body<'outer, 'm, 'a, S: Source>(
     Ok(())
 }
 
-trait ValidateInsnSeq<'outer, 'm, 'a, S: Source> {
-    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a, S>) -> Result<(), S>;
+trait ValidateInsnSeq<'outer, 'm, 's, S: Source> {
+    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 's, S>) -> Result<(), S>;
 }
 
-impl<'a, 'm, 'outer, S: Source, V: ValidateInsnSeq<'outer, 'm, 'a, S>>
-    ValidateInsnSeq<'outer, 'm, 'a, S> for [V]
+impl<'s, 'm, 'outer, S: Source, V: ValidateInsnSeq<'outer, 'm, 's, S>>
+    ValidateInsnSeq<'outer, 'm, 's, S> for [V]
 {
-    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a, S>) -> Result<(), S> {
+    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 's, S>) -> Result<(), S> {
         self.iter()
             .map(|insn| insn.validate(ctx))
             .collect::<Result<_, _>>()?;
@@ -267,8 +267,8 @@ impl<'a, 'm, 'outer, S: Source, V: ValidateInsnSeq<'outer, 'm, 'a, S>>
 }
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#instruction-sequences
-impl<'outer, 'm, 'a, S: Source> ValidateInsnSeq<'outer, 'm, 'a, S> for Instruction {
-    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 'a, S>) -> Result<(), S> {
+impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instruction {
+    fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 's, S>) -> Result<(), S> {
         ctx.current_op = self.kind.name();
         ctx.current_offset = self.start;
         let start = self.start;
@@ -608,9 +608,9 @@ impl<'outer, 'm, 'a, S: Source> ValidateInsnSeq<'outer, 'm, 'a, S> for Instructi
 }
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions
-pub(crate) fn validate_constant<'m, 'a, S: Source>(
+pub(crate) fn validate_constant<'m, 's, S: Source>(
     insns: &[Instruction],
-    ctx: &OuterContext<'m, 'a, S>,
+    ctx: &OuterContext<'m, 's, S>,
     expr_ty: ValType,
     when: &'static str,
     start: usize,

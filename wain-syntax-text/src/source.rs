@@ -23,10 +23,10 @@ pub(crate) fn describe_position(
 }
 
 #[derive(Clone)]
-pub struct TextSource<'a>(pub(crate) &'a str);
+pub struct TextSource<'source>(pub(crate) &'source str);
 
-impl<'a> Source for TextSource<'a> {
-    type Raw = &'a str;
+impl<'s> Source for TextSource<'s> {
+    type Raw = &'s str;
 
     fn describe(&self, f: &mut fmt::Formatter<'_>, offset: usize) -> fmt::Result {
         describe_position(f, self.0, offset)

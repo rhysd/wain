@@ -6,31 +6,31 @@ use std::fmt;
 use wain_ast as wasm;
 
 #[cfg_attr(test, derive(Debug))]
-pub enum TransformErrorKind<'a> {
+pub enum TransformErrorKind<'source> {
     IdIsNotDefined {
-        id: &'a str,
+        id: &'source str,
         what: &'static str,
     },
     IdAlreadyDefined {
-        id: &'a str,
+        id: &'source str,
         idx: u32,
         what: &'static str,
     },
     LabelAndIdMismatch {
-        label: &'a str,
-        id: &'a str,
+        label: &'source str,
+        id: &'source str,
     },
 }
 
 #[cfg_attr(test, derive(Debug))]
-pub struct TransformError<'a> {
-    kind: TransformErrorKind<'a>,
+pub struct TransformError<'s> {
+    kind: TransformErrorKind<'s>,
     offset: usize,
-    source: &'a str,
+    source: &'s str,
 }
 
-impl<'a> TransformError<'a> {
-    fn new(kind: TransformErrorKind<'a>, offset: usize, source: &'a str) -> Box<Self> {
+impl<'s> TransformError<'s> {
+    fn new(kind: TransformErrorKind<'s>, offset: usize, source: &'s str) -> Box<Self> {
         Box::new(TransformError {
             kind,
             offset,
@@ -39,7 +39,7 @@ impl<'a> TransformError<'a> {
     }
 }
 
-impl<'a> fmt::Display for TransformError<'a> {
+impl<'s> fmt::Display for TransformError<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TransformErrorKind::*;
         match &self.kind {
@@ -62,24 +62,24 @@ impl<'a> fmt::Display for TransformError<'a> {
     }
 }
 
-type Result<'a, T> = ::std::result::Result<T, Box<TransformError<'a>>>;
+type Result<'s, T> = ::std::result::Result<T, Box<TransformError<'s>>>;
 
-type Indices<'a> = HashMap<&'a str, u32>;
+type Indices<'s> = HashMap<&'s str, u32>;
 
-struct LabelStack<'a> {
-    source: &'a str,
-    stack: Vec<Option<&'a str>>,
+struct LabelStack<'s> {
+    source: &'s str,
+    stack: Vec<Option<&'s str>>,
 }
 
-impl<'a> LabelStack<'a> {
-    fn new(source: &'a str) -> Self {
+impl<'s> LabelStack<'s> {
+    fn new(source: &'s str) -> Self {
         Self {
             source,
             stack: vec![],
         }
     }
 
-    fn resolve(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+    fn resolve(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
         match idx {
             wat::Index::Num(idx) => Ok(idx),
             wat::Index::Ident(id) => {
@@ -98,10 +98,10 @@ impl<'a> LabelStack<'a> {
 
     fn push(
         &mut self,
-        label: Option<&'a str>,
-        id: Option<&'a str>,
+        label: Option<&'s str>,
+        id: Option<&'s str>,
         offset: usize,
-    ) -> Result<'a, ()> {
+    ) -> Result<'s, ()> {
         let label = match (label, id) {
             (Some(label), Some(id)) if label == id => label,
             (Some(label), Some(id)) => {
@@ -145,7 +145,7 @@ impl<'a> LabelStack<'a> {
     // innermost structured control instruction enclosing the referring branch instruction, while increasing indices refer
     // to those farther out.
     //   https://webassembly.github.io/spec/core/syntax/instructions.html#control-instructions
-    fn find(&self, label: &'a str) -> Option<u32> {
+    fn find(&self, label: &'s str) -> Option<u32> {
         self.stack
             .iter()
             .rev()
@@ -157,26 +157,26 @@ impl<'a> LabelStack<'a> {
     }
 }
 
-struct Context<'a> {
-    source: &'a str,
-    type_indices: Indices<'a>,
-    func_indices: Indices<'a>,
-    table_indices: Indices<'a>,
-    mem_indices: Indices<'a>,
-    global_indices: Indices<'a>,
-    local_indices: Indices<'a>,
+struct Context<'s> {
+    source: &'s str,
+    type_indices: Indices<'s>,
+    func_indices: Indices<'s>,
+    table_indices: Indices<'s>,
+    mem_indices: Indices<'s>,
+    global_indices: Indices<'s>,
+    local_indices: Indices<'s>,
     next_local_idx: u32,
-    label_stack: LabelStack<'a>,
+    label_stack: LabelStack<'s>,
 }
 
-impl<'a> Context<'a> {
+impl<'s> Context<'s> {
     fn resolve_index(
         &self,
         indices: &Indices,
-        idx: wat::Index<'a>,
+        idx: wat::Index<'s>,
         offset: usize,
         what: &'static str,
-    ) -> Result<'a, u32> {
+    ) -> Result<'s, u32> {
         match idx {
             wat::Index::Num(i) => Ok(i),
             wat::Index::Ident(id) => {
@@ -193,23 +193,23 @@ impl<'a> Context<'a> {
         }
     }
 
-    fn resolve_type_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+    fn resolve_type_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
         self.resolve_index(&self.type_indices, idx, offset, "type")
     }
 
-    fn resolve_func_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+    fn resolve_func_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
         self.resolve_index(&self.func_indices, idx, offset, "function")
     }
 
-    fn resolve_table_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+    fn resolve_table_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
         self.resolve_index(&self.table_indices, idx, offset, "table")
     }
 
-    fn resolve_mem_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+    fn resolve_mem_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
         self.resolve_index(&self.mem_indices, idx, offset, "memory")
     }
 
-    fn resolve_global_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+    fn resolve_global_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
         self.resolve_index(&self.global_indices, idx, offset, "global")
     }
 
@@ -218,7 +218,7 @@ impl<'a> Context<'a> {
         self.local_indices.clear();
     }
 
-    fn new_local_idx(&mut self, id: Option<&'a str>, offset: usize) -> Result<'a, u32> {
+    fn new_local_idx(&mut self, id: Option<&'s str>, offset: usize) -> Result<'s, u32> {
         let idx = self.next_local_idx;
         if let Some(id) = id {
             if let Some(idx) = self.local_indices.insert(id, idx) {
@@ -237,15 +237,15 @@ impl<'a> Context<'a> {
         Ok(idx)
     }
 
-    fn resolve_local_idx(&self, idx: wat::Index<'a>, offset: usize) -> Result<'a, u32> {
+    fn resolve_local_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
         self.resolve_index(&self.local_indices, idx, offset, "local variable")
     }
 }
 
-pub fn wat2wasm<'a>(
-    parsed: wat::Parsed<'a>,
-    source: &'a str,
-) -> Result<'a, wasm::Root<'a, TextSource<'a>>> {
+pub fn wat2wasm<'s>(
+    parsed: wat::Parsed<'s>,
+    source: &'s str,
+) -> Result<'s, wasm::Root<'s, TextSource<'s>>> {
     let mut ctx = Context {
         source,
         type_indices: parsed.type_indices,
@@ -264,28 +264,28 @@ pub fn wat2wasm<'a>(
     })
 }
 
-trait Transform<'a>: Sized {
+trait Transform<'s>: Sized {
     type Target;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target>;
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target>;
 }
 
-impl<'a, T: Transform<'a>> Transform<'a> for Vec<T> {
+impl<'s, T: Transform<'s>> Transform<'s> for Vec<T> {
     type Target = Vec<T::Target>;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         self.into_iter().map(|n| n.transform(ctx)).collect()
     }
 }
 
-impl<'a, T: Transform<'a>> Transform<'a> for Option<T> {
+impl<'s, T: Transform<'s>> Transform<'s> for Option<T> {
     type Target = Option<T::Target>;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         self.map(|n| n.transform(ctx)).transpose()
     }
 }
 
-impl<'a> Transform<'a> for wat::Module<'a> {
-    type Target = wasm::Module<'a>;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+impl<'s> Transform<'s> for wat::Module<'s> {
+    type Target = wasm::Module<'s>;
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Module {
             start: self.start,
             id: self.id,
@@ -302,9 +302,9 @@ impl<'a> Transform<'a> for wat::Module<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::ValType {
+impl<'s> Transform<'s> for wat::ValType {
     type Target = wasm::ValType;
-    fn transform(self, _ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+    fn transform(self, _ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(match self {
             wat::ValType::I32 => wasm::ValType::I32,
             wat::ValType::I64 => wasm::ValType::I64,
@@ -314,9 +314,9 @@ impl<'a> Transform<'a> for wat::ValType {
     }
 }
 
-impl<'a> Transform<'a> for wat::TypeDef<'a> {
+impl<'s> Transform<'s> for wat::TypeDef<'s> {
     type Target = wasm::FuncType;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::FuncType {
             start: self.start,
             params: self
@@ -335,16 +335,16 @@ impl<'a> Transform<'a> for wat::TypeDef<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::Name {
-    type Target = wasm::Name<'a>;
-    fn transform(self, _ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+impl<'s> Transform<'s> for wat::Name {
+    type Target = wasm::Name<'s>;
+    fn transform(self, _ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Name(Cow::Owned(self.0)))
     }
 }
 
-impl<'a> Transform<'a> for wat::Export<'a> {
-    type Target = wasm::Export<'a>;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+impl<'s> Transform<'s> for wat::Export<'s> {
+    type Target = wasm::Export<'s>;
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         let start = self.start;
         Ok(wasm::Export {
             start,
@@ -371,9 +371,9 @@ impl<'a> Transform<'a> for wat::Export<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::Import {
-    type Target = wasm::Import<'a>;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+impl<'s> Transform<'s> for wat::Import {
+    type Target = wasm::Import<'s>;
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Import {
             mod_name: self.mod_name.transform(ctx)?,
             name: self.name.transform(ctx)?,
@@ -381,9 +381,9 @@ impl<'a> Transform<'a> for wat::Import {
     }
 }
 
-impl<'a> Transform<'a> for wat::Mem {
+impl<'s> Transform<'s> for wat::Mem {
     type Target = wasm::Mem;
-    fn transform(self, _ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+    fn transform(self, _ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Mem {
             align: self.align,
             offset: self.offset,
@@ -391,9 +391,9 @@ impl<'a> Transform<'a> for wat::Mem {
     }
 }
 
-impl<'a> Transform<'a> for wat::Instruction<'a> {
+impl<'s> Transform<'s> for wat::Instruction<'s> {
     type Target = wasm::Instruction;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         let start = self.start;
         let kind = match self.kind {
             wat::InsnKind::Block {
@@ -652,9 +652,9 @@ impl<'a> Transform<'a> for wat::Instruction<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::Func<'a> {
-    type Target = wasm::Func<'a>;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+impl<'s> Transform<'s> for wat::Func<'s> {
+    type Target = wasm::Func<'s>;
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Func {
             start: self.start,
             idx: ctx.resolve_type_idx(self.ty.idx, self.start)?,
@@ -682,9 +682,9 @@ impl<'a> Transform<'a> for wat::Func<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::Elem<'a> {
+impl<'s> Transform<'s> for wat::Elem<'s> {
     type Target = wasm::ElemSegment;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         let start = self.start;
         Ok(wasm::ElemSegment {
             start,
@@ -699,9 +699,9 @@ impl<'a> Transform<'a> for wat::Elem<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::Limits {
+impl<'s> Transform<'s> for wat::Limits {
     type Target = wasm::Limits;
-    fn transform(self, _ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+    fn transform(self, _ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(match self {
             wat::Limits::Range { min, max } => wasm::Limits::Range(min, max),
             wat::Limits::From { min } => wasm::Limits::From(min),
@@ -709,9 +709,9 @@ impl<'a> Transform<'a> for wat::Limits {
     }
 }
 
-impl<'a> Transform<'a> for wat::Table<'a> {
-    type Target = wasm::Table<'a>;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+impl<'s> Transform<'s> for wat::Table<'s> {
+    type Target = wasm::Table<'s>;
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Table {
             start: self.start,
             ty: wasm::TableType {
@@ -722,9 +722,9 @@ impl<'a> Transform<'a> for wat::Table<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::Data<'a> {
-    type Target = wasm::DataSegment<'a>;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+impl<'s> Transform<'s> for wat::Data<'s> {
+    type Target = wasm::DataSegment<'s>;
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::DataSegment {
             start: self.start,
             idx: ctx.resolve_mem_idx(self.idx, self.start)?,
@@ -734,9 +734,9 @@ impl<'a> Transform<'a> for wat::Data<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::Memory<'a> {
-    type Target = wasm::Memory<'a>;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+impl<'s> Transform<'s> for wat::Memory<'s> {
+    type Target = wasm::Memory<'s>;
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Memory {
             start: self.start,
             ty: wasm::MemType {
@@ -747,9 +747,9 @@ impl<'a> Transform<'a> for wat::Memory<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::Global<'a> {
-    type Target = wasm::Global<'a>;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+impl<'s> Transform<'s> for wat::Global<'s> {
+    type Target = wasm::Global<'s>;
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Global {
             start: self.start,
             mutable: self.ty.mutable,
@@ -762,9 +762,9 @@ impl<'a> Transform<'a> for wat::Global<'a> {
     }
 }
 
-impl<'a> Transform<'a> for wat::Start<'a> {
+impl<'s> Transform<'s> for wat::Start<'s> {
     type Target = wasm::StartFunction;
-    fn transform(self, ctx: &mut Context<'a>) -> Result<'a, Self::Target> {
+    fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::StartFunction {
             start: self.start,
             idx: ctx.resolve_func_idx(self.idx, self.start)?,

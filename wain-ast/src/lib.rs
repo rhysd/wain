@@ -6,8 +6,8 @@ use std::borrow::Cow;
 use std::fmt;
 
 // Root of the tree
-pub struct Root<'a, S: source::Source> {
-    pub module: Module<'a>,
+pub struct Root<'s, S: source::Source> {
+    pub module: Module<'s>,
     pub source: S,
 }
 
@@ -24,24 +24,24 @@ pub type LocalIdx = u32;
 pub type LabelIdx = u32;
 
 // https://webassembly.github.io/spec/core/syntax/modules.html
-pub struct Module<'a> {
+pub struct Module<'s> {
     pub start: usize,
-    pub id: Option<&'a str>,
+    pub id: Option<&'s str>,
     pub types: Vec<FuncType>,
-    pub exports: Vec<Export<'a>>,
-    pub funcs: Vec<Func<'a>>,
+    pub exports: Vec<Export<'s>>,
+    pub funcs: Vec<Func<'s>>,
     pub elems: Vec<ElemSegment>,
-    pub tables: Vec<Table<'a>>,
-    pub data: Vec<DataSegment<'a>>,
-    pub memories: Vec<Memory<'a>>,
-    pub globals: Vec<Global<'a>>,
+    pub tables: Vec<Table<'s>>,
+    pub data: Vec<DataSegment<'s>>,
+    pub memories: Vec<Memory<'s>>,
+    pub globals: Vec<Global<'s>>,
     pub entrypoint: Option<StartFunction>,
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#syntax-module
-pub struct Import<'a> {
-    pub mod_name: Name<'a>,
-    pub name: Name<'a>,
+pub struct Import<'s> {
+    pub mod_name: Name<'s>,
+    pub name: Name<'s>,
 }
 
 // https://webassembly.github.io/spec/core/syntax/types.html#function-types
@@ -87,11 +87,11 @@ impl fmt::Display for ValType {
 
 // https://webassembly.github.io/spec/core/syntax/values.html#syntax-name
 //
-// Use Cow<'a, str> since it is String on text format and it is &str on binary format.
+// Use Cow<'s, str> since it is String on text format and it is &str on binary format.
 // In text format, special characters in string literal are escaped. Unescaped string must
 // be allocated in heap. In binary format, it is directly encoded as bytes so borrowing the
 // part of source is enough.
-pub struct Name<'a>(pub Cow<'a, str>);
+pub struct Name<'s>(pub Cow<'s, str>);
 
 // https://webassembly.github.io/spec/core/syntax/types.html#table-types
 // Note: elemtype is currently fixed to 'funcref'
@@ -117,24 +117,24 @@ pub enum ExportKind {
     Memory(MemIdx),
     Global(GlobalIdx),
 }
-pub struct Export<'a> {
+pub struct Export<'s> {
     pub start: usize,
-    pub name: Name<'a>,
+    pub name: Name<'s>,
     pub kind: ExportKind,
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#syntax-func
-pub enum FuncKind<'a> {
-    Import(Import<'a>),
+pub enum FuncKind<'s> {
+    Import(Import<'s>),
     Body {
         locals: Vec<ValType>,
         expr: Vec<Instruction>,
     },
 }
-pub struct Func<'a> {
+pub struct Func<'s> {
     pub start: usize,
     pub idx: TypeIdx,
-    pub kind: FuncKind<'a>,
+    pub kind: FuncKind<'s>,
 }
 
 // https://webassembly.github.io/spec/core/syntax/instructions.html#instructions
@@ -547,38 +547,38 @@ pub struct ElemSegment {
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#tables
-pub struct Table<'a> {
+pub struct Table<'s> {
     pub start: usize,
     pub ty: TableType,
-    pub import: Option<Import<'a>>,
+    pub import: Option<Import<'s>>,
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#data-segments
-pub struct DataSegment<'a> {
+pub struct DataSegment<'s> {
     pub start: usize,
     pub idx: MemIdx,
     pub offset: Vec<Instruction>, // expr
-    pub data: Cow<'a, [u8]>,
+    pub data: Cow<'s, [u8]>,
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#memories
-pub struct Memory<'a> {
+pub struct Memory<'s> {
     pub start: usize,
     pub ty: MemType,
-    pub import: Option<Import<'a>>,
+    pub import: Option<Import<'s>>,
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#globals
 // https://webassembly.github.io/spec/core/syntax/types.html#global-types
-pub enum GlobalKind<'a> {
-    Import(Import<'a>),
+pub enum GlobalKind<'s> {
+    Import(Import<'s>),
     Init(Vec<Instruction>), // expr
 }
-pub struct Global<'a> {
+pub struct Global<'s> {
     pub start: usize,
     pub mutable: bool,
     pub ty: ValType,
-    pub kind: GlobalKind<'a>,
+    pub kind: GlobalKind<'s>,
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#start-function

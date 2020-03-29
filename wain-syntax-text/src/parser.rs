@@ -10,43 +10,43 @@ use std::fmt;
 use std::mem;
 
 #[cfg_attr(test, derive(Debug))]
-pub enum ParseErrorKind<'a> {
-    LexError(LexError<'a>),
+pub enum ParseErrorKind<'source> {
+    LexError(LexError<'source>),
     UnexpectedToken {
-        got: Token<'a>,
+        got: Token<'source>,
         expected: &'static str, // TODO: Make 'expected' better
     },
     UnexpectedEndOfFile {
         expected: &'static str, // TODO: Make 'expected' better
     },
-    UnexpectedKeyword(&'a str),
-    InvalidValType(&'a str),
+    UnexpectedKeyword(&'source str),
+    InvalidValType(&'source str),
     InvalidStringFormat(&'static str),
     MissingParen {
         paren: char,
-        got: Option<Token<'a>>,
-        what: &'a str,
+        got: Option<Token<'source>>,
+        what: &'source str,
     },
     InvalidOperand {
         insn: &'static str,
         msg: &'static str,
     },
-    NumberMustBePositive(NumBase, &'a str),
+    NumberMustBePositive(NumBase, &'source str),
     CannotParseNum {
-        digits: &'a str,
+        digits: &'source str,
         reason: &'static str,
         base: NumBase,
         sign: Sign,
     },
-    MultipleEntrypoints(Start<'a>, Start<'a>),
+    MultipleEntrypoints(Start<'source>, Start<'source>),
     IdAlreadyDefined {
-        id: &'a str,
+        id: &'source str,
         prev_idx: u32,
         what: &'static str,
         scope: &'static str,
     },
     ExpectEndOfFile {
-        token: Token<'a>,
+        token: Token<'source>,
         after: &'static str,
     },
     ImportMustPrecedeOtherDefs {
@@ -55,14 +55,14 @@ pub enum ParseErrorKind<'a> {
 }
 
 #[cfg_attr(test, derive(Debug))]
-pub struct ParseError<'a> {
-    kind: ParseErrorKind<'a>,
+pub struct ParseError<'s> {
+    kind: ParseErrorKind<'s>,
     offset: usize,
-    source: &'a str,
+    source: &'s str,
 }
 
-impl<'a> ParseError<'a> {
-    fn new(kind: ParseErrorKind<'a>, offset: usize, source: &'a str) -> Box<ParseError<'a>> {
+impl<'s> ParseError<'s> {
+    fn new(kind: ParseErrorKind<'s>, offset: usize, source: &'s str) -> Box<ParseError<'s>> {
         Box::new(ParseError {
             source,
             offset,
@@ -71,7 +71,7 @@ impl<'a> ParseError<'a> {
     }
 }
 
-impl<'a> fmt::Display for ParseError<'a> {
+impl<'s> fmt::Display for ParseError<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ParseErrorKind::*;
         match &self.kind {
@@ -131,8 +131,8 @@ impl<'a> fmt::Display for ParseError<'a> {
     }
 }
 
-impl<'a> From<Box<LexError<'a>>> for Box<ParseError<'a>> {
-    fn from(err: Box<LexError<'a>>) -> Box<ParseError<'a>> {
+impl<'s> From<Box<LexError<'s>>> for Box<ParseError<'s>> {
+    fn from(err: Box<LexError<'s>>) -> Box<ParseError<'s>> {
         Box::new(ParseError {
             source: err.source(),
             offset: err.offset(),
@@ -141,7 +141,7 @@ impl<'a> From<Box<LexError<'a>>> for Box<ParseError<'a>> {
     }
 }
 
-type Result<'a, T> = ::std::result::Result<T, Box<ParseError<'a>>>;
+type Result<'s, T> = ::std::result::Result<T, Box<ParseError<'s>>>;
 
 // iter::Peekable is not sufficient to parse WAT tokens
 // WAT requires LL(1) parser to see a token after '('
@@ -182,16 +182,16 @@ impl<I: Iterator> Iterator for LookAhead<I> {
     }
 }
 
-struct Indices<'a> {
-    source: &'a str,
+struct Indices<'s> {
+    source: &'s str,
     next_idx: u32,
-    indices: HashMap<&'a str, u32>,
+    indices: HashMap<&'s str, u32>,
     what: &'static str,
     scope: &'static str,
 }
 
-impl<'a> Indices<'a> {
-    fn new(source: &'a str, what: &'static str, scope: &'static str) -> Self {
+impl<'s> Indices<'s> {
+    fn new(source: &'s str, what: &'static str, scope: &'static str) -> Self {
         Self {
             source,
             next_idx: 0,
@@ -201,11 +201,11 @@ impl<'a> Indices<'a> {
         }
     }
 
-    fn error<T>(&self, kind: ParseErrorKind<'a>, offset: usize) -> Result<'a, T> {
+    fn error<T>(&self, kind: ParseErrorKind<'s>, offset: usize) -> Result<'s, T> {
         Err(ParseError::new(kind, offset, self.source))
     }
 
-    fn new_idx(&mut self, id: Option<&'a str>, offset: usize) -> Result<'a, u32> {
+    fn new_idx(&mut self, id: Option<&'s str>, offset: usize) -> Result<'s, u32> {
         let idx = self.next_idx;
         if let Some(id) = id {
             if let Some(prev_idx) = self.indices.insert(id, idx) {
@@ -224,29 +224,29 @@ impl<'a> Indices<'a> {
         Ok(idx)
     }
 
-    fn move_out(&mut self) -> HashMap<&'a str, u32> {
+    fn move_out(&mut self) -> HashMap<&'s str, u32> {
         self.next_idx = 0; // Clear next index for parsing next module
         mem::replace(&mut self.indices, HashMap::new())
     }
 }
 
 // TODO: Remember offset of place where the identifier is defined for better error
-struct ParseContext<'a> {
+struct ParseContext<'s> {
     // types are put in Parser context due to abbreviation of typeuse
     // https://webassembly.github.io/spec/core/text/modules.html#abbreviations
-    types: Vec<TypeDef<'a>>,
-    exports: Vec<Export<'a>>,
+    types: Vec<TypeDef<'s>>,
+    exports: Vec<Export<'s>>,
     // Indices for each spaces.
     // https://webassembly.github.io/spec/core/syntax/modules.html#syntax-index
-    type_indices: Indices<'a>,
-    func_indices: Indices<'a>,
-    table_indices: Indices<'a>,
-    mem_indices: Indices<'a>,
-    global_indices: Indices<'a>,
+    type_indices: Indices<'s>,
+    func_indices: Indices<'s>,
+    table_indices: Indices<'s>,
+    mem_indices: Indices<'s>,
+    global_indices: Indices<'s>,
 }
 
-impl<'a> ParseContext<'a> {
-    fn new(source: &'a str) -> Self {
+impl<'s> ParseContext<'s> {
+    fn new(source: &'s str) -> Self {
         ParseContext {
             types: vec![],
             exports: vec![],
@@ -261,14 +261,14 @@ impl<'a> ParseContext<'a> {
 
 // TODO: Add index-to-id tables for types, funcs, tables, mems, globals, locals and labels
 // https://webassembly.github.io/spec/core/text/modules.html#indices
-pub struct Parser<'a> {
-    source: &'a str,
-    tokens: LookAhead<Lexer<'a>>,
-    ctx: ParseContext<'a>,
+pub struct Parser<'s> {
+    source: &'s str,
+    tokens: LookAhead<Lexer<'s>>,
+    ctx: ParseContext<'s>,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(source: &'a str) -> Self {
+impl<'s> Parser<'s> {
+    pub fn new(source: &'s str) -> Self {
         Parser {
             source,
             tokens: LookAhead::new(Lexer::new(source)),
@@ -276,7 +276,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn source(&self) -> &'a str {
+    pub fn source(&self) -> &'s str {
         self.source
     }
 
@@ -284,35 +284,35 @@ impl<'a> Parser<'a> {
         self.tokens.peek().is_none()
     }
 
-    pub fn parse_wat(mut self) -> Result<'a, Parsed<'a>> {
+    pub fn parse_wat(mut self) -> Result<'s, Parsed<'s>> {
         self.parse()
     }
 
-    pub fn parse<P: Parse<'a>>(&mut self) -> Result<'a, P> {
-        Parse::<'a>::parse(self)
+    pub fn parse<P: Parse<'s>>(&mut self) -> Result<'s, P> {
+        Parse::<'s>::parse(self)
     }
 
-    fn error<T>(&self, kind: ParseErrorKind<'a>, offset: usize) -> Result<'a, T> {
+    fn error<T>(&self, kind: ParseErrorKind<'s>, offset: usize) -> Result<'s, T> {
         Err(ParseError::new(kind, offset, self.source))
     }
 
     fn unexpected_token<T>(
         &self,
-        got: Token<'a>,
+        got: Token<'s>,
         expected: &'static str,
         offset: usize,
-    ) -> Result<'a, T> {
+    ) -> Result<'s, T> {
         self.error(ParseErrorKind::UnexpectedToken { got, expected }, offset)
     }
 
-    fn unexpected_eof<T>(&self, expected: &'static str) -> Result<'a, T> {
+    fn unexpected_eof<T>(&self, expected: &'static str) -> Result<'s, T> {
         self.error(
             ParseErrorKind::UnexpectedEndOfFile { expected },
             self.source().len(),
         )
     }
 
-    fn invalid_utf8_char<T>(&self, offset: usize) -> Result<'a, T> {
+    fn invalid_utf8_char<T>(&self, offset: usize) -> Result<'s, T> {
         self.error(
             ParseErrorKind::InvalidStringFormat(
                 "UTF-8 character must be in format u{hexnum} like u{308f} in range of hexnum < 0xd800 or 0xe0000 <= hexnum < 0x110000",
@@ -321,7 +321,7 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn invalid_char_escape<T>(&self, offset: usize) -> Result<'a, T> {
+    fn invalid_char_escape<T>(&self, offset: usize) -> Result<'s, T> {
         self.error(
             ParseErrorKind::InvalidStringFormat(
                 r#"escape must be one of \t, \n, \r, \", \', \\, \u{hexnum}, \MN where M and N are hex number"#,
@@ -333,11 +333,11 @@ impl<'a> Parser<'a> {
     fn cannot_parse_num<T>(
         &self,
         reason: &'static str,
-        digits: &'a str,
+        digits: &'s str,
         base: NumBase,
         sign: Sign,
         offset: usize,
-    ) -> Result<'a, T> {
+    ) -> Result<'s, T> {
         self.error(
             ParseErrorKind::CannotParseNum {
                 digits,
@@ -351,9 +351,9 @@ impl<'a> Parser<'a> {
 
     fn maybe_eof<'p>(
         &'p self,
-        lexed: Option<&'p <Lexer<'a> as Iterator>::Item>,
+        lexed: Option<&'p <Lexer<'s> as Iterator>::Item>,
         expected: &'static str,
-    ) -> Result<'a, (&Token<'a>, usize)> {
+    ) -> Result<'s, (&Token<'s>, usize)> {
         match lexed {
             Some(Ok((tok, offset))) => Ok((tok, *offset)),
             Some(Err(err)) => Err(err.clone().into()),
@@ -361,15 +361,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn lookahead(&self, expected: &'static str) -> Result<'a, (&Token<'a>, usize)> {
+    fn lookahead(&self, expected: &'static str) -> Result<'s, (&Token<'s>, usize)> {
         self.maybe_eof(self.tokens.lookahead(), expected)
     }
 
-    fn peek(&self, expected: &'static str) -> Result<'a, (&Token<'a>, usize)> {
+    fn peek(&self, expected: &'static str) -> Result<'s, (&Token<'s>, usize)> {
         self.maybe_eof(self.tokens.peek(), expected)
     }
 
-    fn next_token(&mut self, expected: &'static str) -> Result<'a, (Token<'a>, usize)> {
+    fn next_token(&mut self, expected: &'static str) -> Result<'s, (Token<'s>, usize)> {
         match self.tokens.next() {
             Some(lexed) => Ok(lexed?),
             None => self.unexpected_eof(expected),
@@ -380,7 +380,7 @@ impl<'a> Parser<'a> {
         self.tokens.next().is_some()
     }
 
-    fn peek_fold_start(&self, expected: &'static str) -> Result<'a, (Option<&'a str>, usize)> {
+    fn peek_fold_start(&self, expected: &'static str) -> Result<'s, (Option<&'s str>, usize)> {
         match self.peek(expected)? {
             (Token::LParen, offset) => match self.lookahead(expected)? {
                 (Token::Keyword(kw), _) => Ok((Some(*kw), offset)),
@@ -390,7 +390,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn maybe_ident(&mut self, expected: &'static str) -> Result<'a, Option<&'a str>> {
+    fn maybe_ident(&mut self, expected: &'static str) -> Result<'s, Option<&'s str>> {
         Ok(match self.peek(expected)? {
             (Token::Ident(id), _) => {
                 let id = *id;
@@ -404,14 +404,14 @@ impl<'a> Parser<'a> {
     fn missing_paren<T>(
         &mut self,
         paren: char,
-        got: Option<Token<'a>>,
+        got: Option<Token<'s>>,
         what: &'static str,
         offset: usize,
-    ) -> Result<'a, T> {
+    ) -> Result<'s, T> {
         self.error(ParseErrorKind::MissingParen { paren, got, what }, offset)
     }
 
-    fn opening_paren(&mut self, what: &'static str) -> Result<'a, usize> {
+    fn opening_paren(&mut self, what: &'static str) -> Result<'s, usize> {
         if let Some(lexed) = self.tokens.next() {
             match lexed? {
                 (Token::LParen, offset) => Ok(offset),
@@ -422,7 +422,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn closing_paren(&mut self, what: &'static str) -> Result<'a, usize> {
+    fn closing_paren(&mut self, what: &'static str) -> Result<'s, usize> {
         if let Some(lexed) = self.tokens.next() {
             match lexed? {
                 (Token::RParen, offset) => Ok(offset),
@@ -433,7 +433,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_u32(&mut self, expected: &'static str) -> Result<'a, u32> {
+    fn parse_u32(&mut self, expected: &'static str) -> Result<'s, u32> {
         match self.next_token(expected)? {
             (Token::Int(sign, base, s), offset) if sign == Sign::Minus => {
                 self.error(ParseErrorKind::NumberMustBePositive(base, s), offset)
@@ -443,7 +443,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_bytes_encoded_in_string(&self, src: &str, offset: usize) -> Result<'a, Vec<u8>> {
+    fn parse_bytes_encoded_in_string(&self, src: &str, offset: usize) -> Result<'s, Vec<u8>> {
         let mut buf: Vec<u8> = vec![];
         let mut chars = src.char_indices();
         while let Some((i, c)) = chars.next() {
@@ -503,13 +503,13 @@ impl<'a> Parser<'a> {
 // TODO: Use trait rather than macros to avoid duplication of implementations
 macro_rules! parse_integer_function {
     ($name:ident, $int:ty) => {
-        fn $name<'a>(
-            parser: &Parser<'a>,
-            input: &'a str,
+        fn $name<'s>(
+            parser: &Parser<'s>,
+            input: &'s str,
             base: NumBase,
             sign: Sign,
             offset: usize,
-        ) -> Result<'a, $int> {
+        ) -> Result<'s, $int> {
             let radix = base.radix();
             let mut ret: $int = 0;
             for c in input.chars() {
@@ -553,13 +553,13 @@ parse_integer_function!(parse_u64_str, u64);
 
 macro_rules! parse_float_number_function {
     ($name:ident, $float:ty) => {
-        fn $name<'a>(
-            parser: &Parser<'a>,
-            input: &'a str,
+        fn $name<'s>(
+            parser: &Parser<'s>,
+            input: &'s str,
             base: NumBase,
             sign: Sign,
             offset: usize,
-        ) -> Result<'a, $float> {
+        ) -> Result<'s, $float> {
             let radix_u = base.radix();
             let radix = radix_u as $float;
             let mut chars = input.chars();
@@ -628,13 +628,13 @@ macro_rules! match_token {
     };
 }
 
-pub trait Parse<'a>: Sized {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self>;
+pub trait Parse<'s>: Sized {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self>;
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html
-impl<'a> Parse<'a> for Parsed<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Parsed<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         Ok(Parsed {
             module: parser.parse()?,
             type_indices: parser.ctx.type_indices.move_out(),
@@ -650,22 +650,22 @@ impl<'a> Parse<'a> for Parsed<'a> {
 //
 // https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
 #[cfg_attr(test, derive(Debug))]
-enum ModuleField<'a> {
-    Type(TypeDef<'a>),
-    Import(ImportItem<'a>),
-    Export(Export<'a>),
-    Func(Func<'a>),
-    Elem(Elem<'a>),
-    Table(TableAbbrev<'a>),
-    Data(Data<'a>),
-    Memory(MemoryAbbrev<'a>),
-    Global(Global<'a>),
-    Start(Start<'a>),
+enum ModuleField<'s> {
+    Type(TypeDef<'s>),
+    Import(ImportItem<'s>),
+    Export(Export<'s>),
+    Func(Func<'s>),
+    Elem(Elem<'s>),
+    Table(TableAbbrev<'s>),
+    Data(Data<'s>),
+    Memory(MemoryAbbrev<'s>),
+    Global(Global<'s>),
+    Start(Start<'s>),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
-impl<'a> Parse<'a> for Module<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Module<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         // Note: Abbreviation
         // In a source file, the toplevel (module ...) surrounding the module body may be omitted.
         // {modulefield}* == (module {modulefield}*)
@@ -830,8 +830,8 @@ impl<'a> Parse<'a> for Module<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-modulefield
-impl<'a> Parse<'a> for ModuleField<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for ModuleField<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let expected = "one of 'type', 'import', 'export', 'func', 'elem', 'table', 'data', 'memory', 'global', 'start' sections in module";
         match parser.peek_fold_start(expected)? {
             (Some(kw), offset) => match kw {
@@ -856,8 +856,8 @@ impl<'a> Parse<'a> for ModuleField<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
-impl<'a> Parse<'a> for TypeDef<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for TypeDef<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("type")?;
         match_token!(parser, "'type' keyword", Token::Keyword("type"));
         let id = parser.maybe_ident("identifier for type")?;
@@ -869,8 +869,8 @@ impl<'a> Parse<'a> for TypeDef<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-functype
-impl<'a> Parse<'a> for FuncType<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for FuncType<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("function type")?;
         match_token!(parser, "'func' keyword", Token::Keyword("func"));
 
@@ -887,9 +887,9 @@ impl<'a> Parse<'a> for FuncType<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-param
-// Not impl for Param<'a> considering abbreviation
-impl<'a> Parse<'a> for Vec<Param<'a>> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+// Not impl for Param<'s> considering abbreviation
+impl<'s> Parse<'s> for Vec<Param<'s>> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let mut params = vec![];
         while let (Some("param"), start) = parser.peek_fold_start("parameter")? {
             parser.eat_token(); // eat '('
@@ -924,8 +924,8 @@ impl<'a> Parse<'a> for Vec<Param<'a>> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-valtype
-impl<'a> Parse<'a> for ValType {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for ValType {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let expected = "keyword for value type";
         match parser.next_token(expected)? {
             (Token::Keyword("i32"), _) => Ok(ValType::I32),
@@ -942,8 +942,8 @@ impl<'a> Parse<'a> for ValType {
 
 // https://webassembly.github.io/spec/core/text/types.html#text-result
 // Not impl for FuncResult considering abbreviation
-impl<'a> Parse<'a> for Vec<FuncResult> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Vec<FuncResult> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let mut results = vec![];
         while let Some("result") = parser.peek_fold_start("result type")?.0 {
             parser.eat_token(); // eat '('
@@ -969,8 +969,8 @@ impl<'a> Parse<'a> for Vec<FuncResult> {
 }
 
 // https://webassembly.github.io/spec/core/text/values.html#text-name
-impl<'a> Parse<'a> for Name {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Name {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let (src, offset) = match_token!(parser, "string literal for name", Token::String(s) => s);
 
         // A name string must form a valid UTF-8 encoding as defined by Unicode (Section 2.5)
@@ -1031,8 +1031,8 @@ impl<'a> Parse<'a> for Name {
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-import
 // Parse "mod name" "name" sequence in import section
-impl<'a> Parse<'a> for Import {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Import {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let mod_name = parser.parse()?;
         let name = parser.parse()?;
         Ok(Import { mod_name, name })
@@ -1041,14 +1041,14 @@ impl<'a> Parse<'a> for Import {
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-import
 #[cfg_attr(test, derive(Debug))]
-enum ImportItem<'a> {
-    Func(Func<'a>),
-    Table(Table<'a>),
-    Memory(Memory<'a>),
-    Global(Global<'a>),
+enum ImportItem<'s> {
+    Func(Func<'s>),
+    Table(Table<'s>),
+    Memory(Memory<'s>),
+    Global(Global<'s>),
 }
-impl<'a> Parse<'a> for ImportItem<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for ImportItem<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("import")?;
         match_token!(parser, "'import' keyword", Token::Keyword("import"));
         let import = parser.parse()?;
@@ -1106,8 +1106,8 @@ impl<'a> Parse<'a> for ImportItem<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#type-uses
-impl<'a> Parse<'a> for TypeUse<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for TypeUse<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let (keyword, start) = parser.peek_fold_start("type or param or result in typeuse")?;
         let idx = if let Some("type") = keyword {
             parser.eat_token(); // Eat '('
@@ -1205,8 +1205,8 @@ impl<'a> Parse<'a> for TypeUse<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#indices
-impl<'a> Parse<'a> for Index<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Index<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let expected = "number or identifier for index";
         match parser.next_token(expected)? {
             (Token::Int(sign, base, s), offset) if sign == Sign::Minus => {
@@ -1222,8 +1222,8 @@ impl<'a> Parse<'a> for Index<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-tabletype
-impl<'a> Parse<'a> for TableType {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for TableType {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let limit = parser.parse()?;
         match_token!(
             parser,
@@ -1235,8 +1235,8 @@ impl<'a> Parse<'a> for TableType {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-limits
-impl<'a> Parse<'a> for Limits {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Limits {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let min = parser.parse_u32("u32 for min table limit")?;
         Ok(match parser.peek("u32 for max table limit")? {
             (Token::Int(..), _) => {
@@ -1249,15 +1249,15 @@ impl<'a> Parse<'a> for Limits {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-memtype
-impl<'a> Parse<'a> for MemType {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for MemType {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         parser.parse().map(|limit| MemType { limit })
     }
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-globaltype
-impl<'a> Parse<'a> for GlobalType {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for GlobalType {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         match parser.peek("'(' for mut or value type of global type")? {
             (Token::LParen, _) => {
                 parser.eat_token(); // eat '('
@@ -1279,8 +1279,8 @@ impl<'a> Parse<'a> for GlobalType {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-export
-impl<'a> Parse<'a> for Export<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Export<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("export")?;
         match_token!(
             parser,
@@ -1314,8 +1314,8 @@ impl<'a> Parse<'a> for Export<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-func
-impl<'a> Parse<'a> for Func<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Func<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("func")?;
         match_token!(
             parser,
@@ -1393,8 +1393,8 @@ impl<'a> Parse<'a> for Func<'a> {
 // https://webassembly.github.io/spec/core/text/modules.html#text-func-abbrev
 //
 // https://webassembly.github.io/spec/core/text/modules.html#text-local
-impl<'a> Parse<'a> for Vec<Local<'a>> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Vec<Local<'s>> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let mut locals = vec![];
         while let (Some("local"), start) = parser.peek_fold_start("local")? {
             parser.eat_token(); // Eat '(' keyword
@@ -1428,8 +1428,8 @@ impl<'a> Parse<'a> for Vec<Local<'a>> {
     }
 }
 
-impl<'a> Parse<'a> for Mem {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Mem {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         fn base_and_digits(s: &str) -> (NumBase, &'_ str) {
             if s.starts_with("0x") {
                 (NumBase::Hex, &s[2..])
@@ -1476,14 +1476,14 @@ impl<'a> Parse<'a> for Mem {
 //       (i32.mul (i32.add (local.get $x) (i32.const 2)) (i32.const 3))
 //
 // https://webassembly.github.io/spec/core/text/instructions.html#folded-instructions
-struct MaybeFoldedInsn<'a, 'p> {
-    insns: Vec<Instruction<'a>>,
-    parser: &'p mut Parser<'a>,
+struct MaybeFoldedInsn<'s, 'p> {
+    insns: Vec<Instruction<'s>>,
+    parser: &'p mut Parser<'s>,
 }
 
 // Note: These are free functions not to modify `insns` field of MaybeFoldedInsn.
 
-fn parse_maybe_result_type<'a>(parser: &mut Parser<'a>) -> Result<'a, Option<ValType>> {
+fn parse_maybe_result_type<'s>(parser: &mut Parser<'s>) -> Result<'s, Option<ValType>> {
     // Note: This requires that next token exists
     if let Some("result") = parser.peek_fold_start("result type")?.0 {
         parser.eat_token(); // Eat '('
@@ -1497,15 +1497,15 @@ fn parse_maybe_result_type<'a>(parser: &mut Parser<'a>) -> Result<'a, Option<Val
 }
 
 // https://webassembly.github.io/spec/core/text/instructions.html#folded-instructions
-impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
-    fn new(parser: &'p mut Parser<'a>) -> MaybeFoldedInsn<'a, 'p> {
+impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
+    fn new(parser: &'p mut Parser<'s>) -> MaybeFoldedInsn<'s, 'p> {
         MaybeFoldedInsn {
             insns: vec![],
             parser,
         }
     }
 
-    fn parse_naked_insn(&mut self, end: bool) -> Result<'a, Instruction<'a>> {
+    fn parse_naked_insn(&mut self, end: bool) -> Result<'s, Instruction<'s>> {
         let (kw, start) =
             match_token!(self.parser, "keyword for instruction", Token::Keyword(k) => k);
         let kind = match kw {
@@ -2042,7 +2042,7 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
         Ok(Instruction { start, kind })
     }
 
-    fn parse_folded(&mut self) -> Result<'a, ()> {
+    fn parse_folded(&mut self) -> Result<'s, ()> {
         let start = self.parser.opening_paren("folded instruction")?;
         let mut insn = self.parse_naked_insn(false)?;
         insn.start = start;
@@ -2061,7 +2061,7 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
         Ok(())
     }
 
-    fn parse_one(&mut self) -> Result<'a, ()> {
+    fn parse_one(&mut self) -> Result<'s, ()> {
         // Parse {instr}. Even if one {instr}, result is sequence of instructions because of
         // folded form
         if let Token::LParen = self.parser.peek("instruction keyword or '('")?.0 {
@@ -2073,7 +2073,7 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
         Ok(())
     }
 
-    fn parse(&mut self) -> Result<'a, ()> {
+    fn parse(&mut self) -> Result<'s, ()> {
         // Parse {instr}*
         loop {
             // This assumes that instr* is always ending with
@@ -2097,8 +2097,8 @@ impl<'a, 'p> MaybeFoldedInsn<'a, 'p> {
     }
 }
 
-impl<'a> Parse<'a> for Vec<Instruction<'a>> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Vec<Instruction<'s>> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let mut parser = MaybeFoldedInsn::new(parser);
         parser.parse()?;
         Ok(parser.insns)
@@ -2106,8 +2106,8 @@ impl<'a> Parse<'a> for Vec<Instruction<'a>> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#element-segments
-impl<'a> Parse<'a> for Elem<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Elem<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         // Need to parse several abbreviations
         // https://webassembly.github.io/spec/core/text/modules.html#id7
         let start = parser.opening_paren("elem")?;
@@ -2160,13 +2160,13 @@ impl<'a> Parse<'a> for Elem<'a> {
 // Helper struct to resolve import/export/elem abbreviation in 'table' section
 // https://webassembly.github.io/spec/core/text/modules.html#text-table-abbrev
 #[cfg_attr(test, derive(Debug))]
-enum TableAbbrev<'a> {
-    Elem(Table<'a>, Elem<'a>),
-    Table(Table<'a>),
+enum TableAbbrev<'s> {
+    Elem(Table<'s>, Elem<'s>),
+    Table(Table<'s>),
 }
 
-impl<'a> Parse<'a> for TableAbbrev<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for TableAbbrev<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("table")?;
         match_token!(parser, "'table' keyword", Token::Keyword("table"));
 
@@ -2267,8 +2267,8 @@ impl<'a> Parse<'a> for TableAbbrev<'a> {
     }
 }
 
-impl<'a> Parse<'a> for Data<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Data<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("data")?;
         match_token!(parser, "'data' keyword", Token::Keyword("data"));
 
@@ -2321,12 +2321,12 @@ impl<'a> Parse<'a> for Data<'a> {
 // Helper struct to resolve import/export/data abbreviation in memory section
 // https://webassembly.github.io/spec/core/text/modules.html#memories
 #[cfg_attr(test, derive(Debug))]
-enum MemoryAbbrev<'a> {
-    Memory(Memory<'a>),
-    Data(Memory<'a>, Data<'a>),
+enum MemoryAbbrev<'s> {
+    Memory(Memory<'s>),
+    Data(Memory<'s>, Data<'s>),
 }
-impl<'a> Parse<'a> for MemoryAbbrev<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for MemoryAbbrev<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("memory")?;
         match_token!(parser, "'memory' keyword", Token::Keyword("memory"));
 
@@ -2437,8 +2437,8 @@ impl<'a> Parse<'a> for MemoryAbbrev<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#globals
-impl<'a> Parse<'a> for Global<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Global<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("global")?;
         match_token!(parser, "'global' keyword", Token::Keyword("global"));
 
@@ -2516,8 +2516,8 @@ impl<'a> Parse<'a> for Global<'a> {
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-start
-impl<'a> Parse<'a> for Start<'a> {
-    fn parse(parser: &mut Parser<'a>) -> Result<'a, Self> {
+impl<'s> Parse<'s> for Start<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("start")?;
         match_token!(parser, "'start' keyword", Token::Keyword("start"));
         let idx = parser.parse()?;
@@ -3202,7 +3202,7 @@ mod tests {
 
     #[test]
     fn type_use() {
-        // XXX: Parsing TypeUse<'a> directly does not work since parser tries to parse (param)* and
+        // XXX: Parsing TypeUse<'s> directly does not work since parser tries to parse (param)* and
         // (result)* and fails with unexpected EOF when they are missing. This is not a real-world
         // problem because typeuse is always used within other statement.
         assert_parse!(

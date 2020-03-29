@@ -6,17 +6,17 @@ use std::fmt;
 // For example, wat::ValType and wasm::TableType has the same structure. So we can use
 // wasm::TableType directly in parsing WAT.
 
-type Indices<'a> = HashMap<&'a str, u32>;
+type Indices<'s> = HashMap<&'s str, u32>;
 
 // Root of the tree
 #[cfg_attr(test, derive(Debug))]
-pub struct Parsed<'a> {
-    pub module: Module<'a>,
-    pub type_indices: Indices<'a>,
-    pub func_indices: Indices<'a>,
-    pub table_indices: Indices<'a>,
-    pub mem_indices: Indices<'a>,
-    pub global_indices: Indices<'a>,
+pub struct Parsed<'s> {
+    pub module: Module<'s>,
+    pub type_indices: Indices<'s>,
+    pub func_indices: Indices<'s>,
+    pub table_indices: Indices<'s>,
+    pub mem_indices: Indices<'s>,
+    pub global_indices: Indices<'s>,
 }
 
 // Note: Since crate for syntax tree data structure is separated, all fields of AST node structs need
@@ -24,42 +24,42 @@ pub struct Parsed<'a> {
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-module
 #[cfg_attr(test, derive(Debug))]
-pub struct Module<'a> {
+pub struct Module<'s> {
     pub start: usize,
-    pub id: Option<&'a str>,
-    pub types: Vec<TypeDef<'a>>,
-    pub exports: Vec<Export<'a>>,
-    pub funcs: Vec<Func<'a>>,
-    pub elems: Vec<Elem<'a>>,
-    pub tables: Vec<Table<'a>>,
-    pub data: Vec<Data<'a>>,
-    pub memories: Vec<Memory<'a>>,
-    pub globals: Vec<Global<'a>>,
-    pub entrypoint: Option<Start<'a>>,
+    pub id: Option<&'s str>,
+    pub types: Vec<TypeDef<'s>>,
+    pub exports: Vec<Export<'s>>,
+    pub funcs: Vec<Func<'s>>,
+    pub elems: Vec<Elem<'s>>,
+    pub tables: Vec<Table<'s>>,
+    pub data: Vec<Data<'s>>,
+    pub memories: Vec<Memory<'s>>,
+    pub globals: Vec<Global<'s>>,
+    pub entrypoint: Option<Start<'s>>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
 #[cfg_attr(test, derive(Debug))]
-pub struct TypeDef<'a> {
+pub struct TypeDef<'s> {
     pub start: usize,
-    pub id: Option<&'a str>,
-    pub ty: FuncType<'a>,
+    pub id: Option<&'s str>,
+    pub ty: FuncType<'s>,
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-functype
 #[cfg_attr(test, derive(Debug))]
-pub struct FuncType<'a> {
+pub struct FuncType<'s> {
     pub start: usize,
-    pub params: Vec<Param<'a>>,
+    pub params: Vec<Param<'s>>,
     pub results: Vec<FuncResult>,
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-param
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
-pub struct Param<'a> {
+pub struct Param<'s> {
     pub start: usize,
-    pub id: Option<&'a str>,
+    pub id: Option<&'s str>,
     pub ty: ValType,
 }
 
@@ -90,7 +90,7 @@ pub struct Import {
 
 // https://webassembly.github.io/spec/core/text/values.html#text-name
 //
-// Use Cow<'a, str> since it is String on text format and it is &str on binary format.
+// Use Cow<'s, str> since it is String on text format and it is &str on binary format.
 // In text format, special characters in string literal are escaped. Unescaped string must
 // be allocated in heap. In binary format, it is directly encoded as bytes so borrowing the
 // part of source is enough.
@@ -99,20 +99,20 @@ pub struct Name(pub String);
 
 // https://webassembly.github.io/spec/core/text/modules.html#type-uses
 #[cfg_attr(test, derive(Debug))]
-pub struct TypeUse<'a> {
+pub struct TypeUse<'s> {
     pub start: usize,
-    pub idx: Index<'a>,
-    pub params: Vec<Param<'a>>,
+    pub idx: Index<'s>,
+    pub params: Vec<Param<'s>>,
     pub results: Vec<FuncResult>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#indices
 #[cfg_attr(test, derive(Debug, PartialEq))]
-pub enum Index<'a> {
+pub enum Index<'s> {
     Num(u32),
-    Ident(&'a str),
+    Ident(&'s str),
 }
-impl<'a> fmt::Display for Index<'a> {
+impl<'s> fmt::Display for Index<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Index::Num(i) => write!(f, "{}", i),
@@ -150,11 +150,11 @@ pub struct GlobalType {
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-export
 #[cfg_attr(test, derive(Debug))]
-pub struct Export<'a> {
+pub struct Export<'s> {
     pub start: usize,
     pub name: Name,
     pub kind: ExportKind,
-    pub idx: Index<'a>,
+    pub idx: Index<'s>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-exportdesc
@@ -168,34 +168,34 @@ pub enum ExportKind {
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-func
 #[cfg_attr(test, derive(Debug))]
-pub enum FuncKind<'a> {
+pub enum FuncKind<'s> {
     Import(Import),
     Body {
-        locals: Vec<Local<'a>>,
-        body: Vec<Instruction<'a>>,
+        locals: Vec<Local<'s>>,
+        body: Vec<Instruction<'s>>,
     },
 }
 #[cfg_attr(test, derive(Debug))]
-pub struct Func<'a> {
+pub struct Func<'s> {
     pub start: usize,
-    pub id: Option<&'a str>,
-    pub ty: TypeUse<'a>,
-    pub kind: FuncKind<'a>,
+    pub id: Option<&'s str>,
+    pub ty: TypeUse<'s>,
+    pub kind: FuncKind<'s>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-local
 #[cfg_attr(test, derive(Debug))]
-pub struct Local<'a> {
+pub struct Local<'s> {
     pub start: usize,
-    pub id: Option<&'a str>,
+    pub id: Option<&'s str>,
     pub ty: ValType,
 }
 
 // https://webassembly.github.io/spec/core/text/instructions.html#instructions
 #[cfg_attr(test, derive(Debug))]
-pub struct Instruction<'a> {
+pub struct Instruction<'s> {
     pub start: usize,
-    pub kind: InsnKind<'a>,
+    pub kind: InsnKind<'s>,
 }
 
 // https://webassembly.github.io/spec/core/text/instructions.html#text-memarg
@@ -206,51 +206,51 @@ pub struct Mem {
 }
 
 #[cfg_attr(test, derive(Debug))]
-pub enum InsnKind<'a> {
+pub enum InsnKind<'s> {
     // Control instructions
     // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
     Block {
-        label: Option<&'a str>,
+        label: Option<&'s str>,
         ty: Option<ValType>,
-        body: Vec<Instruction<'a>>,
-        id: Option<&'a str>,
+        body: Vec<Instruction<'s>>,
+        id: Option<&'s str>,
     },
     Loop {
-        label: Option<&'a str>,
+        label: Option<&'s str>,
         ty: Option<ValType>,
-        body: Vec<Instruction<'a>>,
-        id: Option<&'a str>,
+        body: Vec<Instruction<'s>>,
+        id: Option<&'s str>,
     },
     If {
-        label: Option<&'a str>,
+        label: Option<&'s str>,
         ty: Option<ValType>,
-        then_body: Vec<Instruction<'a>>,
-        else_id: Option<&'a str>,
-        else_body: Vec<Instruction<'a>>,
-        end_id: Option<&'a str>,
+        then_body: Vec<Instruction<'s>>,
+        else_id: Option<&'s str>,
+        else_body: Vec<Instruction<'s>>,
+        end_id: Option<&'s str>,
     },
     Unreachable,
     Nop,
-    Br(Index<'a>),
-    BrIf(Index<'a>),
+    Br(Index<'s>),
+    BrIf(Index<'s>),
     BrTable {
-        labels: Vec<Index<'a>>,
-        default_label: Index<'a>,
+        labels: Vec<Index<'s>>,
+        default_label: Index<'s>,
     },
     Return,
-    Call(Index<'a>),
-    CallIndirect(TypeUse<'a>),
+    Call(Index<'s>),
+    CallIndirect(TypeUse<'s>),
     // Parametric instructions
     // https://webassembly.github.io/spec/core/text/instructions.html#parametric-instructions
     Drop,
     Select,
     // Variable instructions
     // https://webassembly.github.io/spec/core/text/instructions.html#variable-instructions
-    LocalGet(Index<'a>),
-    LocalSet(Index<'a>),
-    LocalTee(Index<'a>),
-    GlobalGet(Index<'a>),
-    GlobalSet(Index<'a>),
+    LocalGet(Index<'s>),
+    LocalSet(Index<'s>),
+    LocalTee(Index<'s>),
+    GlobalGet(Index<'s>),
+    GlobalSet(Index<'s>),
     // Memory instructions
     // https://webassembly.github.io/spec/core/text/instructions.html#memory-instructions
     I32Load(Mem),
@@ -419,7 +419,7 @@ pub enum InsnKind<'a> {
     F64ReinterpretI64,
 }
 
-impl<'a> InsnKind<'a> {
+impl<'s> InsnKind<'s> {
     pub fn is_block(&self) -> bool {
         use InsnKind::*;
         match self {
@@ -431,59 +431,59 @@ impl<'a> InsnKind<'a> {
 
 // https://webassembly.github.io/spec/core/text/modules.html#element-segments
 #[cfg_attr(test, derive(Debug))]
-pub struct Elem<'a> {
+pub struct Elem<'s> {
     pub start: usize,
-    pub idx: Index<'a>,
-    pub offset: Vec<Instruction<'a>>,
-    pub init: Vec<Index<'a>>,
+    pub idx: Index<'s>,
+    pub offset: Vec<Instruction<'s>>,
+    pub init: Vec<Index<'s>>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#tables
 #[cfg_attr(test, derive(Debug))]
-pub struct Table<'a> {
+pub struct Table<'s> {
     pub start: usize,
-    pub id: Option<&'a str>,
+    pub id: Option<&'s str>,
     pub ty: TableType,
     pub import: Option<Import>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-data
 #[cfg_attr(test, derive(Debug))]
-pub struct Data<'a> {
+pub struct Data<'s> {
     pub start: usize,
-    pub idx: Index<'a>,
-    pub offset: Vec<Instruction<'a>>,
-    pub data: Cow<'a, [u8]>,
+    pub idx: Index<'s>,
+    pub offset: Vec<Instruction<'s>>,
+    pub data: Cow<'s, [u8]>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#memories
 #[cfg_attr(test, derive(Debug))]
-pub struct Memory<'a> {
+pub struct Memory<'s> {
     pub start: usize,
-    pub id: Option<&'a str>,
+    pub id: Option<&'s str>,
     pub ty: MemType,
     pub import: Option<Import>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#globals
 #[cfg_attr(test, derive(Debug))]
-pub enum GlobalKind<'a> {
+pub enum GlobalKind<'s> {
     Import(Import),
-    Init(Vec<Instruction<'a>>),
+    Init(Vec<Instruction<'s>>),
 }
 #[cfg_attr(test, derive(Debug))]
-pub struct Global<'a> {
+pub struct Global<'s> {
     pub start: usize,
-    pub id: Option<&'a str>,
+    pub id: Option<&'s str>,
     pub ty: GlobalType,
-    pub kind: GlobalKind<'a>,
+    pub kind: GlobalKind<'s>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-start
 #[cfg_attr(test, derive(Debug))]
-pub struct Start<'a> {
+pub struct Start<'s> {
     pub start: usize,
-    pub idx: Index<'a>,
+    pub idx: Index<'s>,
 }
 
 #[cfg(test)]

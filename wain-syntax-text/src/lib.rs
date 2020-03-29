@@ -17,23 +17,23 @@ use source::TextSource;
 use std::fmt;
 use wat2wasm::{wat2wasm, TransformError};
 
-pub enum Error<'a> {
-    Parse(Box<ParseError<'a>>),
-    Transform(Box<TransformError<'a>>),
-    Compose(Box<ComposeError<'a>>),
+pub enum Error<'source> {
+    Parse(Box<ParseError<'source>>),
+    Transform(Box<TransformError<'source>>),
+    Compose(Box<ComposeError<'source>>),
 }
 
 macro_rules! from_errors {
     ($($ty:ty => $kind:ident,)+) => {
         $(
-            impl<'a> From<Box<$ty>> for Error<'a> {
-                fn from(err: Box<$ty>) -> Error<'a> {
+            impl<'s> From<Box<$ty>> for Error<'s> {
+                fn from(err: Box<$ty>) -> Error<'s> {
                     Error::$kind(err)
                 }
             }
         )+
 
-        impl<'a> fmt::Display for Error<'a> {
+        impl<'s> fmt::Display for Error<'s> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self {
                     $(
@@ -45,9 +45,9 @@ macro_rules! from_errors {
     };
 }
 from_errors! {
-    ParseError<'a> => Parse,
-    TransformError<'a> => Transform,
-    ComposeError<'a> => Compose,
+    ParseError<'s> => Parse,
+    TransformError<'s> => Transform,
+    ComposeError<'s> => Compose,
 }
 
 pub fn parse(source: &'_ str) -> Result<wain_ast::Root<'_, TextSource>, Error<'_>> {
