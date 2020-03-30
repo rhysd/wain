@@ -21,6 +21,12 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: cargo test --color always --all
+      - name: Build sources
+        run: cargo build --color always
+      - name: Run hello.wasm for sanity test
+        run: cargo run -- examples/hello/hello.wasm
+      - name: Run hello.wat for sanity test
+        run: cargo run -- examples/hello/hello.wat
   linter:
     name: Clippy and Rustfmt
     runs-on: ubuntu-latest
