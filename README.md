@@ -11,7 +11,7 @@ An implementation of [WebAssembly][wasm-spec].
 **Features:**
 
 - No unsafe code. Memory safety and no undefined behavior are guaranteed
-- No external crate dependencies
+- No external runtime dependency. It means no unsafe dependency and less binary size
 - Efficiency. Avoid unnecessary allocations and run instructions as fast as possible without unsafe code
 - Modular implementation. Binary format parser, text format parser, validator, executor are
   developed as separate libraries
@@ -50,6 +50,7 @@ If you don't want to run text format code, it can be omitted:
 # Only run binary format files
 $ cargo install wain --no-default-features --features binary
 ```
+
 
 ## Usage
 
@@ -157,6 +158,7 @@ let ast = ...; // Parse abstract syntax tree and validate it
 let mut machine = Machine::instantiate(&ast.module, YourOwnImporter{ /* ... */ }).unwrap();
 let run = machine.execute().unwrap();
 ```
+
 
 ## Future works
 
