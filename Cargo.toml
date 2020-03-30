@@ -50,9 +50,5 @@ members = [
 [badges]
 maintenance = { status = "actively-developed" }
 
-[dev-dependencies]
-criterion = "0.3"
-
 [[bench]]
 name = "mandelbrot"
-harness = false
