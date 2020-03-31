@@ -80,7 +80,13 @@ impl Memory {
             ));
         }
 
-        self.data[offset..end_addr].copy_from_slice(&segment.data);
+        // TODO: copy_from_slice is slower here. I need to investigate the reason
+        #[allow(clippy::manual_memcpy)]
+        {
+            for i in 0..data.len() {
+                self.data[offset + i] = data[i];
+            }
+        }
 
         Ok(())
     }
