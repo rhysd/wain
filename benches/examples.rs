@@ -36,19 +36,25 @@ mod benches {
         }
     }
 
-    #[bench]
-    pub fn mandelbrot_wasm(b: &mut Bencher) {
+    fn run_example(name: &'static str) {
         let mut file = env::current_dir().unwrap();
         file.push("examples");
-        file.push("mandelbrot.wasm");
+        file.push(name);
         let source = fs::read(file).unwrap();
+        let ast = unwrap(parse(&source));
+        unwrap(validate(&ast));
+        let importer = DefaultImporter::with_stdio(Discard, Discard);
+        let mut machine = unwrap(Machine::instantiate(&ast.module, importer));
+        unwrap(machine.execute());
+    }
 
-        b.iter(|| {
-            let ast = unwrap(parse(&source));
-            unwrap(validate(&ast));
-            let importer = DefaultImporter::with_stdio(Discard, Discard);
-            let mut machine = unwrap(Machine::instantiate(&ast.module, importer));
-            unwrap(machine.execute());
-        });
+    #[bench]
+    pub fn mandelbrot_wasm(b: &mut Bencher) {
+        b.iter(|| run_example("mandelbrot.wasm"));
+    }
+
+    #[bench]
+    pub fn nbodies_wasm(b: &mut Bencher) {
+        b.iter(|| run_example("nbodies.wasm"));
     }
 }
