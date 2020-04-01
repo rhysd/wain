@@ -2,6 +2,7 @@
 
 extern crate wain_ast;
 
+mod conv;
 mod globals;
 mod import;
 mod machine;

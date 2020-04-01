@@ -1,3 +1,4 @@
+use crate::conv;
 use crate::globals::Globals;
 use crate::import::{ImportError, Importer};
 use crate::memory::Memory;
@@ -652,15 +653,15 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-wrap
             I32WrapI64 => machine.cvtop::<i64, i32, _>(|v| v as i32),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-trunc-u
-            I32TruncF32U => machine.cvtop::<f32, i32, _>(|v| v as u32 as i32),
-            I32TruncF64U => machine.cvtop::<f64, i32, _>(|v| v as u32 as i32),
-            I64TruncF32U => machine.cvtop::<f32, i64, _>(|v| v as u64 as i64),
-            I64TruncF64U => machine.cvtop::<f64, i64, _>(|v| v as u64 as i64),
+            I32TruncF32U => machine.cvtop::<f32, i32, _>(|v| conv::f32_to_u32(v) as i32),
+            I32TruncF64U => machine.cvtop::<f64, i32, _>(|v| conv::f64_to_u32(v) as i32),
+            I64TruncF32U => machine.cvtop::<f32, i64, _>(|v| conv::f32_to_u64(v) as i64),
+            I64TruncF64U => machine.cvtop::<f64, i64, _>(|v| conv::f64_to_u64(v) as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-trunc-s
-            I32TruncF32S => machine.cvtop::<f32, i32, _>(|v| v as i32),
-            I32TruncF64S => machine.cvtop::<f64, i32, _>(|v| v as i32),
-            I64TruncF32S => machine.cvtop::<f32, i64, _>(|v| v as i64),
-            I64TruncF64S => machine.cvtop::<f64, i64, _>(|v| v as i64),
+            I32TruncF32S => machine.cvtop::<f32, i32, _>(conv::f32_to_i32),
+            I32TruncF64S => machine.cvtop::<f64, i32, _>(conv::f64_to_i32),
+            I64TruncF32S => machine.cvtop::<f32, i64, _>(conv::f32_to_i64),
+            I64TruncF64S => machine.cvtop::<f64, i64, _>(conv::f64_to_i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-promote
             F64PromoteF32 => machine.cvtop::<f32, f64, _>(|v| v as f64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-demote
