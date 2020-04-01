@@ -42,20 +42,6 @@ void print_float(double f)
     }
 }
 
-double my_abs(double x) {
-    return x < 0.0 ? -x : x;
-}
-
-double sqrt(double x)
-{
-    double const diff = 0.000000001;
-    double guess = 1.0;
-    while(my_abs(guess * guess - x) >= diff){
-        guess = (x / guess + guess) / 2;
-    }
-    return guess;
-}
-
 static double const PI = 3.1415926535897932384626433;
 static double const SOLAR_MASS = 4 * PI * PI;
 static double const DAYS_PER_YEAR = 365.24;
@@ -97,7 +83,8 @@ void planet_move_from_i(
         double const dy = b->y - b2->y;
         double const dz = b->z - b2->z;
 
-        double const distance = sqrt(dx * dx + dy * dy + dz * dz);
+        // Clang emits f64.sqrt on __builtin_sqrt() call
+        double const distance = __builtin_sqrt(dx * dx + dy * dy + dz * dz);
         double const mag = dt / (distance * distance * distance);
         double const b_mass_mag = b->mass * mag;
         double const b2_mass_mag = b2->mass * mag;
@@ -129,7 +116,7 @@ double energy(struct planet const* const bodies, unsigned const nbodies)
             double const dx = b->x - b2->x;
             double const dy = b->y - b2->y;
             double const dz = b->z - b2->z;
-            double const distance = sqrt(dx * dx + dy * dy + dz * dz);
+            double const distance = __builtin_sqrt(dx * dx + dy * dy + dz * dz);
             e -= (b->mass * b2->mass) / distance;
         }
     }
