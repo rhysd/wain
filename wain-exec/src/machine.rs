@@ -677,10 +677,10 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             F64ConvertI32S => machine.cvtop::<i32, f64, _>(|v| v as f64),
             F64ConvertI64S => machine.cvtop::<i64, f64, _>(|v| v as f64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-reinterpret
-            I32ReinterpretF32 => machine.cvtop::<f32, i32, _>(|v| v as i32),
-            I64ReinterpretF64 => machine.cvtop::<f64, i64, _>(|v| v as i64),
-            F32ReinterpretI32 => machine.cvtop::<i32, f32, _>(|v| v as f32),
-            F64ReinterpretI64 => machine.cvtop::<i64, f64, _>(|v| v as f64),
+            I32ReinterpretF32 => machine.cvtop::<f32, i32, _>(|v| v.to_bits() as i32),
+            I64ReinterpretF64 => machine.cvtop::<f64, i64, _>(|v| v.to_bits() as i64),
+            F32ReinterpretI32 => machine.cvtop::<i32, f32, _>(|v| f32::from_bits(v as u32)),
+            F64ReinterpretI64 => machine.cvtop::<i64, f64, _>(|v| f64::from_bits(v as u64)),
         }
         Ok(ExecState::Continue)
     }
