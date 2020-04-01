@@ -1,6 +1,6 @@
 use crate::memory::Memory;
 use crate::stack::Stack;
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 
 pub enum ImportError {
     Fatal { message: String },
@@ -19,14 +19,6 @@ pub trait Importer {
 pub struct DefaultImporter<R: Read, W: Write> {
     stdout: W,
     stdin: R,
-}
-
-impl Default for DefaultImporter<io::BufReader<io::Stdin>, io::BufWriter<io::Stdout>> {
-    fn default() -> Self {
-        let stdin = io::BufReader::new(io::stdin());
-        let stdout = io::BufWriter::new(io::stdout());
-        Self { stdin, stdout }
-    }
 }
 
 impl<R: Read, W: Write> Drop for DefaultImporter<R, W> {

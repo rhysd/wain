@@ -16,6 +16,7 @@ pub use machine::{Machine, Run};
 pub use memory::Memory;
 pub use stack::Stack;
 
+use std::io;
 use trap::Result;
 use wain_ast::Module;
 
@@ -23,7 +24,7 @@ use wain_ast::Module;
 ///
 /// This function takes parsed and validated WebAssembly module and executes it until the end.
 ///
-/// For standard I/O speed, this function buffers io::Stdin and io::Stdout objects because currently
+/// For standard I/O speed, this function locks io::Stdin and io::Stdout objects because currently
 /// getchar() and putchar() don't buffer its input/output. This behavior may change in the future.
 ///
 /// If the behavior is not acceptable, please make an abstract machine instance with
@@ -32,7 +33,9 @@ use wain_ast::Module;
 /// You will need importer for initializing Machine struct. Please use DefaultImporter::with_stdio()
 /// or make your own importer struct which implements Importer trait.
 pub fn execute(module: Module<'_>) -> Result<Run> {
-    let importer = DefaultImporter::default();
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let importer = DefaultImporter::with_stdio(stdin.lock(), stdout.lock());
     let mut machine = Machine::instantiate(&module, importer)?;
     machine.execute()
 }
