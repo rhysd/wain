@@ -1,6 +1,6 @@
 [package]
 name = "wain"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2018"
 description = "WebAssembly interpreter written in Safe Rust with zero dependency"
@@ -52,3 +52,4 @@ maintenance = { status = "actively-developed" }
 
 [[bench]]
 name = "mandelbrot"
+path = "benches/mandelbrot.rs"
