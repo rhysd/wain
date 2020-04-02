@@ -32,6 +32,7 @@ impl<R: Read, W: Write> DefaultImporter<R, W> {
         Self { stdin, stdout }
     }
 
+    // (func (param i32) (result i32))
     fn putchar(&mut self, stack: &mut Stack) {
         let v: i32 = stack.pop();
         let b = v as u8;
@@ -42,6 +43,7 @@ impl<R: Read, W: Write> DefaultImporter<R, W> {
         stack.push(ret);
     }
 
+    // (func () (result i32))
     fn getchar(&mut self, stack: &mut Stack) {
         let mut buf = [0u8];
         let v = match self.stdin.read_exact(&mut buf) {
@@ -50,10 +52,45 @@ impl<R: Read, W: Write> DefaultImporter<R, W> {
         };
         stack.push(v);
     }
+
+    // (func (param i32 i32 i32) (result i32))
+    fn memcpy(&mut self, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportError> {
+        // memcpy(void *dest, void *src, size_t n)
+        let size = stack.pop::<i32>() as usize;
+        let src_start = stack.pop::<i32>() as usize;
+        let dest_i32: i32 = stack.pop();
+        let dest_start = dest_i32 as usize;
+        let src_end = src_start + size;
+        let dest_end = dest_start + size;
+
+        let (dest, src) = if dest_end <= src_start {
+            let (dest, src) = memory.data_mut().split_at_mut(src_start);
+            (&mut dest[dest_start..dest_end], &mut src[..size])
+        } else if src_end <= dest_start {
+            let (src, dest) = memory.data_mut().split_at_mut(dest_start);
+            (&mut dest[..size], &mut src[src_start..src_end])
+        } else {
+            return Err(ImportError::Fatal {
+                message: format!(
+                    "range overwrap on memcpy: src={}..{} and dest={}..{}",
+                    src_start, src_end, dest_start, dest_end
+                ),
+            });
+        };
+
+        dest.copy_from_slice(&src);
+        stack.push(dest_i32);
+        Ok(())
+    }
 }
 
 impl<R: Read, W: Write> Importer for DefaultImporter<R, W> {
-    fn call(&mut self, name: &str, stack: &mut Stack, _: &mut Memory) -> Result<(), ImportError> {
+    fn call(
+        &mut self,
+        name: &str,
+        stack: &mut Stack,
+        memory: &mut Memory,
+    ) -> Result<(), ImportError> {
         match name {
             "putchar" => {
                 self.putchar(stack);
@@ -63,6 +100,7 @@ impl<R: Read, W: Write> Importer for DefaultImporter<R, W> {
                 self.getchar(stack);
                 Ok(())
             }
+            "memcpy" => self.memcpy(stack, memory),
             _ => Err(ImportError::NotFound),
         }
     }

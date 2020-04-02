@@ -68,7 +68,12 @@ of `Result`.
 the future). If this behavior is not acceptable, please specify your `io::Write`/`io::Read` values
 for stdout/stdin at `wain_exec::Machine::new()`. Then run the module by `wain_exec::Machine::execute()`.
 
-By default, only `putchar` and `getchar` in `env` module are supported as external functions.
+By default, only following C functions are supported in `env` module are supported as external functions
+
+- `int putchar(int)` (in wasm `(func (param i32) (result i32))`)
+- `int getchar(void)` (in wasm `(func (param) (result i32))`
+- `void *memcpy(void *, void *, size_t)` (in wasm `(func (param i32 i32 i32) (result i32))`)
+
 But you can implement your own struct which implements `wain_exec::Importer` for defining external
 functions from Rust side.
 
