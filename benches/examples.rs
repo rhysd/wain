@@ -67,4 +67,5 @@ mod benches {
     bench_example!(nbodies, "nbodies.wasm");
     bench_example!(brainfxxk, "brainfxxk.wasm");
     bench_example!(primes, "primes.wasm");
+    bench_example!(quicksort, "quicksort.wasm");
 }
