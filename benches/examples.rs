@@ -48,13 +48,22 @@ mod benches {
         unwrap(machine.execute());
     }
 
-    #[bench]
-    pub fn mandelbrot_wasm(b: &mut Bencher) {
-        b.iter(|| run_example("mandelbrot.wasm"));
+    macro_rules! bench_example {
+        ($name:ident, $file:expr) => {
+            #[bench]
+            pub fn $name(b: &mut Bencher) {
+                b.iter(|| run_example($file));
+            }
+        };
     }
 
-    #[bench]
-    pub fn nbodies_wasm(b: &mut Bencher) {
-        b.iter(|| run_example("nbodies.wasm"));
-    }
+    bench_example!(hello, "hello/hello.wasm");
+    bench_example!(hello_global, "hello/hello_global.wasm");
+    bench_example!(hello_indirect, "hello/hello_indirect.wasm");
+    bench_example!(hello_struct, "hello/hello_struct.wasm");
+    bench_example!(sqrt, "sqrt.wasm");
+    bench_example!(pi, "pi.wasm");
+    bench_example!(mandelbrot, "mandelbrot.wasm");
+    bench_example!(nbodies, "nbodies.wasm");
+    bench_example!(brainfxxk, "brainfxxk.wasm");
 }
