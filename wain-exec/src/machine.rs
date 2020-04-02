@@ -1,4 +1,4 @@
-use crate::conv;
+use crate::cast;
 use crate::globals::Globals;
 use crate::import::{ImportError, Importer};
 use crate::memory::Memory;
@@ -184,12 +184,16 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-unop
     fn unop<T: StackAccess, F: FnOnce(T) -> T>(&mut self, op: F) {
+        // TODO: Do not pop and push value. Instead, get top value by stack.top()
+        // and modify the top value directly
         let ret = op(self.stack.pop());
         self.stack.push(ret);
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-binop
     fn binop<T: StackAccess, F: FnOnce(T, T) -> T>(&mut self, op: F) {
+        // TODO: Do not pop c1 and push value. Instead, get top value by stack.top() as c1
+        // and modify the top value directly
         let c2 = self.stack.pop();
         let c1 = self.stack.pop();
         let ret = op(c1, c2);
@@ -198,12 +202,16 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-testop
     fn testop<T: StackAccess, F: FnOnce(T) -> bool>(&mut self, op: F) {
+        // TODO: Do not pop and push value. Instead, get top value by stack.top()
+        // and modify the top value directly. When top value is 64bits, pop 32bits
         let ret = op(self.stack.pop());
         self.stack.push::<i32>(if ret { 1 } else { 0 });
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-relop
     fn relop<T: StackAccess, F: FnOnce(T, T) -> bool>(&mut self, op: F) {
+        // TODO: Do not pop c1 and push value. Instead, get top value by stack.top() as c1
+        // and modify the top value directly. When top value is 64bits, pop 32bits
         let c2 = self.stack.pop();
         let c1 = self.stack.pop();
         let ret = op(c1, c2);
@@ -212,6 +220,9 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-cvtop
     fn cvtop<T: StackAccess, U: StackAccess, F: FnOnce(T) -> U>(&mut self, op: F) {
+        // TODO: Do not pop c1 and push value. Instead, get top value by stack.top() as c1
+        // and modify the top value directly. When 64bits -> 32bits, pop 32bits.
+        // When 64bits -> 32bits, push 32bits.
         let ret = op(self.stack.pop());
         self.stack.push(ret);
     }
@@ -653,15 +664,15 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-wrap
             I32WrapI64 => machine.cvtop::<i64, i32, _>(|v| v as i32),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-trunc-u
-            I32TruncF32U => machine.cvtop::<f32, i32, _>(|v| conv::f32_to_u32(v) as i32),
-            I32TruncF64U => machine.cvtop::<f64, i32, _>(|v| conv::f64_to_u32(v) as i32),
-            I64TruncF32U => machine.cvtop::<f32, i64, _>(|v| conv::f32_to_u64(v) as i64),
-            I64TruncF64U => machine.cvtop::<f64, i64, _>(|v| conv::f64_to_u64(v) as i64),
+            I32TruncF32U => machine.cvtop::<f32, i32, _>(|v| cast::f32_to_u32(v) as i32),
+            I32TruncF64U => machine.cvtop::<f64, i32, _>(|v| cast::f64_to_u32(v) as i32),
+            I64TruncF32U => machine.cvtop::<f32, i64, _>(|v| cast::f32_to_u64(v) as i64),
+            I64TruncF64U => machine.cvtop::<f64, i64, _>(|v| cast::f64_to_u64(v) as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-trunc-s
-            I32TruncF32S => machine.cvtop::<f32, i32, _>(conv::f32_to_i32),
-            I32TruncF64S => machine.cvtop::<f64, i32, _>(conv::f64_to_i32),
-            I64TruncF32S => machine.cvtop::<f32, i64, _>(conv::f32_to_i64),
-            I64TruncF64S => machine.cvtop::<f64, i64, _>(conv::f64_to_i64),
+            I32TruncF32S => machine.cvtop::<f32, i32, _>(cast::f32_to_i32),
+            I32TruncF64S => machine.cvtop::<f64, i32, _>(cast::f64_to_i32),
+            I64TruncF32S => machine.cvtop::<f32, i64, _>(cast::f32_to_i64),
+            I64TruncF64S => machine.cvtop::<f64, i64, _>(cast::f64_to_i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-promote
             F64PromoteF32 => machine.cvtop::<f32, f64, _>(|v| v as f64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-demote
@@ -677,6 +688,7 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             F64ConvertI32S => machine.cvtop::<i32, f64, _>(|v| v as f64),
             F64ConvertI64S => machine.cvtop::<i64, f64, _>(|v| v as f64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-reinterpret
+            // TODO: We don't need to modify stack. Just changing type to t2 is enough.
             I32ReinterpretF32 => machine.cvtop::<f32, i32, _>(|v| v.to_bits() as i32),
             I64ReinterpretF64 => machine.cvtop::<f64, i64, _>(|v| v.to_bits() as i64),
             F32ReinterpretI32 => machine.cvtop::<i32, f32, _>(|v| f32::from_bits(v as u32)),
