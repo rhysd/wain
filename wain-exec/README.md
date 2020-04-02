@@ -111,8 +111,8 @@ Thanks to validation, checks at runtime are minimal (e.g. function signature on 
 1. Allocate memory, table, global variables. Initialize stack
 2. Interpret syntax tree nodes pushing/popping values to/from stack
 
-Currently wain interprets a Wasm syntax tree directly. I'm planning to define internal representation
-which can be interpreted faster.
+Currently wain interprets a Wasm syntax tree directly. I'm planning to define an intermediate
+representation which can be interpreted faster.
 
 Entrypoint is 'start function' which is defined either
 

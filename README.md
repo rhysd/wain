@@ -25,7 +25,7 @@ tasks are remaining.
 - Add sufficient tests to all libraries and fuzz tests for parsers
 - Pass all [spec tests][wasm-test-suite]
 - Add benchmarks to track performance
-- Introduce internal representation to execute instructions more efficiently
+- Introduce an intermediate representation to execute instructions more efficiently
 - Add documentation for every public APIs
 
 Please see [the task board](https://github.com/rhysd/wain/projects/1) for current progress.
@@ -95,8 +95,8 @@ wain consists of multiple crates.
 - **[wain-validate](./wain-validate):** Validator of a Wasm abstract syntax tree. Implementation of
   [Wasm validation spec][wasm-spec-validation]
 - **[wain-exec](./wain-exec):** Executor which interprets a Wasm abstract syntax tree. Implementation
-  of [Wasm execution spec][wasm-spec-exec]. It directly interprets a syntax tree for now, but it
-  would translate it into an internal representation and execute it for efficiency in the future
+  of [Wasm execution spec][wasm-spec-exec]. It directly interprets a syntax tree for now, but in the
+  it would translate the tree into an intermediate representation to execute it efficiently
 
 `wain-*` crates are libraries as modular implementation of WebAssembly.
 
@@ -225,7 +225,7 @@ to validation, checks at runtime are minimal (e.g. function signature on indirec
 1. Allocate memory, table, global variables. Initialize stack
 2. Interpret syntax tree nodes pushing/popping values to/from stack
 
-Currently wain interprets a Wasm syntax tree directly. I'm planning to define internal representation
+Currently wain interprets a Wasm syntax tree directly. I'm planning to define intermediate representation
 which can be interpreted faster.
 
 Entrypoint is 'start function' which is defined either
