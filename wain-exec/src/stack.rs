@@ -4,7 +4,7 @@ use std::f32;
 use std::f64;
 use std::fmt;
 use std::mem::size_of;
-use wain_ast::ValType;
+use wain_ast::{AsValType, ValType};
 
 // Vec<Value> consumes too much space since its element size is always 64bits.
 // To use space more efficiently, here use u32 for storing values as bytes.
@@ -130,8 +130,34 @@ impl Stack {
         StackAccess::top(self)
     }
 
+    pub fn write_top_bytes<V: LittleEndian>(&mut self, v: V) {
+        let addr = self.bytes.len() - size_of::<V>();
+        LittleEndian::write(&mut self.bytes, addr, v);
+    }
+
+    pub fn write_top_type(&mut self, t: ValType) {
+        let len = self.types.len() - 1;
+        self.types[len] = t;
+    }
+
+    // Note: The same value as size_of::<T>() can be obtained by self.top_type().bytes(), but it's
+    // runtime value preventing compiler from optimization.
+    pub fn write_top<T: StackAccess, V: LittleEndian + AsValType>(&mut self, v: V) {
+        // Expect optimizations by compiler since conditions of these if statements can be
+        // calculated at compile time
+        if size_of::<T>() > size_of::<V>() {
+            let len = self.bytes.len() - (size_of::<T>() - size_of::<V>());
+            self.bytes.truncate(len);
+        } else if size_of::<T>() < size_of::<V>() {
+            let len = self.bytes.len() + (size_of::<V>() - size_of::<T>());
+            self.bytes.resize(len, 0);
+        }
+        self.write_top_bytes(v);
+        self.write_top_type(V::VAL_TYPE);
+    }
+
     pub fn write<V: LittleEndian>(&mut self, addr: usize, v: V) {
-        LittleEndian::write(&mut self.bytes, addr, v)
+        LittleEndian::write(&mut self.bytes, addr, v);
     }
 
     pub fn read<V: LittleEndian>(&self, addr: usize) -> V {
@@ -183,6 +209,14 @@ impl Stack {
         self.types.extend_from_slice(types);
         let bytes = types.iter().fold(0, |acc, t| acc + t.bytes());
         self.bytes.resize(self.bytes.len() + bytes, 0);
+    }
+
+    pub fn extend_zeros(&mut self, bytes: usize) {
+        self.bytes.resize(self.bytes.len() + bytes, 0);
+    }
+
+    pub fn truncate_bytes(&mut self, bytes: usize) {
+        self.bytes.truncate(self.bytes.len() - bytes);
     }
 }
 

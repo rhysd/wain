@@ -84,6 +84,21 @@ impl fmt::Display for ValType {
         f.write_str(self.as_ref())
     }
 }
+pub trait AsValType {
+    const VAL_TYPE: ValType;
+}
+impl AsValType for i32 {
+    const VAL_TYPE: ValType = ValType::I32;
+}
+impl AsValType for i64 {
+    const VAL_TYPE: ValType = ValType::I64;
+}
+impl AsValType for f32 {
+    const VAL_TYPE: ValType = ValType::F32;
+}
+impl AsValType for f64 {
+    const VAL_TYPE: ValType = ValType::F64;
+}
 
 // https://webassembly.github.io/spec/core/syntax/values.html#syntax-name
 //

@@ -7,6 +7,7 @@ use crate::table::Table;
 use crate::trap::{Result, Trap, TrapReason};
 use crate::value::{LittleEndian, Value};
 use wain_ast as ast;
+use wain_ast::AsValType;
 
 // Note: This implementation currently ignores Wasm's thread model since MVP does not support multiple
 // threads. https://webassembly.github.io/spec/core/exec/runtime.html#configurations
@@ -183,48 +184,60 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-unop
-    fn unop<T: StackAccess, F: FnOnce(T) -> T>(&mut self, op: F) {
-        // TODO: Do not pop and push value. Instead, get top value by stack.top()
-        // and modify the top value directly
-        let ret = op(self.stack.pop());
-        self.stack.push(ret);
+    fn unop<T, F>(&mut self, op: F)
+    where
+        T: StackAccess + LittleEndian,
+        F: FnOnce(T) -> T,
+    {
+        // Instead of popping value and pushing the result, directly modify stack top for optimization
+        let ret = op(self.stack.top());
+        self.stack.write_top_bytes(ret);
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-binop
-    fn binop<T: StackAccess, F: FnOnce(T, T) -> T>(&mut self, op: F) {
-        // TODO: Do not pop c1 and push value. Instead, get top value by stack.top() as c1
-        // and modify the top value directly
+    fn binop<T, F>(&mut self, op: F)
+    where
+        T: StackAccess + LittleEndian,
+        F: FnOnce(T, T) -> T,
+    {
+        // Instead of popping value and pushing the result, directly modify stack top for optimization
         let c2 = self.stack.pop();
-        let c1 = self.stack.pop();
+        let c1 = self.stack.top();
         let ret = op(c1, c2);
-        self.stack.push(ret);
+        self.stack.write_top_bytes(ret);
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-testop
-    fn testop<T: StackAccess, F: FnOnce(T) -> bool>(&mut self, op: F) {
-        // TODO: Do not pop and push value. Instead, get top value by stack.top()
-        // and modify the top value directly. When top value is 64bits, pop 32bits
-        let ret = op(self.stack.pop());
-        self.stack.push::<i32>(if ret { 1 } else { 0 });
+    fn testop<T, F>(&mut self, op: F)
+    where
+        T: StackAccess + LittleEndian,
+        F: FnOnce(T) -> bool,
+    {
+        let ret = op(self.stack.top());
+        self.stack.write_top::<T, i32>(if ret { 1 } else { 0 });
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-relop
-    fn relop<T: StackAccess, F: FnOnce(T, T) -> bool>(&mut self, op: F) {
-        // TODO: Do not pop c1 and push value. Instead, get top value by stack.top() as c1
-        // and modify the top value directly. When top value is 64bits, pop 32bits
+    fn relop<T, F>(&mut self, op: F)
+    where
+        T: StackAccess + LittleEndian,
+        F: FnOnce(T, T) -> bool,
+    {
         let c2 = self.stack.pop();
-        let c1 = self.stack.pop();
+        let c1 = self.stack.top();
         let ret = op(c1, c2);
-        self.stack.push::<i32>(if ret { 1 } else { 0 });
+        self.stack.write_top::<T, i32>(if ret { 1i32 } else { 0 });
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-cvtop
-    fn cvtop<T: StackAccess, U: StackAccess, F: FnOnce(T) -> U>(&mut self, op: F) {
-        // TODO: Do not pop c1 and push value. Instead, get top value by stack.top() as c1
-        // and modify the top value directly. When 64bits -> 32bits, pop 32bits.
-        // When 64bits -> 32bits, push 32bits.
-        let ret = op(self.stack.pop());
-        self.stack.push(ret);
+    fn cvtop<T, U, F>(&mut self, op: F)
+    where
+        T: StackAccess,
+        U: StackAccess + LittleEndian + AsValType,
+        F: FnOnce(T) -> U,
+    {
+        let ret = op(self.stack.top());
+        self.stack.write_top::<T, U>(ret);
     }
 }
 
@@ -688,11 +701,11 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             F64ConvertI32S => machine.cvtop::<i32, f64, _>(|v| v as f64),
             F64ConvertI64S => machine.cvtop::<i64, f64, _>(|v| v as f64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-reinterpret
-            // TODO: We don't need to modify stack. Just changing type to t2 is enough.
-            I32ReinterpretF32 => machine.cvtop::<f32, i32, _>(|v| v.to_bits() as i32),
-            I64ReinterpretF64 => machine.cvtop::<f64, i64, _>(|v| v.to_bits() as i64),
-            F32ReinterpretI32 => machine.cvtop::<i32, f32, _>(|v| f32::from_bits(v as u32)),
-            F64ReinterpretI64 => machine.cvtop::<i64, f64, _>(|v| f64::from_bits(v as u64)),
+            // Don't need to modify stack. Just changing type to t2 is enough.
+            I32ReinterpretF32 => machine.stack.write_top_type(i32::VAL_TYPE),
+            I64ReinterpretF64 => machine.stack.write_top_type(i64::VAL_TYPE),
+            F32ReinterpretI32 => machine.stack.write_top_type(f32::VAL_TYPE),
+            F64ReinterpretI64 => machine.stack.write_top_type(f64::VAL_TYPE),
         }
         Ok(ExecState::Continue)
     }
