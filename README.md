@@ -56,17 +56,27 @@ $ cargo install wain --no-default-features --features binary
 
 ### `wain` command
 
-Run a binary format Wasm source
+Run a binary format Wasm source file:
 
 ```
 $ wain examples/hello/hello.wasm
 Hello, world
 ```
 
-Run a text format Wasm source:
+Run a text format Wasm source file:
 
 ```
 $ wain examples/hello/hello.wat
+Hello, world
+```
+
+Without argument, `wain` command detects both binary format and text format from stdin and runs the
+input.
+
+```
+$ wain < examples/hello/hello.wasm
+Hello, world
+$ wain < examples/hello/hello.wat
 Hello, world
 ```
 

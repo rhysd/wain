@@ -5,42 +5,54 @@ use std::io::Read;
 use std::process::exit;
 
 #[allow(dead_code)]
-enum InputFile {
+enum InputOption {
     Text(String),
     Binary(String),
     Stdin,
 }
 
+enum Input {
+    Text(String),
+    Binary(Vec<u8>),
+}
+
 #[allow(dead_code)]
-impl InputFile {
+impl InputOption {
     fn filename(&self) -> Option<&str> {
         match self {
-            InputFile::Text(f) => Some(f),
-            InputFile::Binary(f) => Some(f),
-            InputFile::Stdin => None,
+            InputOption::Text(f) => Some(f),
+            InputOption::Binary(f) => Some(f),
+            InputOption::Stdin => None,
         }
     }
 
-    fn read_text(&self) -> io::Result<String> {
+    fn read(&self) -> io::Result<Input> {
         match self {
-            InputFile::Text(f) => fs::read_to_string(f),
-            InputFile::Stdin => {
-                let mut stdin = String::new();
-                io::stdin().read_to_string(&mut stdin)?;
-                Ok(stdin)
+            InputOption::Text(f) => Ok(Input::Text(fs::read_to_string(f)?)),
+            InputOption::Stdin => {
+                let mut stdin = vec![];
+                io::stdin().read_to_end(&mut stdin)?;
+                if stdin.starts_with(&[0x00, 0x61, 0x73, 0x6d]) {
+                    Ok(Input::Binary(stdin))
+                } else {
+                    match String::from_utf8(stdin) {
+                        Ok(s) => Ok(Input::Text(s)),
+                        Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+                    }
+                }
             }
-            InputFile::Binary(_) => unreachable!(),
+            InputOption::Binary(f) => Ok(Input::Binary(fs::read(f)?)),
         }
     }
 }
 
 struct Options {
-    file: InputFile,
+    file: InputOption,
     help: bool,
 }
 
 fn parse_args() -> Result<Options, String> {
-    let mut file = InputFile::Stdin;
+    let mut file = InputOption::Stdin;
     let mut help = false;
 
     for arg in env::args().skip(1) {
@@ -59,7 +71,7 @@ fn parse_args() -> Result<Options, String> {
         if arg.ends_with(".wasm") {
             #[cfg(feature = "binary")]
             {
-                file = InputFile::Binary(arg);
+                file = InputOption::Binary(arg);
                 continue;
             }
         }
@@ -67,7 +79,7 @@ fn parse_args() -> Result<Options, String> {
         if arg.ends_with(".wat") {
             #[cfg(feature = "text")]
             {
-                file = InputFile::Text(arg);
+                file = InputOption::Text(arg);
                 continue;
             }
         }
@@ -93,8 +105,9 @@ OPTIONS:
     --help | -h : Show this help
 
 ARGUMENTS:
-    Currently one '.wat' file or '.wasm' file can be specified. If not
-    specified, STDIN will be interpreted as text format wasm file.
+    Currently one '.wat' file or '.wasm' file can be specified. If no file is
+    specified, STDIN will be interpreted as binary or text. wain automatically
+    detect binary-format or text-format from the input.
 
 REPOSITORY:
     https://github.com/rhysd/wain
@@ -119,24 +132,20 @@ fn run<S: wain_ast::source::Source>(ast: wain_ast::Root<'_, S>) -> wain_exec::Ru
 }
 
 #[cfg(feature = "binary")]
-fn run_binary(file: &str) -> wain_exec::Run {
-    let source = unwrap("reading .wasm file", fs::read(file));
-    let ast = unwrap("parsing", wain_syntax_binary::parse(&source));
-    run(ast)
+fn run_binary(bin: Vec<u8>) -> wain_exec::Run {
+    run(unwrap("parsing", wain_syntax_binary::parse(&bin)))
 }
 #[cfg(not(feature = "binary"))]
-fn run_binary(_: &str) -> wain_exec::Run {
+fn run_binary(_: Vec<u8>) -> wain_exec::Run {
     unreachable!()
 }
 
 #[cfg(feature = "text")]
-fn run_text(file: InputFile) -> wain_exec::Run {
-    let source = unwrap("reading text file", file.read_text());
-    let ast = unwrap("parsing", wain_syntax_text::parse(&source));
-    run(ast)
+fn run_text(text: String) -> wain_exec::Run {
+    run(unwrap("parsing", wain_syntax_text::parse(&text)))
 }
 #[cfg(not(feature = "text"))]
-fn run_text(_: InputFile) -> wain_exec::Run {
+fn run_text(_: String) -> wain_exec::Run {
     unreachable!()
 }
 
@@ -147,10 +156,9 @@ fn main() {
         help();
     }
 
-    let result = match &opts.file {
-        InputFile::Binary(file) => run_binary(file),
-        InputFile::Text(_) => run_text(opts.file),
-        InputFile::Stdin => run_text(opts.file),
+    let result = match unwrap("reading input", opts.file.read()) {
+        Input::Binary(bin) => run_binary(bin),
+        Input::Text(text) => run_text(text),
     };
 
     if let wain_exec::Run::Warning(msg) = result {
