@@ -2,10 +2,10 @@
 # It is not intended for manual editing.
 [[package]]
 name = "wain"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "wain-ast 0.1.0",
- "wain-exec 0.1.1",
+ "wain-exec 0.1.2",
  "wain-syntax-binary 0.1.1",
  "wain-syntax-text 0.1.0",
  "wain-validate 0.1.1",
@@ -17,7 +17,7 @@ version = "0.1.0"
 
 [[package]]
 name = "wain-exec"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "wain-ast 0.1.0",
  "wain-syntax-text 0.1.0",
