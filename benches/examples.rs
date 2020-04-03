@@ -69,4 +69,5 @@ mod benches {
     bench_example!(primes, "primes.wasm");
     bench_example!(quicksort, "quicksort.wasm");
     bench_example!(mt19937, "mt19937.wasm");
+    bench_example!(n_queens, "n_queens.wasm");
 }
