@@ -84,7 +84,7 @@ fn parse_args() -> Result<Options, String> {
 fn help() -> ! {
     println!(
         "\
-wain: a WebAssembly INterpreter written in Safe Rust with zero dependency
+wain: a WebAssembly INterpreter written in Safe Rust with zero dependencies
 
 USAGE:
     wain [OPTIONS] [{{file}}]

@@ -3,7 +3,7 @@ wain
 [![crates.io][crates-io-badge]][crates-io]
 [![CI][ci-badge]][ci]
 
-[wain][proj] is a **W**eb**A**ssembly **IN**terpreter written in Rust from scratch with zero dependency.
+[wain][proj] is a **W**eb**A**ssembly **IN**terpreter written in Rust from scratch with zero dependencies.
 An implementation of [WebAssembly][wasm-spec].
 
 <img width=438 height=257 src="https://github.com/rhysd/ss/blob/master/wain/main.gif?raw=true" alt="screencast">
