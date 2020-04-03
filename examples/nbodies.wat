@@ -1609,7 +1609,7 @@
     local.set 8
     local.get 8
     local.set 9
-    i32.const 1000
+    i32.const 2000
     local.set 10
     f64.const 0x1.ec267a905572ap+3 (;=15.3797;)
     local.set 11
@@ -1767,7 +1767,7 @@
     i32.store offset=12
     block  ;; label = @1
       loop  ;; label = @2
-        i32.const 1000
+        i32.const 2000
         local.set 50
         local.get 2
         i32.load offset=12

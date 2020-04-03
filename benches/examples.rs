@@ -59,7 +59,7 @@ mod benches {
 
     bench_example!(hello, "hello/hello.wasm");
     bench_example!(hello_global, "hello/hello_global.wasm");
-    bench_example!(hello_indirect, "hello/hello_indirect.wasm");
+    bench_example!(hello_indirect_call, "hello/hello_indirect_call.wasm");
     bench_example!(hello_struct, "hello/hello_struct.wasm");
     bench_example!(sqrt, "sqrt.wasm");
     bench_example!(pi, "pi.wasm");

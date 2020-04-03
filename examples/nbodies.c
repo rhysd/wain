@@ -200,7 +200,7 @@ void _start()
     };
     unsigned const nbodies = sizeof(bodies) / sizeof(struct planet);
 
-    unsigned const n = 1000;
+    unsigned const n = 2000;
 
     offset_momentum(bodies, nbodies);
     print_float(energy(bodies, nbodies));
