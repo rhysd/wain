@@ -12,16 +12,17 @@ void print_4d(int i) {
 }
 
 void _start() {
-    int r[2800 + 1];
+    int r[1400 + 1];
     int i, k;
     int b, d;
     int c = 0;
 
-    for (i = 0; i < 2800; i++) {
+    for (i = 0; i < 1400; i++) {
         r[i] = 2000;
     }
 
-    for (k = 2800; k > 0; k -= 14) {
+    // 1400 = 14 * 100 terms
+    for (k = 1400; k > 0; k -= 14) {
         d = 0;
 
         i = k;

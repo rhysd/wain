@@ -113,7 +113,7 @@
     (local i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)
     global.get 0
     local.set 0
-    i32.const 11248
+    i32.const 5648
     local.set 1
     local.get 0
     local.get 1
@@ -131,7 +131,7 @@
     i32.store offset=28
     block  ;; label = @1
       loop  ;; label = @2
-        i32.const 2800
+        i32.const 1400
         local.set 4
         local.get 2
         i32.load offset=28
@@ -194,7 +194,7 @@
         br 0 (;@2;)
       end
     end
-    i32.const 2800
+    i32.const 1400
     local.set 22
     local.get 2
     local.get 22
@@ -414,7 +414,7 @@
         br 0 (;@2;)
       end
     end
-    i32.const 11248
+    i32.const 5648
     local.set 77
     local.get 2
     local.get 77
