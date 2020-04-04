@@ -28,6 +28,7 @@ pub enum TrapReason {
     },
     UninitializedElem(usize),
     FuncSignatureMismatch {
+        import: Option<(String, String)>,
         expected_params: Vec<ValType>,
         expected_results: Vec<ValType>,
         actual_params: Vec<ValType>,
@@ -132,24 +133,45 @@ impl fmt::Display for Trap {
                 write!(f, "element at index {} in table is uninitialized", idx,)?
             }
             FuncSignatureMismatch {
+                import,
                 expected_params,
                 expected_results,
                 actual_params,
                 actual_results,
+            } => {
+                if let Some((mod_name, name)) = import {
+                    write!(
+                        f,
+                        "function signature mismatch in imported function '{}' of module '{}'. ",
+                        name, mod_name
+                    )?;
+                } else {
+                    f.write_str("cannot invoke function due to mismatch of function signature. ")?;
+                }
+                write!(
+                    f,
+                    "expected '[{}] -> [{}]' but got '[{}] -> [{}]'",
+                    JoinWritable(expected_params, " "),
+                    JoinWritable(expected_results, " "),
+                    JoinWritable(actual_params, " "),
+                    JoinWritable(actual_results, " "),
+                )?
+            }
+            LoadMemoryOutOfRange {
+                max,
+                addr,
+                operation,
+                ty,
             } => write!(
-                f,
-                "cannot invoke function due to mismatch of function signatures. expected '[{}] -> [{}]' but got '[{}] -> [{}]'",
-                JoinWritable(expected_params, " "),
-                JoinWritable(expected_results, " "),
-                JoinWritable(actual_params, " "),
-                JoinWritable(actual_results, " "),
-            )?,
-            LoadMemoryOutOfRange { max, addr, operation, ty } => write!(
                 f,
                 "cannot {} {} value at 0x{:x} due to out of range of memory. memory size is 0x{:x}",
                 operation, ty, addr, max,
             )?,
-            ImportFuncCallFail { mod_name, name, msg } => write!(
+            ImportFuncCallFail {
+                mod_name,
+                name,
+                msg,
+            } => write!(
                 f,
                 "calling imported function '{}' in module '{}': {}",
                 name, mod_name, msg,

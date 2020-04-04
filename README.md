@@ -152,19 +152,29 @@ functions from Rust side.
 
 ```rust
 extern crate wain_exec;
-use wain_exec::{Machine, Stack, Memory, Importer}
+extern crate wain_ast;
+use wain_exec::{Machine, Stack, Memory, Importer, ImportInvokeError, ImportInvalidError}
+use wain_ast::ValType;
 
 struct YourOwnImporter {
     // ...
 }
 
 impl Importer for YourOwnImporter {
-    fn call(&mut self, name: &str, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportError> {
+    fn validate(&self, name: &str, params: &[ValType], ret: Option<ValType>) -> Option<ImportInvalidError> {
+        // `name` is a name of function to validate. `params` and `ret` are the function's signature.
+        // Return ImportInvalidError::NotFound when the name is unknown.
+        // Return ImportInvalidError::SignatureMismatch when signature does not match.
+        // wain_exec::check_func_signature() utility is would be useful for the check.
+    }
+    fn call(&mut self, name: &str, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportInvokeError> {
         // Implement your own function call. `name` is a name of function and you have full access
         // to stack and linear memory. Pop values from stack for getting arguments and push value to
         // set return value.
         // Note: Consistency between imported function signature and implementation of this method
         // is your responsibility.
+        // On invocation failure, return ImportInvokeError::Fatal. It is trapped by interpreter and it
+        // stops execution immediately.
     };
 }
 

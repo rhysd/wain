@@ -1,6 +1,6 @@
 use crate::cast;
 use crate::globals::Globals;
-use crate::import::{ImportError, Importer};
+use crate::import::{ImportInvalidError, ImportInvokeError, Importer};
 use crate::memory::Memory;
 use crate::stack::{CallFrame, Stack, StackAccess};
 use crate::table::Table;
@@ -43,6 +43,53 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
     // https://webassembly.github.io/spec/core/exec/modules.html#instantiation
     pub fn instantiate(module: &'m ast::Module<'s>, importer: I) -> Result<Self> {
         // TODO: 2., 3., 4. Validate external values before instantiate globals
+
+        fn unknown_import<'s>(import: &ast::Import<'s>, at: usize) -> Box<Trap> {
+            Trap::new(
+                TrapReason::UnknownImport {
+                    mod_name: import.mod_name.0.to_string(),
+                    name: import.name.0.to_string(),
+                    kind: "function",
+                },
+                at,
+            )
+        }
+
+        for func in module.funcs.iter() {
+            match &func.kind {
+                ast::FuncKind::Body { .. } => break, // All imports precedes other definitions
+                ast::FuncKind::Import(i) => {
+                    let mod_name = &i.mod_name.0;
+                    if mod_name == "env" {
+                        let fty = &module.types[func.idx as usize];
+                        let name = &i.name.0;
+                        match importer.validate(name, &fty.params, fty.results.get(0).copied()) {
+                            Some(ImportInvalidError::NotFound) => {
+                                return Err(unknown_import(i, func.start));
+                            }
+                            Some(ImportInvalidError::SignatureMismatch {
+                                expected_params,
+                                expected_ret,
+                            }) => {
+                                return Err(Trap::new(
+                                    TrapReason::FuncSignatureMismatch {
+                                        import: Some((mod_name.to_string(), name.to_string())),
+                                        expected_params: expected_params.iter().copied().collect(),
+                                        expected_results: expected_ret.into_iter().collect(),
+                                        actual_params: fty.params.iter().copied().collect(),
+                                        actual_results: fty.results.clone(),
+                                    },
+                                    func.start,
+                                ))
+                            }
+                            None => { /* do nothing */ }
+                        }
+                    } else {
+                        return Err(unknown_import(i, func.start));
+                    }
+                }
+            }
+        }
 
         // 5. global initialization values determined by module and externval
         let globals = Globals::instantiate(&module.globals)?;
@@ -89,8 +136,7 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
                 .call(&import.name.0, &mut self.stack, &mut self.memory)
             {
                 Ok(()) => return Ok(ExecState::Continue),
-                Err(ImportError::NotFound) => { /* fallthrough */ }
-                Err(ImportError::Fatal { message }) => {
+                Err(ImportInvokeError::Fatal { message }) => {
                     return Err(Trap::new(
                         TrapReason::ImportFuncCallFail {
                             mod_name: import.mod_name.0.to_string(),
@@ -102,7 +148,10 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
                 }
             }
         }
-        Err(Trap::unknown_import(import, "function", pos))
+        unreachable!(
+            "fatal: invalid import at runtime: {}::{}",
+            import.mod_name.0, import.name.0
+        );
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#function-calls
@@ -353,6 +402,7 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
                 {
                     return Err(Trap::new(
                         TrapReason::FuncSignatureMismatch {
+                            import: None,
                             expected_params: expected.params.clone(),
                             expected_results: expected.results.clone(),
                             actual_params: actual.params.clone(),

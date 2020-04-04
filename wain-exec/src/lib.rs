@@ -12,7 +12,9 @@ mod table;
 mod trap;
 mod value;
 
-pub use import::{DefaultImporter, ImportError, Importer};
+pub use import::{
+    check_func_signature, DefaultImporter, ImportInvalidError, ImportInvokeError, Importer,
+};
 pub use machine::{Machine, Run};
 pub use memory::Memory;
 pub use stack::Stack;
