@@ -14,8 +14,8 @@ use wain_ast::AsValType;
 
 // TODO: Handle external values for imports and exports
 
-#[derive(PartialEq)]
 #[cfg_attr(test, derive(Debug))]
+#[derive(PartialEq)]
 pub enum Run {
     Success,
     Warning(&'static str),
@@ -129,13 +129,19 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         })
     }
 
-    fn invoke_import(&mut self, import: &ast::Import<'s>, pos: usize) -> ExecResult {
+    // Returns if it has return value on stack or not
+    fn invoke_import(
+        &mut self,
+        import: &ast::Import<'s>,
+        has_ret: bool,
+        pos: usize,
+    ) -> Result<bool> {
         if import.mod_name.0 == "env" {
             match self
                 .importer
                 .call(&import.name.0, &mut self.stack, &mut self.memory)
             {
-                Ok(()) => return Ok(ExecState::Continue),
+                Ok(()) => return Ok(has_ret),
                 Err(ImportInvokeError::Fatal { message }) => {
                     return Err(Trap::new(
                         TrapReason::ImportFuncCallFail {
@@ -155,16 +161,18 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
     }
 
     // https://webassembly.github.io/spec/core/exec/instructions.html#function-calls
-    fn invoke(&mut self, funcidx: u32) -> ExecResult {
+    // Returns if it has return value on stack or not
+    fn invoke_by_funcidx(&mut self, funcidx: u32) -> Result<bool> {
         let func = &self.module.funcs[funcidx as usize];
+        let fty = &self.module.types[func.idx as usize];
 
         // Call this function with params
         let (locals, body) = match &func.kind {
-            ast::FuncKind::Import(i) => return self.invoke_import(i, func.start),
+            ast::FuncKind::Import(i) => {
+                return self.invoke_import(i, !fty.results.is_empty(), func.start)
+            }
             ast::FuncKind::Body { locals, expr } => (locals, expr),
         };
-
-        let fty = &self.module.types[func.idx as usize];
 
         // Push call frame
         let frame = CallFrame::new(&self.stack, &fty.params, locals);
@@ -181,14 +189,14 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
 
         if fty.results.is_empty() {
             self.stack.restore(frame.base_addr, frame.base_idx); // Pop call frame
+            Ok(false)
         } else {
             // Push 1st result value since number of result type is 1 or 0 for MVP
             let v: Value = self.stack.pop();
             self.stack.restore(frame.base_addr, frame.base_idx); // Pop call frame
             self.stack.push(v); // push result value
+            Ok(true)
         }
-
-        Ok(ExecState::Continue)
     }
 
     // As the last step of instantiation, invoke start function
@@ -196,7 +204,7 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         // 15. If the start function is not empty, invoke it
         if let Some(start) = &self.module.entrypoint {
             // Execute entrypoint
-            return self.invoke(start.idx).map(|_| Run::Success);
+            return self.invoke_by_funcidx(start.idx).map(|_| Run::Success);
         }
 
         // Note: This behavior is not described in spec. But current Clang does not emit 'start' section
@@ -205,7 +213,7 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         for export in self.module.exports.iter() {
             if export.name.0 == "_start" {
                 if let ast::ExportKind::Func(idx) = &export.kind {
-                    return self.invoke(*idx).map(|_| Run::Success);
+                    return self.invoke_by_funcidx(*idx).map(|_| Run::Success);
                 }
             }
         }
@@ -389,7 +397,9 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-return
             Return => return Ok(ExecState::Ret),
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-call
-            Call(funcidx) => return machine.invoke(*funcidx),
+            Call(funcidx) => {
+                machine.invoke_by_funcidx(*funcidx)?;
+            }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-call-indirect
             CallIndirect(typeidx) => {
                 let expected = &machine.module.types[*typeidx as usize];
@@ -411,7 +421,7 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
                         self.start,
                     ));
                 }
-                return machine.invoke(funcidx);
+                machine.invoke_by_funcidx(funcidx)?;
             }
             // Parametric instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-drop

@@ -18,6 +18,7 @@ pub use import::{
 pub use machine::{Machine, Run};
 pub use memory::Memory;
 pub use stack::Stack;
+pub use value::Value;
 
 use std::io;
 use trap::Result;

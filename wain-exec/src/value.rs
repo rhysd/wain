@@ -10,6 +10,17 @@ pub enum Value {
     F64(f64),
 }
 
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::I32(v) => write!(f, "{}i32", v),
+            Value::I64(v) => write!(f, "{}i64", v),
+            Value::F32(v) => write!(f, "{}f32", v),
+            Value::F64(v) => write!(f, "{}f64", v),
+        }
+    }
+}
+
 pub trait LittleEndian {
     fn read(buf: &[u8], addr: usize) -> Self;
     fn write(buf: &mut [u8], addr: usize, v: Self);
