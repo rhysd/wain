@@ -1,6 +1,6 @@
 [package]
 name = "wain-validate"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2018"
 description = "WebAssembly syntax tree validator for wain project"

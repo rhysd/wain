@@ -1,6 +1,6 @@
 [package]
 name = "wain-ast"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2018"
 description = "WebAssembly abstract syntax tree definition used by both binary format and text format for wain project"

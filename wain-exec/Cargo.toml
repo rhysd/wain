@@ -1,6 +1,6 @@
 [package]
 name = "wain-exec"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2018"
 description = "WebAssembly syntax tree executor for wain project"
