@@ -297,7 +297,7 @@ impl<'s, S: Source> Validate<'s, S> for StartFunction {
                     params: fty.params.clone(),
                     results: fty.results.clone(),
                 },
-                "parameter of type for start function",
+                "start function in 'start' section",
                 self.start,
             );
         }
@@ -310,7 +310,22 @@ impl<'s, S: Source> Validate<'s, S> for Export<'s> {
     fn validate<'m>(&self, ctx: &mut Context<'m, 's, S>) -> Result<(), S> {
         match self.kind {
             ExportKind::Func(idx) => {
-                ctx.func_from_idx(idx, "exported function", self.start)?;
+                let func = ctx.func_from_idx(idx, "exported function", self.start)?;
+                if self.name.0 == "_start" {
+                    // Functions were already validated
+                    let fty = &ctx.module.types[func.idx as usize];
+                    if !fty.params.is_empty() || !fty.results.is_empty() {
+                        return ctx.error(
+                            ErrorKind::StartFunctionSignature {
+                                idx,
+                                params: fty.params.clone(),
+                                results: fty.results.clone(),
+                            },
+                            "start function exported as '_start'",
+                            self.start,
+                        );
+                    }
+                }
             }
             ExportKind::Table(idx) => {
                 ctx.table_from_idx(idx, "exported table", self.start)?;

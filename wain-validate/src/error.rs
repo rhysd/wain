@@ -124,7 +124,7 @@ impl<S: Source> fmt::Display for Error<S> {
             NoInstructionForConstant => write!(f, "at least one instruction is necessary for constant expressions")?,
             StartFunctionSignature{ idx, params, results } => write!(
                 f,
-                "start function should have no parameter and no result [] -> [] but found function {} [{}] -> [{}]",
+                "start function should have no parameter and no result [] -> [] but found function '{}' is [{}] -> [{}]",
                 idx,
                 params.iter().map(AsRef::<str>::as_ref).collect::<Vec<_>>().join(" "),
                 results.iter().map(AsRef::<str>::as_ref).collect::<Vec<_>>().join(" "),
