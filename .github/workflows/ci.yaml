@@ -40,3 +40,18 @@ jobs:
           cargo clippy --version
       - run: cargo fmt -- --color always --check
       - run: cargo clippy --color always -- -D warnings
+  examples:
+    name: examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust toolchain
+        run: |
+          rustup set profile minimal
+          rustup update stable
+          rustup default stable
+          rustc --version
+          cargo --version
+      - run: cargo run --example execute
+      - run: cargo run --example wat
+      - run: cargo run --example invoke
