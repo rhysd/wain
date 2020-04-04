@@ -49,15 +49,22 @@ impl InputOption {
 struct Options {
     file: InputOption,
     help: bool,
+    version: bool,
 }
 
 fn parse_args() -> Result<Options, String> {
     let mut file = InputOption::Stdin;
     let mut help = false;
+    let mut version = false;
 
     for arg in env::args().skip(1) {
         if arg == "--help" || arg == "-h" {
             help = true;
+            break;
+        }
+
+        if arg == "--version" || arg == "-v" {
+            version = true;
             break;
         }
 
@@ -90,7 +97,11 @@ fn parse_args() -> Result<Options, String> {
         ));
     }
 
-    Ok(Options { file, help })
+    Ok(Options {
+        file,
+        help,
+        version,
+    })
 }
 
 fn help() -> ! {
@@ -102,7 +113,8 @@ USAGE:
     wain [OPTIONS] [{{file}}]
 
 OPTIONS:
-    --help | -h : Show this help
+    --help | -h    : Show this help
+    --version | -v : Show version
 
 ARGUMENTS:
     Currently one '.wat' file or '.wasm' file can be specified. If no file is
@@ -154,6 +166,11 @@ fn main() {
 
     if opts.help {
         help();
+    }
+
+    if opts.version {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        exit(0);
     }
 
     let result = match unwrap("reading input", opts.file.read()) {
