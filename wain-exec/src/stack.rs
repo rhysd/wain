@@ -216,14 +216,6 @@ impl Stack {
         let bytes = types.iter().fold(0, |acc, t| acc + t.bytes());
         self.bytes.resize(self.bytes.len() + bytes, 0);
     }
-
-    pub fn extend_zeros(&mut self, bytes: usize) {
-        self.bytes.resize(self.bytes.len() + bytes, 0);
-    }
-
-    pub fn truncate_bytes(&mut self, bytes: usize) {
-        self.bytes.truncate(self.bytes.len() - bytes);
-    }
 }
 
 // Activations of function frames

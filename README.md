@@ -121,20 +121,54 @@ use std::fs;
 use std::process::exit;
 use wain_syntax_binary::parse;
 use wain_validate::validate;
-use wain_exec::{execute, Run};
+use wain_exec::{execute, Run, Value};
 
+// Read wasm binary
 let source = fs::read("foo.wasm").unwrap();
+
+// Parse binary into syntax tree
 let tree = parse(&source).unwrap();
 
+// Validate module
 if let Err(err) = validate(&tree) {
     eprintln!("This .wasm file is invalid!: {}", err);
     exit(1);
 }
 
+// Execute module
 match execute(tree.module) {
     Ok(run) => {
         if let Run::Warning(msg) = run {
             eprintln!("Warning: {}, msg);
+        }
+    }
+    Err(trap) => eprintln!("Execution was trapped: {}", trap),
+}
+```
+
+Or invoke specific exported function with arguments
+
+```rust
+// ...(snip)
+
+use wain_exec::{machine, DefaultImporter, Value};
+use std::io;
+
+// Create default importer to call external function supported by default
+let stdin = io::stdin();
+let stdout = io::stdout();
+let importer = DefaultImporter::with_stdio(stdin.lock(), stdout.lock());
+
+// Make abstract machine instance
+let mut machine = Machine::instantiate(&tree.module, importer)?;
+
+// Let's say `int add(int, int)` is exported
+match machine.invoke("add", &[Value::I32(10), Value::I32(32)]) {
+    Ok(ret) => {
+        if let Value::I32(i) = ret {
+            println!("10 + 32 = {}", i);
+        } else {
+            unreachable!()
         }
     }
     Err(trap) => eprintln!("Execution was trapped: {}", trap),

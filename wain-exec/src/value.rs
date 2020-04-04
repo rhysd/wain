@@ -1,13 +1,26 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::mem::size_of;
+use wain_ast::ValType;
 
 #[cfg_attr(test, derive(Debug, PartialEq))]
+#[derive(Clone)]
 pub enum Value {
     I32(i32),
     I64(i64),
     F32(f32),
     F64(f64),
+}
+
+impl Value {
+    pub fn valtype(&self) -> ValType {
+        match self {
+            Value::I32(_) => ValType::I32,
+            Value::I64(_) => ValType::I64,
+            Value::F32(_) => ValType::F32,
+            Value::F64(_) => ValType::F64,
+        }
+    }
 }
 
 impl fmt::Display for Value {

@@ -199,6 +199,69 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         }
     }
 
+    pub fn invoke(&mut self, name: impl AsRef<str>, args: &[Value]) -> Result<Option<Value>> {
+        fn find_func_to_invoke<'s>(
+            name: &str,
+            exports: &[ast::Export<'s>],
+        ) -> Result<(u32, usize)> {
+            for export in exports {
+                if export.name.0 == name {
+                    let actual = match export.kind {
+                        ast::ExportKind::Func(idx) => return Ok((idx, export.start)),
+                        ast::ExportKind::Table(_) => "table",
+                        ast::ExportKind::Memory(_) => "memory",
+                        ast::ExportKind::Global(_) => "global variable",
+                    };
+                    return Err(Trap::new(
+                        TrapReason::WrongInvokeTarget {
+                            name: name.to_string(),
+                            actual: Some(actual),
+                        },
+                        export.start,
+                    ));
+                }
+            }
+            Err(Trap::new(
+                TrapReason::WrongInvokeTarget {
+                    name: name.to_string(),
+                    actual: None,
+                },
+                0,
+            ))
+        }
+
+        let name = name.as_ref();
+        let (funcidx, start) = find_func_to_invoke(name, &self.module.exports)?;
+        let arg_types = &self.module.types[self.module.funcs[funcidx as usize].idx as usize].params;
+
+        // Check parameter types
+        if args
+            .iter()
+            .map(Value::valtype)
+            .ne(arg_types.iter().copied())
+        {
+            return Err(Trap::new(
+                TrapReason::InvokeInvalidArgs {
+                    name: name.to_string(),
+                    args: args.to_vec(),
+                    arg_types: arg_types.iter().copied().collect(),
+                },
+                start,
+            ));
+        }
+
+        // Push values to stack for invoking the function
+        for arg in args {
+            self.stack.push(arg.clone());
+        }
+
+        if self.invoke_by_funcidx(funcidx)? {
+            Ok(Some(self.stack.pop()))
+        } else {
+            Ok(None)
+        }
+    }
+
     // As the last step of instantiation, invoke start function
     pub fn execute(&mut self) -> Result<Run> {
         // 15. If the start function is not empty, invoke it

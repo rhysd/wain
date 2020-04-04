@@ -1,3 +1,4 @@
+use crate::value::Value;
 use std::fmt;
 use wain_ast::{Import, ValType};
 
@@ -45,6 +46,15 @@ pub enum TrapReason {
         mod_name: String,
         name: String,
         msg: String,
+    },
+    WrongInvokeTarget {
+        name: String,
+        actual: Option<&'static str>,
+    },
+    InvokeInvalidArgs {
+        name: String,
+        args: Vec<Value>,
+        arg_types: Vec<ValType>,
     },
 }
 
@@ -175,6 +185,20 @@ impl fmt::Display for Trap {
                 f,
                 "calling imported function '{}' in module '{}': {}",
                 name, mod_name, msg,
+            )?,
+            WrongInvokeTarget { name, actual: None } => write!(f, "cannot invoke unknown function '{}'", name)?,
+            WrongInvokeTarget { name, actual: Some(actual) } => write!(
+                f,
+                "cannot invoke '{name}': '{name}' is {actual}",
+                name=name,
+                actual=actual,
+            )?,
+            InvokeInvalidArgs { name, args, arg_types } => write!(
+                f,
+                "cannot invoke function '{}' since given values [{}] does not match to parameter types [{}]",
+                name,
+                JoinWritable(args, ", "),
+                JoinWritable(arg_types, " "),
             )?,
         }
         write!(
