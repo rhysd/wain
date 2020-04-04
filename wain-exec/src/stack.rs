@@ -1,4 +1,5 @@
 use crate::value::{LittleEndian, Value};
+use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::f32;
 use std::f64;
@@ -140,17 +141,22 @@ impl Stack {
         self.types[len] = t;
     }
 
-    // Note: The same value as size_of::<T>() can be obtained by self.top_type().bytes(), but it's
-    // runtime value preventing compiler from optimization.
     pub fn write_top<T: StackAccess, V: LittleEndian + AsValType>(&mut self, v: V) {
         // Expect optimizations by compiler since conditions of these if statements can be
         // calculated at compile time
-        if size_of::<T>() > size_of::<V>() {
-            let len = self.bytes.len() - (size_of::<T>() - size_of::<V>());
-            self.bytes.truncate(len);
-        } else if size_of::<T>() < size_of::<V>() {
-            let len = self.bytes.len() + (size_of::<V>() - size_of::<T>());
-            self.bytes.resize(len, 0);
+        //
+        // Note: The same value as size_of::<T>() can be obtained by self.top_type().bytes(), but
+        // it's runtime value preventing compiler from optimization.
+        match size_of::<T>().cmp(&size_of::<V>()) {
+            Ordering::Equal => {}
+            Ordering::Greater => {
+                let len = self.bytes.len() - (size_of::<T>() - size_of::<V>());
+                self.bytes.truncate(len);
+            }
+            Ordering::Less => {
+                let len = self.bytes.len() + (size_of::<V>() - size_of::<T>());
+                self.bytes.resize(len, 0);
+            }
         }
         self.write_top_bytes(v);
         self.write_top_type(V::VAL_TYPE);
