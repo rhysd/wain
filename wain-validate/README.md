@@ -44,6 +44,8 @@ if let Err(err) = validate(&tree) {
 }
 ```
 
+Working examples can be seen at [examples/api/ directory][examples]
+
 Please read documentation (not yet) for details.
 
 
@@ -78,3 +80,4 @@ is in the stack.
 [wasm-spec-validation]: https://webassembly.github.io/spec/core/valid/index.html
 [gh]: https://github.com/rhysd/wain/tree/master/wain-validate
 [proj]: https://github.com/rhysd/wain
+[examples]: https://github.com/rhysd/wain/tree/master/examples/api

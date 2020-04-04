@@ -121,13 +121,19 @@ use std::fs;
 use std::process::exit;
 use wain_syntax_binary::parse;
 use wain_validate::validate;
-use wain_exec::{execute, Run, Value};
+use wain_exec::{execute, Run};
 
 // Read wasm binary
 let source = fs::read("foo.wasm").unwrap();
 
 // Parse binary into syntax tree
-let tree = parse(&source).unwrap();
+let tree = match parse(&source) {
+    Ok(tree) => tree,
+    Err(err) => {
+        eprintln!("Could not parse: {}", err);
+        exit(1);
+    }
+};
 
 // Validate module
 if let Err(err) = validate(&tree) {
@@ -139,7 +145,7 @@ if let Err(err) = validate(&tree) {
 match execute(tree.module) {
     Ok(run) => {
         if let Run::Warning(msg) = run {
-            eprintln!("Warning: {}, msg);
+            eprintln!("Warning: {}", msg);
         }
     }
     Err(trap) => eprintln!("Execution was trapped: {}", trap),
@@ -160,15 +166,23 @@ let stdout = io::stdout();
 let importer = DefaultImporter::with_stdio(stdin.lock(), stdout.lock());
 
 // Make abstract machine instance
-let mut machine = Machine::instantiate(&tree.module, importer)?;
+let mut machine = match Machine::instantiate(&tree.module, importer) {
+    Ok(m) => m,
+    Err(err) => {
+        eprintln!("could not instantiate module: {}", err);
+        exit(1);
+    }
+};
 
 // Let's say `int add(int, int)` is exported
 match machine.invoke("add", &[Value::I32(10), Value::I32(32)]) {
     Ok(ret) => {
-        if let Value::I32(i) = ret {
+        // `ret` is type of `Option<Value>` where it contains `Some` value when the invoked
+        // function returned a value. Otherwise it's `None` value.
+        if let Some(Value::I32(i)) = ret {
             println!("10 + 32 = {}", i);
         } else {
-            unreachable!()
+            unreachable!();
         }
     }
     Err(trap) => eprintln!("Execution was trapped: {}", trap),
@@ -217,6 +231,8 @@ let ast = ...; // Parse abstract syntax tree and validate it
 let mut machine = Machine::instantiate(&ast.module, YourOwnImporter{ /* ... */ }).unwrap();
 let run = machine.execute().unwrap();
 ```
+
+To know the usage of APIs, working examples are available at [examples/api/](./examples/api).
 
 
 ## Future works

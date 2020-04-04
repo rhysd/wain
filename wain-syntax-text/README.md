@@ -72,6 +72,8 @@ APIs are provided for each logic:
 - WAT to WASM translation
 - Composing multiple WASM modules into single WASM module
 
+Working examples can be seen at [examples/api/ directory][examples]
+
 Please read documentation (not yet) for details.
 
 
@@ -100,3 +102,4 @@ Please read documentation (not yet) for details.
 [wasm-spec-text]: https://webassembly.github.io/spec/core/text/index.html
 [proj]: https://github.com/rhysd/wain
 [ast]: https://crates.io/crates/wain-ast
+[examples]: https://github.com/rhysd/wain/tree/master/examples/api

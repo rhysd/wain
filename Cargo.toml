@@ -53,3 +53,15 @@ maintenance = { status = "actively-developed" }
 [[bench]]
 name = "examples"
 path = "benches/examples.rs"
+
+[[example]]
+name = "execute"
+path = "examples/api/execute.rs"
+
+[[example]]
+name = "wat"
+path = "examples/api/wat.rs"
+
+[[example]]
+name = "invoke"
+path = "examples/api/invoke.rs"

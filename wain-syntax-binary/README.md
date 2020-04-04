@@ -51,6 +51,8 @@ let source = fs::read("data_segment_only.bin").unwrap();
 let data: DataSegment<'_> = Parser.parse().unwrap();
 ```
 
+Working examples can be seen at [examples/api/ directory][examples]
+
 Please read documentation (not yet) for details.
 
 
@@ -66,3 +68,4 @@ Please read documentation (not yet) for details.
 [wasm-spec-bin]: https://webassembly.github.io/spec/core/binary/index.html
 [proj]: https://github.com/rhysd/wain
 [ast]: https://crates.io/crates/wain-syntax-binary
+[examples]: https://github.com/rhysd/wain/tree/master/examples/api

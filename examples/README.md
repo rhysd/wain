@@ -1,4 +1,4 @@
-### How to run these examples
+## How to run Wasm examples
 
 Please use [Clang](https://clang.llvm.org/) for compiling C source into Wasm and
 [wabt](https://github.com/WebAssembly/wabt) to compile C sources into WebAssembly text-format.
@@ -26,3 +26,7 @@ Or execute pre-built files.
 $ wain hello/hello.wat
 $ wain hello/hello.wasm
 ```
+
+## How to run Rust API examples
+
+TBD
