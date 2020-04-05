@@ -8,7 +8,6 @@ use wain_exec::{DefaultImporter, Machine, Value};
 use wain_syntax_text::parse;
 use wain_validate::validate;
 
-// examples/hello/hello.wat
 const MODULE_ADD: &'static str = r#"
 (module
   (type (;0;) (func (param i32 i32) (result i32)))
@@ -49,7 +48,7 @@ const MODULE_ADD: &'static str = r#"
 
 fn main() {
     // Parse WAT text into syntax tree
-    let tree = match parse(&MODULE_ADD) {
+    let tree = match parse(MODULE_ADD) {
         Ok(tree) => tree,
         Err(err) => {
             eprintln!("Parse failed: {}", err);
@@ -59,7 +58,7 @@ fn main() {
 
     // Validate module
     if let Err(err) = validate(&tree) {
-        eprintln!("This .wasm file is invalid!: {}", err);
+        eprintln!("This .wat file is invalid: {}", err);
         exit(1);
     }
 
@@ -77,7 +76,9 @@ fn main() {
         }
     };
 
-    // Let's say `int add(int, int)` is exported
+    // `int add(int, int)` is exported as `(func (param i32) (result i32))`.
+    // Let's invoke add(10, 32). `Value` is an enum to represent arbitrary value of Wasm. Wasm has
+    // i32, i64, f32, f64 basic types.
     match machine.invoke("add", &[Value::I32(10), Value::I32(32)]) {
         Ok(ret) => {
             // `ret` is type of `Option<Value>` where it contains `Some` value when the invoked

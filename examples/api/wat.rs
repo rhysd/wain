@@ -110,7 +110,7 @@ const HELLO_WORLD: &'static str = r#"
 
 fn main() {
     // Parse WAT text into syntax tree
-    let tree = match parse(&HELLO_WORLD) {
+    let tree = match parse(HELLO_WORLD) {
         Ok(tree) => tree,
         Err(err) => {
             eprintln!("Parse failed: {}", err);
@@ -120,17 +120,14 @@ fn main() {
 
     // Validate module
     if let Err(err) = validate(&tree) {
-        eprintln!("This .wasm file is invalid!: {}", err);
+        eprintln!("This .wat file is invalid: {}", err);
         exit(1);
     }
 
     // Execute module
     match execute(tree.module) {
-        Ok(run) => {
-            if let Run::Warning(msg) = run {
-                eprintln!("Warning: {}", msg);
-            }
-        }
+        Ok(Run::Success) => {}
+        Ok(Run::Warning(msg)) => eprintln!("Warning: {}", msg),
         Err(trap) => eprintln!("Execution was trapped: {}", trap),
     }
 }

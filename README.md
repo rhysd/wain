@@ -108,7 +108,8 @@ wain consists of multiple crates.
   of [Wasm execution spec][wasm-spec-exec]. It directly interprets a syntax tree for now, but in the
   it would translate the tree into an intermediate representation to execute it efficiently
 
-`wain-*` crates are libraries as modular implementation of WebAssembly.
+`wain-*` crates are libraries as modular implementation of WebAssembly. They can parse, validate,
+execute WebAssembly code.
 
 Here is an example code to run the interpreter from Rust.
 
@@ -189,10 +190,10 @@ match machine.invoke("add", &[Value::I32(10), Value::I32(32)]) {
 }
 ```
 
-By default, only following C functions are supported in `env` module are supported as external functions
+By default, only following C functions are supported in `env` module as external functions
 
 - `int putchar(int)` (in wasm `(func (param i32) (result i32))`)
-- `int getchar(void)` (in wasm `(func (param) (result i32))`
+- `int getchar(void)` (in wasm `(func (param) (result i32))`)
 - `void *memcpy(void *, void *, size_t)` (in wasm `(func (param i32 i32 i32) (result i32))`)
 
 But you can implement your own struct which implements `wain_exec::Importer` for defining external

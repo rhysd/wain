@@ -29,4 +29,4 @@ $ wain hello/hello.wasm
 
 ## How to run Rust API examples
 
-TBD
+Please see [api/ directory](./api/README.md).
