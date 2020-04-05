@@ -1,5 +1,5 @@
-use crate::ast as wat;
 use crate::source::{describe_position, TextSource};
+use crate::wat;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
