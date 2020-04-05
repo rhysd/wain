@@ -30,10 +30,10 @@ pub enum TrapReason {
     UninitializedElem(usize),
     FuncSignatureMismatch {
         import: Option<(String, String)>,
-        expected_params: Vec<ValType>,
-        expected_results: Vec<ValType>,
-        actual_params: Vec<ValType>,
-        actual_results: Vec<ValType>,
+        expected_params: Box<[ValType]>,
+        expected_results: Box<[ValType]>,
+        actual_params: Box<[ValType]>,
+        actual_results: Box<[ValType]>,
     },
     // 10. https://webassembly.github.io/spec/core/exec/instructions.html#and
     LoadMemoryOutOfRange {
@@ -53,7 +53,7 @@ pub enum TrapReason {
     },
     InvokeInvalidArgs {
         name: String,
-        args: Vec<Value>,
+        args: Box<[Value]>,
         arg_types: Vec<ValType>,
     },
 }

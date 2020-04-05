@@ -77,7 +77,7 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
                                         expected_params: expected_params.iter().copied().collect(),
                                         expected_results: expected_ret.into_iter().collect(),
                                         actual_params: fty.params.iter().copied().collect(),
-                                        actual_results: fty.results.clone(),
+                                        actual_results: fty.results.clone().into_boxed_slice(),
                                     },
                                     func.start,
                                 ))
@@ -243,7 +243,7 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
             return Err(Trap::new(
                 TrapReason::InvokeInvalidArgs {
                     name: name.to_string(),
-                    args: args.to_vec(),
+                    args: args.iter().cloned().collect(),
                     arg_types: arg_types.iter().copied().collect(),
                 },
                 start,
@@ -476,10 +476,10 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
                     return Err(Trap::new(
                         TrapReason::FuncSignatureMismatch {
                             import: None,
-                            expected_params: expected.params.clone(),
-                            expected_results: expected.results.clone(),
-                            actual_params: actual.params.clone(),
-                            actual_results: actual.results.clone(),
+                            expected_params: expected.params.clone().into_boxed_slice(),
+                            expected_results: expected.results.clone().into_boxed_slice(),
+                            actual_params: actual.params.clone().into_boxed_slice(),
+                            actual_results: actual.results.clone().into_boxed_slice(),
                         },
                         self.start,
                     ));
