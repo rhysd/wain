@@ -1,6 +1,6 @@
+use crate::ast::*;
 use crate::lexer::{Float, LexError, Lexer, NumBase, Sign, Token};
 use crate::source::describe_position;
-use crate::wat::*;
 use std::borrow::Cow;
 use std::char;
 use std::collections::HashMap;

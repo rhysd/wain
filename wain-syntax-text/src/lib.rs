@@ -6,9 +6,9 @@ extern crate wain_ast;
 mod compose;
 mod source;
 
+pub mod ast;
 pub mod lexer;
 pub mod parser;
-pub mod wat;
 pub mod wat2wasm;
 
 use compose::{ComposeError, Composer};
