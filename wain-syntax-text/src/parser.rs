@@ -145,14 +145,14 @@ type Result<'s, T> = ::std::result::Result<T, Box<ParseError<'s>>>;
 
 // iter::Peekable is not sufficient to parse WAT tokens
 // WAT requires LL(1) parser to see a token after '('
-struct LookAhead<I: Iterator> {
+pub struct LookAhead<I: Iterator> {
     it: I,
     current: Option<I::Item>,
     incoming: Option<I::Item>,
 }
 
 impl<I: Iterator> LookAhead<I> {
-    fn new(mut it: I) -> Self {
+    pub fn new(mut it: I) -> Self {
         let current = it.next();
         let incoming = it.next();
         LookAhead {
@@ -161,10 +161,10 @@ impl<I: Iterator> LookAhead<I> {
             incoming,
         }
     }
-    fn peek(&self) -> Option<&I::Item> {
+    pub fn peek(&self) -> Option<&I::Item> {
         self.current.as_ref()
     }
-    fn lookahead(&self) -> Option<&I::Item> {
+    pub fn lookahead(&self) -> Option<&I::Item> {
         self.incoming.as_ref()
     }
 }
@@ -367,6 +367,14 @@ impl<'s> Parser<'s> {
 
     fn peek(&self, expected: &'static str) -> Result<'s, (&Token<'s>, usize)> {
         self.maybe_eof(self.tokens.peek(), expected)
+    }
+
+    pub fn current_pos(&self) -> Result<'s, Option<usize>> {
+        match self.tokens.peek() {
+            Some(Ok((_, pos))) => Ok(Some(*pos)),
+            Some(Err(err)) => Err(err.clone().into()),
+            None => Ok(None),
+        }
     }
 
     fn next_token(&mut self, expected: &'static str) -> Result<'s, (Token<'s>, usize)> {

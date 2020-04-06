@@ -1,11 +1,7 @@
 use std::fmt;
 use wain_ast::source::Source;
 
-pub(crate) fn describe_position(
-    f: &mut fmt::Formatter<'_>,
-    source: &str,
-    start: usize,
-) -> fmt::Result {
+pub fn describe_position(f: &mut fmt::Formatter<'_>, source: &str, start: usize) -> fmt::Result {
     if start == source.len() {
         write!(f, " caused at byte offset {} (end of input)", start)
     } else {

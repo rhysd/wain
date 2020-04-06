@@ -45,6 +45,7 @@ members = [
     "wain-syntax-binary",
     "wain-validate",
     "wain-exec",
+    "spec-test",
 ]
 
 [badges]
