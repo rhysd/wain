@@ -153,6 +153,7 @@ type Result<'s, T> = ::std::result::Result<T, Box<ParseError<'s>>>;
 
 // iter::Peekable is not sufficient to parse WAT tokens
 // WAT requires LL(1) parser to see a token after '('
+#[derive(Clone)]
 pub struct LookAhead<I: Iterator> {
     it: I,
     current: Option<I::Item>,

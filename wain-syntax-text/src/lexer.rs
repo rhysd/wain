@@ -178,6 +178,7 @@ impl<'s> fmt::Display for Token<'s> {
 type Lexed<'s> = Option<(Token<'s>, usize)>;
 type LexResult<'s> = Result<'s, Lexed<'s>>;
 
+#[derive(Clone)]
 pub struct Lexer<'source> {
     chars: iter::Peekable<str::CharIndices<'source>>, // LL(1)
     source: &'source str,

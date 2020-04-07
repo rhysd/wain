@@ -3,7 +3,6 @@
 // test cases.
 
 use wain_ast as ast;
-use wain_syntax_binary::source::BinarySource;
 use wain_syntax_text::source::TextSource;
 
 // (module quote *{string})
@@ -32,18 +31,18 @@ pub enum Const {
 }
 
 pub struct TestSuite<'source> {
-    test_cases: Vec<TestCase<'source>>,
+    pub test_cases: Vec<TestCase<'source>>,
 }
 
-pub enum TestCase<'source> {
-    Text {
-        module: ast::Root<'source, TextSource<'source>>,
-        directives: Vec<Directive<'source>>,
-    },
-    Binary {
-        module: ast::Root<'source, BinarySource<'source>>,
-        directives: Vec<Directive<'source>>,
-    },
+pub enum TestModule<'source> {
+    Quote(String),
+    Binary(Vec<u8>),
+    Inline(ast::Root<'source, TextSource<'source>>),
+}
+
+pub struct TestCase<'source> {
+    pub module: TestModule<'source>,
+    pub directives: Vec<Directive<'source>>,
 }
 
 pub enum Directive<'source> {
@@ -53,7 +52,7 @@ pub enum Directive<'source> {
     AssertInvalid(AssertInvalid<'source>),
     AssertUnlinkable(AssertUnlinkable<'source>),
     AssertExhaustion(AssertExhaustion),
-    Register(String),
+    Register(Register),
     Invoke(Invoke),
 }
 

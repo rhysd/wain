@@ -49,16 +49,28 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn with_lexer<P, F>(&mut self, pred: F) -> Result<'s, P>
+    fn clone_lexer(&self) -> LookAhead<Lexer<'s>> {
+        self.tokens.clone()
+    }
+
+    fn replace_lexer(&mut self, new: LookAhead<Lexer<'s>>) -> LookAhead<Lexer<'s>> {
+        mem::replace(&mut self.tokens, new)
+    }
+
+    fn with_lexer<T, F>(&mut self, pred: F) -> Result<'s, T>
     where
-        P: Parse<'s>,
-        F: FnOnce(LookAhead<Lexer<'s>>) -> Result<'s, (P, LookAhead<Lexer<'s>>)>,
+        F: FnOnce(LookAhead<Lexer<'s>>) -> Result<'s, (T, LookAhead<Lexer<'s>>)>,
     {
         // Substitute pattern to give rent lexer temporarily
-        let lexer = mem::replace(&mut self.tokens, empty_lexer());
+        let lexer = self.replace_lexer(empty_lexer());
         let (ret, lexer) = pred(lexer)?;
-        mem::replace(&mut self.tokens, lexer);
+        self.replace_lexer(lexer);
         Ok(ret)
+    }
+
+    fn is_done(&self) -> Result<'s, bool> {
+        let (t, _) = self.peek()?;
+        Ok(t.is_none())
     }
 
     fn consume(&mut self) -> Result<'s, Option<Token<'s>>> {
@@ -75,7 +87,7 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn peek(&mut self) -> Result<'s, (Option<&Token<'s>>, Option<&Token<'s>>)> {
+    fn peek(&self) -> Result<'s, (Option<&Token<'s>>, Option<&Token<'s>>)> {
         let t1 = match self.tokens.peek() {
             Some(Ok((t, _))) => Some(t),
             Some(Err(e)) => return Err(e.clone().into()),
@@ -229,6 +241,11 @@ impl<'s> Parse<'s> for String {
 impl<'s> Parse<'s> for EmbeddedModule {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.parse_start("module")?;
+
+        // ID like (module $m quote ...). It seems unused so skipped here
+        if let (Some(Token::Ident(_)), _) = parser.peek()? {
+            parser.tokens.next();
+        }
 
         let kw = expect!(parser, Token::Keyword(kw) if kw == "quote" || kw == "binary" => kw);
         match kw {
@@ -568,6 +585,82 @@ impl<'s> Parse<'s> for AssertExhaustion {
     }
 }
 
+impl<'s> Parse<'s> for Directive<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let (t1, t2) = parser.peek()?;
+
+        match t1 {
+            Some(Token::LParen) => { /* ok */ }
+            t => {
+                let t = t.cloned();
+                return parser.unexpected_token(t, "'(' for start of WAST directive");
+            }
+        }
+
+        match t2 {
+            Some(Token::Keyword("assert_return")) => Ok(Directive::AssertReturn(parser.parse()?)),
+            Some(Token::Keyword("assert_trap")) => Ok(Directive::AssertTrap(parser.parse()?)),
+            Some(Token::Keyword("assert_malformed")) => {
+                Ok(Directive::AssertMalformed(parser.parse()?))
+            }
+            Some(Token::Keyword("assert_invalid")) => Ok(Directive::AssertInvalid(parser.parse()?)),
+            Some(Token::Keyword("assert_unlinkable")) => {
+                Ok(Directive::AssertUnlinkable(parser.parse()?))
+            }
+            Some(Token::Keyword("assert_exhaustion")) => {
+                Ok(Directive::AssertExhaustion(parser.parse()?))
+            }
+            Some(Token::Keyword("register")) => Ok(Directive::Register(parser.parse()?)),
+            Some(Token::Keyword("invoke")) => Ok(Directive::Invoke(parser.parse()?)),
+            t => {
+                let t = t.cloned();
+                return parser.unexpected_token(t, "keyword for WAST directive");
+            }
+        }
+    }
+}
+
+impl<'s> Parse<'s> for TestCase<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        // `parser.parse::<EmbeddedModule>()` eats tokens. When reaching 'else' clause, `parser`'s
+        // lexer is no longer available. To parse from start, remember the lexer before calling
+        // `parser.parse::<EmbeddedModule>() by clone.
+        // This is mandatory since Wasm parser is LL(1). To avoid the clone, LL(2) is necessary.
+        let prev_lexer = parser.clone_lexer();
+
+        let module = if let Ok(module) = parser.parse::<EmbeddedModule>() {
+            match module.embedded {
+                Embedded::Quote(text) => TestModule::Quote(text),
+                Embedded::Binary(bin) => TestModule::Binary(bin),
+            }
+        } else {
+            // Here parser.lexer already ate some tokens. To parser from
+            let mut wat_parser = WatParser::with_lexer(prev_lexer);
+            let parsed = wat_parser.parse()?; // text -> wat
+            let root = wat2wasm(parsed, wat_parser.source())?; // wat -> ast
+            parser.replace_lexer(wat_parser.into_lexer());
+            TestModule::Inline(root)
+        };
+
+        let mut directives = vec![];
+        while let Ok(directive) = parser.parse() {
+            directives.push(directive);
+        }
+
+        Ok(TestCase { module, directives })
+    }
+}
+
+impl<'s> Parse<'s> for TestSuite<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let mut test_cases = vec![];
+        while !parser.is_done()? {
+            test_cases.push(parser.parse()?);
+        }
+        Ok(TestSuite { test_cases })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,6 +692,10 @@ mod tests {
             Embedded::Quote(s) => assert_eq!(&s, expected),
             Embedded::Binary(b) => panic!("not a text: {:?}", b),
         }
+
+        // Identifier is ignored
+        let s = r#"(module $M1 binary "\00asm\01\00\00\00")"#;
+        let _: EmbeddedModule = Parser::new(s).parse().unwrap();
 
         let s = r#"
           (module
@@ -672,13 +769,13 @@ mod tests {
         let f = p("(f32.const nan:0x12)").unwrap();
         assert!(matches!(f, Const::F32(f) if f.is_nan()));
         let f = p("(f32.const nan:canonical)").unwrap();
-        assert!(matches!(f, Const::CanonicalNan));
+        assert_eq!(f, Const::CanonicalNan);
         let f = p("(f32.const nan:arithmetic)").unwrap();
-        assert!(matches!(f, Const::ArithmeticNan));
+        assert_eq!(f, Const::ArithmeticNan);
         let f = p("(f32.const inf)").unwrap();
-        assert!(matches!(f, Const::F32(f32::INFINITY)));
+        assert_eq!(f, Const::F32(f32::INFINITY));
         let f = p("(f32.const -inf)").unwrap();
-        assert!(matches!(f, Const::F32(f32::NEG_INFINITY)));
+        assert_eq!(f, Const::F32(f32::NEG_INFINITY));
 
         let f = p("(f64.const nan)").unwrap();
         assert!(matches!(f, Const::F64(f) if f.is_nan()));
@@ -687,13 +784,13 @@ mod tests {
         let f = p("(f64.const nan:0x12)").unwrap();
         assert!(matches!(f, Const::F64(f) if f.is_nan()));
         let f = p("(f64.const nan:canonical)").unwrap();
-        assert!(matches!(f, Const::CanonicalNan));
+        assert_eq!(f, Const::CanonicalNan);
         let f = p("(f64.const nan:arithmetic)").unwrap();
-        assert!(matches!(f, Const::ArithmeticNan));
+        assert_eq!(f, Const::ArithmeticNan);
         let f = p("(f64.const inf)").unwrap();
-        assert!(matches!(f, Const::F64(f64::INFINITY)));
+        assert_eq!(f, Const::F64(f64::INFINITY));
         let f = p("(f64.const -inf)").unwrap();
-        assert!(matches!(f, Const::F64(f64::NEG_INFINITY)));
+        assert_eq!(f, Const::F64(f64::NEG_INFINITY));
     }
 
     #[test]
@@ -869,5 +966,89 @@ mod tests {
         assert_eq!(a.invoke.name, "fac-rec");
         assert_eq!(a.invoke.args.len(), 1);
         assert_eq!(a.invoke.args[0], Const::I64(1073741824));
+    }
+
+    #[test]
+    fn test_case() {
+        let tc: TestCase = Parser::new(
+            r#"
+            (module
+              (func (export "br") (block (br 0)))
+              (func (export "br_if") (block (br_if 0 (i32.const 1))))
+              (func (export "br_table") (block (br_table 0 (i32.const 0))))
+            )
+            (assert_return (invoke "br"))
+            (assert_return (invoke "br_if"))
+            (assert_return (invoke "br_table"))
+            "#,
+        )
+        .parse()
+        .unwrap();
+        assert!(matches!(tc.module, TestModule::Inline(_)));
+        assert_eq!(tc.directives.len(), 3);
+        for i in 0..3 {
+            assert!(matches!(tc.directives[i], Directive::AssertReturn(_)));
+        }
+
+        let tc: TestCase = Parser::new(
+            r#"
+            (module binary "\00asm\01\00\00\00")
+            (assert_return (invoke "br"))
+            "#,
+        )
+        .parse()
+        .unwrap();
+        assert!(matches!(tc.module, TestModule::Binary(_)));
+        assert_eq!(tc.directives.len(), 1);
+        assert!(matches!(tc.directives[0], Directive::AssertReturn(_)));
+    }
+
+    #[test]
+    fn test_suite() {
+        let ts: TestSuite = Parser::new(
+            r#"
+            (module
+              (func (export "br") (block (br 0)))
+              (func (export "br_if") (block (br_if 0 (i32.const 1))))
+              (func (export "br_table") (block (br_table 0 (i32.const 0))))
+            )
+            (assert_return (invoke "br"))
+            (assert_return (invoke "br_if"))
+            (assert_return (invoke "br_table"))
+
+            (module binary "\00asm\01\00\00\00")
+            (module $M1 binary "\00asm\01\00\00\00")
+
+            (module
+              (func (export "add") (param $x i32) (param $y i32) (result i32) (i32.add (local.get $x) (local.get $y)))
+            )
+
+            (assert_return (invoke "add" (i32.const 1) (i32.const 1)) (i32.const 2))
+            (assert_return (invoke "add" (i32.const 1) (i32.const 0)) (i32.const 1))
+            (assert_return (invoke "add" (i32.const -1) (i32.const -1)) (i32.const -2))
+            (assert_return (invoke "add" (i32.const -1) (i32.const 1)) (i32.const 0))
+            "#,
+        )
+        .parse()
+        .unwrap();
+
+        assert_eq!(ts.test_cases.len(), 4);
+
+        let t = &ts.test_cases[0];
+        assert!(matches!(t.module, TestModule::Inline(_)));
+        assert_eq!(t.directives.len(), 3);
+        for i in 0..3 {
+            assert!(matches!(t.directives[i], Directive::AssertReturn(_)));
+        }
+
+        assert!(matches!(ts.test_cases[1].module, TestModule::Binary(_)));
+        assert!(matches!(ts.test_cases[2].module, TestModule::Binary(_)));
+
+        let t = &ts.test_cases[3];
+        assert!(matches!(t.module, TestModule::Inline(_)));
+        assert_eq!(t.directives.len(), 4);
+        for i in 0..4 {
+            assert!(matches!(t.directives[i], Directive::AssertReturn(_)));
+        }
     }
 }

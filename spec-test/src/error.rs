@@ -37,7 +37,7 @@ pub enum ErrorKind<'source> {
 }
 
 pub struct Error<'source> {
-    pos: usize,
+    pub pos: usize,
     source: &'source str,
     kind: ErrorKind<'source>,
 }
