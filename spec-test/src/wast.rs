@@ -16,29 +16,35 @@ pub struct EmbeddedModule {
 }
 
 // Argument of assertion and invoke
+#[cfg_attr(test, derive(Debug))]
+#[derive(PartialEq)]
 pub enum Const {
     I32(i32),
     I64(i64),
     F32(f32),
     F64(f64),
     // nan:canonical
-    NanCanonical,
+    CanonicalNan,
     // nan:arithmetic
-    NanArithmetic,
+    ArithmeticNan,
 }
 
-pub struct WastContext<'source> {
+pub struct TestSuite<'source> {
+    test_cases: Vec<TestCase<'source>>,
+}
+
+pub struct TestCase<'source> {
     pub module: wat::Module<'source>,
     pub directives: Vec<Directive<'source>>,
 }
 
 pub enum Directive<'source> {
     AssertReturn(AssertReturn),
-    AssertTrap(AssertTrap<'source>),
-    AssertMalformed(AssertMalformed<'source>),
+    AssertTrap(AssertTrap),
+    AssertMalformed(AssertMalformed),
     AssertInvalid(AssertInvalid<'source>),
     AssertUnlinkable(AssertUnlinkable<'source>),
-    AssertExhaustion(AssertExhaustion<'source>),
+    AssertExhaustion(AssertExhaustion),
     Register(String),
     Invoke(Invoke),
 }
@@ -64,37 +70,37 @@ pub struct AssertReturn {
 }
 
 // (assert_trap (invoke {name} {constant}*) {string})
-pub struct AssertTrap<'source> {
+pub struct AssertTrap {
     pub start: usize,
     pub invoke: Invoke,
-    pub expected: &'source str,
+    pub expected: String,
 }
 
 // (assert_malformed (module ...) {string})
 // Module must be one of (module binary ...) or (module quote ...)
-pub struct AssertMalformed<'source> {
+pub struct AssertMalformed {
     pub start: usize,
     pub module: EmbeddedModule,
-    pub expected: &'source str,
+    pub expected: String,
 }
 
 // (assert_invalid (module ...) {string})
 pub struct AssertInvalid<'source> {
     pub start: usize,
     pub module: wat::Module<'source>,
-    pub expected: &'source str,
+    pub expected: String,
 }
 
 // (assert_unlinkable (module ...) {string})
 pub struct AssertUnlinkable<'source> {
     pub start: usize,
     pub module: wat::Module<'source>,
-    pub expected: &'source str,
+    pub expected: String,
 }
 
 // (assert_exhaustion (invoke {name} {constant}*) {string})
-pub struct AssertExhaustion<'source> {
+pub struct AssertExhaustion {
     pub start: usize,
     pub invoke: Invoke,
-    pub expected: &'source str,
+    pub expected: String,
 }

@@ -1,4 +1,5 @@
 use std::fmt;
+use std::num::{ParseFloatError, ParseIntError};
 use std::string::FromUtf8Error;
 use wain_syntax_text::lexer::LexError;
 use wain_syntax_text::source::describe_position;
@@ -14,6 +15,17 @@ pub enum ErrorKind<'source> {
     InvalidStringLiteral {
         lit: &'source str,
         reason: &'static str,
+    },
+    InvalidInt {
+        ty: &'static str,
+        err: ParseIntError,
+    },
+    InvalidFloat {
+        ty: &'static str,
+        err: ParseFloatError,
+    },
+    InvalidHexFloat {
+        ty: &'static str,
     },
     Lex(LexError<'source>),
 }
@@ -51,6 +63,11 @@ impl<'s> fmt::Display for Error<'s> {
             InvalidStringLiteral { lit, reason } => {
                 write!(f, "invalid string literal '{}': {}", lit, reason)?
             }
+            InvalidInt { ty, err } => write!(f, "invalid int literal for {}: {}", ty, err)?,
+            InvalidFloat { ty, err } => {
+                write!(f, "invalid float number literal for {}: {}", ty, err)?
+            }
+            InvalidHexFloat { ty } => write!(f, "invalid hex float number literal for {}", ty)?,
         }
         describe_position(f, self.source, self.pos)
     }
