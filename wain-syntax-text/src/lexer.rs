@@ -191,6 +191,10 @@ impl<'s> Lexer<'s> {
         }
     }
 
+    pub fn source(&self) -> &'s str {
+        self.source
+    }
+
     pub fn lex(&mut self) -> LexResult<'s> {
         while self.eat_whitespace()? {}
 

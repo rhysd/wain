@@ -1,16 +1,26 @@
 use crate::error::{Error, ErrorKind, Result};
 use crate::wast::*;
+use std::borrow::Cow;
 use std::char;
 use std::f32;
 use std::f64;
+use std::mem;
+use wain_ast as ast;
 use wain_syntax_text::lexer::{Float, Lexer, NumBase, Sign, Token};
-use wain_syntax_text::parser::LookAhead;
+use wain_syntax_text::parser::{LookAhead, Parser as WatParser};
+use wain_syntax_text::source::TextSource;
+use wain_syntax_text::wat2wasm::wat2wasm;
+
+// Empty lexer for substitute pattern
+fn empty_lexer<'s>() -> LookAhead<Lexer<'s>> {
+    LookAhead::new(Lexer::new(""))
+}
 
 macro_rules! expect {
     ($parser:ident, $tok:pat if $cond:expr => $ret:expr ) => {
         match $parser.consume()? {
             Some($tok) if $cond => $ret,
-            _ => return $parser.unexpected(stringify!($tok if $cond)),
+            x => return $parser.unexpected_token(x, stringify!($tok if $cond)),
         }
     };
     ($parser:ident, $tok:pat => $ret:expr) => {
@@ -26,19 +36,29 @@ macro_rules! expect {
 
 pub struct Parser<'source> {
     source: &'source str,
-    offset: usize,
     tokens: LookAhead<Lexer<'source>>,
     current_pos: usize,
 }
 
 impl<'s> Parser<'s> {
-    pub fn new(source: &'s str, base_offset: usize) -> Self {
+    pub fn new(source: &'s str) -> Self {
         Parser {
             source,
-            offset: base_offset,
             tokens: LookAhead::new(Lexer::new(source)),
             current_pos: 0,
         }
+    }
+
+    fn with_lexer<P, F>(&mut self, pred: F) -> Result<'s, P>
+    where
+        P: Parse<'s>,
+        F: FnOnce(LookAhead<Lexer<'s>>) -> Result<'s, (P, LookAhead<Lexer<'s>>)>,
+    {
+        // Substitute pattern to give rent lexer temporarily
+        let lexer = mem::replace(&mut self.tokens, empty_lexer());
+        let (ret, lexer) = pred(lexer)?;
+        mem::replace(&mut self.tokens, lexer);
+        Ok(ret)
     }
 
     fn consume(&mut self) -> Result<'s, Option<Token<'s>>> {
@@ -70,16 +90,27 @@ impl<'s> Parser<'s> {
     }
 
     fn error(&self, kind: ErrorKind<'s>) -> Box<Error<'s>> {
-        let pos = self.offset + self.current_pos;
-        Error::new(kind, self.source, pos)
+        Error::new(kind, self.source, self.current_pos)
     }
 
     fn fail<T>(&self, kind: ErrorKind<'s>) -> Result<'s, T> {
         Err(self.error(kind))
     }
 
-    fn unexpected<T>(&self, expected: &'static str) -> Result<'s, T> {
-        self.fail(ErrorKind::Unexpected { expected })
+    fn unexpected<T, E: Into<Cow<'static, str>>>(&self, expected: E) -> Result<'s, T> {
+        self.fail(ErrorKind::Unexpected {
+            expected: expected.into(),
+            token: None,
+        })
+    }
+
+    fn unexpected_token<T, E: Into<Cow<'static, str>>>(
+        &self,
+        token: Option<Token<'s>>,
+        expected: E,
+    ) -> Result<'s, T> {
+        let expected = expected.into();
+        self.fail(ErrorKind::Unexpected { expected, token })
     }
 
     pub fn parse<P: Parse<'s>>(&mut self) -> Result<'s, P> {
@@ -89,7 +120,7 @@ impl<'s> Parser<'s> {
     fn parse_escaped(&self, s: &'s str) -> Result<'s, Vec<u8>> {
         let mut buf = vec![];
         let mut chars = s.char_indices();
-        while let Some((i, c)) = chars.next() {
+        while let Some((_, c)) = chars.next() {
             if c != '\\' {
                 let mut b = [0; 4];
                 buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
@@ -167,6 +198,19 @@ impl<'s> Parser<'s> {
             Err(e) => self.fail(ErrorKind::Utf8Error(e)),
         }
     }
+
+    fn parse_start(&mut self, directive: &'static str) -> Result<'s, usize> {
+        match self.consume()? {
+            Some(Token::LParen) => {
+                let start = self.current_pos;
+                match self.consume()? {
+                    Some(Token::Keyword(k)) if k == directive => Ok(start),
+                    x => self.unexpected_token(x, format!("keyword for '{}'", directive)),
+                }
+            }
+            x => self.unexpected_token(x, format!("'(' for '{}'", directive)),
+        }
+    }
 }
 
 trait Parse<'source>: Sized {
@@ -184,9 +228,7 @@ impl<'s> Parse<'s> for String {
 // Parse (module quote ...) or (module binary ...)
 impl<'s> Parse<'s> for EmbeddedModule {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        expect!(parser, Token::LParen);
-        let start = parser.current_pos;
-        expect!(parser, Token::Keyword("module"));
+        let start = parser.parse_start("module")?;
 
         let kw = expect!(parser, Token::Keyword(kw) if kw == "quote" || kw == "binary" => kw);
         match kw {
@@ -203,7 +245,7 @@ impl<'s> Parse<'s> for EmbeddedModule {
                                 embedded: Embedded::Quote(text),
                             });
                         }
-                        _ => return parser.unexpected("string for module body or ending ')'"),
+                        x => return parser.unexpected_token(x, "string for module quote or ')'"),
                     }
                 }
             }
@@ -220,7 +262,7 @@ impl<'s> Parse<'s> for EmbeddedModule {
                                 embedded: Embedded::Binary(bin),
                             });
                         }
-                        _ => return parser.unexpected("string for module body or ending ')'"),
+                        x => return parser.unexpected_token(x, "string for module binary or ')'"),
                     }
                 }
             }
@@ -231,9 +273,6 @@ impl<'s> Parse<'s> for EmbeddedModule {
 
 impl<'s> Parse<'s> for Const {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        expect!(parser, Token::LParen);
-        let kw = expect!(parser, Token::Keyword(k) => k);
-
         macro_rules! parse_int_fn {
             ($name:ident, $ty:ty) => {
                 fn $name<'s>(
@@ -341,14 +380,17 @@ impl<'s> Parse<'s> for Const {
         parse_float_fn!(parse_f32, f32);
         parse_float_fn!(parse_f64, f64);
 
+        expect!(parser, Token::LParen);
+        let kw = expect!(parser, Token::Keyword(k) => k);
+
         let c = match kw {
             "i32.const" => match parser.consume()? {
                 Some(Token::Int(s, b, d)) => Const::I32(parse_i32(parser, s, b, d)?),
-                _ => return parser.unexpected("i32 value"),
+                x => return parser.unexpected_token(x, "i32 value"),
             },
             "i64.const" => match parser.consume()? {
                 Some(Token::Int(s, b, d)) => Const::I64(parse_i64(parser, s, b, d)?),
-                _ => return parser.unexpected("i64 value"),
+                x => return parser.unexpected_token(x, "i64 value"),
             },
             "f32.const" => match parser.consume()? {
                 Some(Token::Keyword("nan:canonical")) => Const::CanonicalNan,
@@ -360,7 +402,7 @@ impl<'s> Parse<'s> for Const {
                 Some(Token::Float(sign, Float::Val { base, frac, exp })) => {
                     Const::F32(parse_f32(parser, sign, base, frac, exp)?)
                 }
-                _ => return parser.unexpected("f32 value"),
+                x => return parser.unexpected_token(x, "f32 value"),
             },
             "f64.const" => match parser.consume()? {
                 Some(Token::Keyword("nan:canonical")) => Const::CanonicalNan,
@@ -372,7 +414,7 @@ impl<'s> Parse<'s> for Const {
                 Some(Token::Float(sign, Float::Val { base, frac, exp })) => {
                     Const::F64(parse_f64(parser, sign, base, frac, exp)?)
                 }
-                _ => return parser.unexpected("f64 value"),
+                x => return parser.unexpected_token(x, "f64 value"),
             },
             _ => return parser.unexpected("t.const for constant"),
         };
@@ -385,10 +427,7 @@ impl<'s> Parse<'s> for Const {
 // (invoke {name} {constant}*)
 impl<'s> Parse<'s> for Invoke {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        expect!(parser, Token::LParen);
-        let start = parser.current_pos;
-
-        expect!(parser, Token::Keyword("invoke"));
+        let start = parser.parse_start("invoke")?;
         let name = parser.parse()?;
 
         let mut args = vec![];
@@ -404,13 +443,9 @@ impl<'s> Parse<'s> for Invoke {
 // (register {string})
 impl<'s> Parse<'s> for Register {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        expect!(parser, Token::LParen);
-        let start = parser.current_pos;
-
-        expect!(parser, Token::Keyword("register"));
+        let start = parser.parse_start("register")?;
         let name = parser.parse()?;
         expect!(parser, Token::RParen);
-
         Ok(Register { start, name })
     }
 }
@@ -418,10 +453,7 @@ impl<'s> Parse<'s> for Register {
 // (assert_return (invoke {name} {constant}*) {constant}?)
 impl<'s> Parse<'s> for AssertReturn {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        expect!(parser, Token::LParen);
-        let start = parser.current_pos;
-
-        expect!(parser, Token::Keyword("assert_return"));
+        let start = parser.parse_start("assert_return")?;
         let invoke = parser.parse()?;
 
         let expected = if let (Some(Token::LParen), _) = parser.peek()? {
@@ -442,15 +474,93 @@ impl<'s> Parse<'s> for AssertReturn {
 // (assert_trap (invoke {name} {constant}*) {string})
 impl<'s> Parse<'s> for AssertTrap {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        expect!(parser, Token::LParen);
-        let start = parser.current_pos;
-
-        expect!(parser, Token::Keyword("assert_trap"));
+        let start = parser.parse_start("assert_trap")?;
         let invoke = parser.parse()?;
         let expected = parser.parse()?;
-
         expect!(parser, Token::RParen);
         Ok(AssertTrap {
+            start,
+            invoke,
+            expected,
+        })
+    }
+}
+
+// (assert_malformed (module ...) {string})
+impl<'s> Parse<'s> for AssertMalformed {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let start = parser.parse_start("assert_malformed")?;
+        let module = parser.parse()?;
+        let expected = parser.parse()?;
+        expect!(parser, Token::RParen);
+        Ok(AssertMalformed {
+            start,
+            module,
+            expected,
+        })
+    }
+}
+
+// inline module in assert_invalid and assert_unlinkable
+impl<'s> Parse<'s> for ast::Root<'s, TextSource<'s>> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        // Check it starts with (module
+        let msg = "starting with '(module' for module argument";
+        match parser.peek()? {
+            (Some(Token::LParen), Some(Token::Keyword("module"))) => { /* ok */ }
+            (Some(Token::LParen), t) | (t, _) => {
+                let t = t.cloned();
+                return parser.unexpected_token(t, msg);
+            }
+        }
+
+        parser.with_lexer(|lexer| {
+            let mut wat_parser = WatParser::with_lexer(lexer);
+            let parsed = wat_parser.parse()?; // text -> wat
+            let root = wat2wasm(parsed, wat_parser.source())?; // wat -> ast
+            Ok((root, wat_parser.into_lexer()))
+        })
+    }
+}
+
+// (assert_invalid (module ...) {string})
+impl<'s> Parse<'s> for AssertInvalid<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let start = parser.parse_start("assert_invalid")?;
+        let wat = parser.parse()?;
+        let expected = parser.parse()?;
+        expect!(parser, Token::RParen);
+        Ok(AssertInvalid {
+            start,
+            wat,
+            expected,
+        })
+    }
+}
+
+// (assert_unlinkable (module ...) {string})
+impl<'s> Parse<'s> for AssertUnlinkable<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let start = parser.parse_start("assert_unlinkable")?;
+        let wat = parser.parse()?;
+        let expected = parser.parse()?;
+        expect!(parser, Token::RParen);
+        Ok(AssertUnlinkable {
+            start,
+            wat,
+            expected,
+        })
+    }
+}
+
+// (assert_unlinkable (module ...) {string})
+impl<'s> Parse<'s> for AssertExhaustion {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let start = parser.parse_start("assert_exhaustion")?;
+        let invoke = parser.parse()?;
+        let expected = parser.parse()?;
+        expect!(parser, Token::RParen);
+        Ok(AssertExhaustion {
             start,
             invoke,
             expected,
@@ -471,7 +581,7 @@ mod tests {
             "\00\82\00"                          ;; no max, minimum 2
           )
         "#;
-        let m: EmbeddedModule = Parser::new(s, 0).parse().unwrap();
+        let m: EmbeddedModule = Parser::new(s).parse().unwrap();
         let b: &[u8] = &[0, b'a', b's', b'm', 0x1, 0, 0, 0, 0x5, 0x4, 1, 0, 0x82, 0];
         match m.embedded {
             Embedded::Binary(bin) => assert_eq!(bin.as_slice(), b),
@@ -483,7 +593,7 @@ mod tests {
             "(memory $foo 1)"
             "(memory $foo 1)")
         "#;
-        let m: EmbeddedModule = Parser::new(s, 0).parse().unwrap();
+        let m: EmbeddedModule = Parser::new(s).parse().unwrap();
         let expected = r#"(memory $foo 1)(memory $foo 1)"#;
         match m.embedded {
             Embedded::Quote(s) => assert_eq!(&s, expected),
@@ -498,13 +608,13 @@ mod tests {
             (start 0)
           )
         "#;
-        assert!(Parser::new(s, 0).parse::<EmbeddedModule>().is_err());
+        assert!(Parser::new(s).parse::<EmbeddedModule>().is_err());
     }
 
     #[test]
     fn constants() {
         fn p<'a>(s: &'a str) -> Result<'a, Const> {
-            Parser::new(s, 0).parse()
+            Parser::new(s).parse()
         }
 
         assert_eq!(p("(i32.const 0)").unwrap(), Const::I32(0));
@@ -588,11 +698,11 @@ mod tests {
 
     #[test]
     fn invoke() {
-        let i: Invoke = Parser::new(r#"(invoke "foo")"#, 0).parse().unwrap();
+        let i: Invoke = Parser::new(r#"(invoke "foo")"#).parse().unwrap();
         assert_eq!(i.name, "foo");
         assert!(i.args.is_empty());
 
-        let i: Invoke = Parser::new(r#"(invoke "foo" (i32.const 123) (f64.const 1.23))"#, 0)
+        let i: Invoke = Parser::new(r#"(invoke "foo" (i32.const 123) (f64.const 1.23))"#)
             .parse()
             .unwrap();
         assert_eq!(i.name, "foo");
@@ -603,7 +713,7 @@ mod tests {
 
     #[test]
     fn register() {
-        let r: Register = Parser::new(r#"(register "foo")"#, 0).parse().unwrap();
+        let r: Register = Parser::new(r#"(register "foo")"#).parse().unwrap();
         assert_eq!(r.name, "foo");
     }
 
@@ -614,7 +724,6 @@ mod tests {
               (invoke "8u_good1" (i32.const 0))
               (i32.const 97)
             )"#,
-            0,
         )
         .parse()
         .unwrap();
@@ -624,7 +733,7 @@ mod tests {
         assert_eq!(a.invoke.args[0], Const::I32(0));
         assert_eq!(a.expected, Some(Const::I32(97)));
 
-        let a: AssertReturn = Parser::new(r#"(assert_return (invoke "type-i32"))"#, 0)
+        let a: AssertReturn = Parser::new(r#"(assert_return (invoke "type-i32"))"#)
             .parse()
             .unwrap();
 
@@ -637,7 +746,6 @@ mod tests {
     fn assert_trap() {
         let a: AssertTrap = Parser::new(
             r#"(assert_trap (invoke "32_good5" (i32.const 65508)) "out of bounds memory access")"#,
-            0,
         )
         .parse()
         .unwrap();
@@ -646,5 +754,120 @@ mod tests {
         assert_eq!(a.invoke.args.len(), 1);
         assert_eq!(a.invoke.args[0], Const::I32(65508));
         assert_eq!(a.expected, "out of bounds memory access");
+    }
+
+    #[test]
+    fn assert_malformed() {
+        let a: AssertMalformed = Parser::new(
+            r#"(assert_malformed
+              (module quote
+                "(module (memory 0) (func (drop (i32.load8_s align=7 (i32.const 0)))))"
+              )
+              "alignment"
+            )"#,
+        )
+        .parse()
+        .unwrap();
+
+        assert!(matches!(a.module.embedded, Embedded::Quote(_)));
+        assert_eq!(a.expected, "alignment");
+
+        let a: AssertMalformed = Parser::new(
+            r#"(assert_malformed
+              (module binary "\00asm" "\01\00\00\00")
+              "integer too large"
+            )"#,
+        )
+        .parse()
+        .unwrap();
+
+        assert!(matches!(a.module.embedded, Embedded::Binary(_)));
+        assert_eq!(a.expected, "integer too large");
+    }
+
+    #[test]
+    fn assert_invalid() {
+        let a: AssertInvalid = Parser::new(
+            r#"(assert_invalid
+              (module (memory 0) (func (drop (i32.load8_s align=2 (i32.const 0)))))
+              "alignment must not be larger than natural"
+            )"#,
+        )
+        .parse()
+        .unwrap();
+
+        assert_eq!(a.expected, "alignment must not be larger than natural");
+
+        let m = a.wat.module;
+        assert_eq!(m.memories.len(), 1);
+        assert!(matches!(&m.memories[0], ast::Memory {
+            ty: ast::MemType {
+                limit: ast::Limits::From(0),
+            },
+            import: None,
+            ..
+        }));
+
+        assert_eq!(m.funcs.len(), 1);
+        assert!(matches!(&m.funcs[0], ast::Func {
+            idx: 0,
+            kind: ast::FuncKind::Body {
+                locals,
+                expr,
+            },
+            ..
+        } if locals.is_empty() && expr.len() == 3));
+    }
+
+    #[test]
+    fn assert_unlinkable() {
+        let a: AssertUnlinkable = Parser::new(
+            r#"(assert_unlinkable
+              (module
+                (memory 0)
+                (data (i32.const 0) "a")
+              )
+              "data segment does not fit"
+            )"#,
+        )
+        .parse()
+        .unwrap();
+
+        assert_eq!(a.expected, "data segment does not fit");
+
+        let m = a.wat.module;
+        assert_eq!(m.memories.len(), 1);
+        assert!(matches!(&m.memories[0], ast::Memory {
+            ty: ast::MemType {
+                limit: ast::Limits::From(0),
+            },
+            import: None,
+            ..
+        }));
+
+        assert_eq!(m.data.len(), 1);
+        assert!(matches!(&m.data[0], ast::DataSegment {
+            idx: 0,
+            offset,
+            data,
+            ..
+        } if data.as_ref() == &b"a"[..] && offset.len() == 1));
+    }
+
+    #[test]
+    fn assert_exhaustion() {
+        let a: AssertExhaustion = Parser::new(
+            r#"(assert_exhaustion
+              (invoke "fac-rec" (i64.const 1073741824))
+              "call stack exhausted"
+            )"#,
+        )
+        .parse()
+        .unwrap();
+
+        assert_eq!(a.expected, "call stack exhausted");
+        assert_eq!(a.invoke.name, "fac-rec");
+        assert_eq!(a.invoke.args.len(), 1);
+        assert_eq!(a.invoke.args[0], Const::I64(1073741824));
     }
 }

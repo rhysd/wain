@@ -69,6 +69,14 @@ impl<'s> ParseError<'s> {
             kind,
         })
     }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    pub fn source(&self) -> &'s str {
+        self.source
+    }
 }
 
 impl<'s> fmt::Display for ParseError<'s> {
@@ -166,6 +174,9 @@ impl<I: Iterator> LookAhead<I> {
     }
     pub fn lookahead(&self) -> Option<&I::Item> {
         self.incoming.as_ref()
+    }
+    pub fn inner(&self) -> &I {
+        &self.it
     }
 }
 
@@ -276,8 +287,20 @@ impl<'s> Parser<'s> {
         }
     }
 
+    pub fn with_lexer(lexer: LookAhead<Lexer<'s>>) -> Self {
+        Parser {
+            source: lexer.inner().source(),
+            ctx: ParseContext::new(lexer.inner().source()),
+            tokens: lexer,
+        }
+    }
+
     pub fn source(&self) -> &'s str {
         self.source
+    }
+
+    pub fn into_lexer(self) -> LookAhead<Lexer<'s>> {
+        self.tokens
     }
 
     pub fn is_done(&self) -> bool {

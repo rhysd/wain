@@ -1,12 +1,16 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
 use std::string::FromUtf8Error;
-use wain_syntax_text::lexer::LexError;
+use wain_syntax_text::lexer::{LexError, Token};
+use wain_syntax_text::parser::ParseError;
 use wain_syntax_text::source::describe_position;
+use wain_syntax_text::wat2wasm::TransformError;
 
 pub enum ErrorKind<'source> {
     Unexpected {
-        expected: &'static str,
+        expected: Cow<'static, str>,
+        token: Option<Token<'source>>,
     },
     EndOfFile {
         expected: &'static str,
@@ -28,6 +32,8 @@ pub enum ErrorKind<'source> {
         ty: &'static str,
     },
     Lex(LexError<'source>),
+    ParseWat(ParseError<'source>),
+    Wat2Wasm(TransformError<'source>),
 }
 
 pub struct Error<'source> {
@@ -42,22 +48,40 @@ impl<'s> Error<'s> {
     }
 }
 
-impl<'s> From<Box<LexError<'s>>> for Box<Error<'s>> {
-    fn from(err: Box<LexError<'s>>) -> Box<Error<'s>> {
-        let source = err.source();
-        let offset = err.offset();
-        Error::new(ErrorKind::Lex(*err), source, offset)
-    }
+macro_rules! from_error {
+    ($from:ty, $kind:ident) => {
+        impl<'s> From<Box<$from>> for Box<Error<'s>> {
+            fn from(err: Box<$from>) -> Box<Error<'s>> {
+                let source = err.source();
+                let offset = err.offset();
+                Error::new(ErrorKind::$kind(*err), source, offset)
+            }
+        }
+    };
 }
+from_error!(LexError<'s>, Lex);
+from_error!(ParseError<'s>, ParseWat);
+from_error!(TransformError<'s>, Wat2Wasm);
 
 impl<'s> fmt::Display for Error<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ErrorKind::*;
         match &self.kind {
             Lex(err) => write!(f, "lexer error: {}", err)?,
-            Unexpected { expected } => {
-                write!(f, "unexpected token while {} is expected", expected)?
-            }
+            ParseWat(err) => write!(f, "parse error on parsing WAT module: {}", err)?,
+            Wat2Wasm(err) => write!(f, "could not transform from WAT to WASM: {}", err)?,
+            Unexpected {
+                expected,
+                token: None,
+            } => write!(f, "unexpected token while {} is expected", expected)?,
+            Unexpected {
+                expected,
+                token: Some(token),
+            } => write!(
+                f,
+                "unexpected token {} while {} is expected",
+                token, expected
+            )?,
             EndOfFile { expected } => write!(f, "unxpected EOF while {} is expected", expected)?,
             Utf8Error(err) => write!(f, "cannot parse text as UTF-8: {}", err)?,
             InvalidStringLiteral { lit, reason } => {

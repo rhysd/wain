@@ -2,7 +2,9 @@
 // .wast is not a part of WebAssembly spec, but it's used by WebAssembly's spec tests to describe
 // test cases.
 
-use wain_ast as wat;
+use wain_ast as ast;
+use wain_syntax_binary::source::BinarySource;
+use wain_syntax_text::source::TextSource;
 
 // (module quote *{string})
 // (module binary *{string})
@@ -33,9 +35,15 @@ pub struct TestSuite<'source> {
     test_cases: Vec<TestCase<'source>>,
 }
 
-pub struct TestCase<'source> {
-    pub module: wat::Module<'source>,
-    pub directives: Vec<Directive<'source>>,
+pub enum TestCase<'source> {
+    Text {
+        module: ast::Root<'source, TextSource<'source>>,
+        directives: Vec<Directive<'source>>,
+    },
+    Binary {
+        module: ast::Root<'source, BinarySource<'source>>,
+        directives: Vec<Directive<'source>>,
+    },
 }
 
 pub enum Directive<'source> {
@@ -87,14 +95,16 @@ pub struct AssertMalformed {
 // (assert_invalid (module ...) {string})
 pub struct AssertInvalid<'source> {
     pub start: usize,
-    pub module: wat::Module<'source>,
+    // module is put inline. The source is always text
+    pub wat: ast::Root<'source, TextSource<'source>>,
     pub expected: String,
 }
 
 // (assert_unlinkable (module ...) {string})
 pub struct AssertUnlinkable<'source> {
     pub start: usize,
-    pub module: wat::Module<'source>,
+    // module is put inline. The source is always text
+    pub wat: ast::Root<'source, TextSource<'source>>,
     pub expected: String,
 }
 

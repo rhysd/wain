@@ -37,6 +37,14 @@ impl<'s> TransformError<'s> {
             source,
         })
     }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    pub fn source(&self) -> &'s str {
+        self.source
+    }
 }
 
 impl<'s> fmt::Display for TransformError<'s> {
