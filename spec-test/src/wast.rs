@@ -50,40 +50,41 @@ pub struct TestCase<'source> {
 // Allow AssertUnlinkable variant makes this enum large since this code is used only in tests
 #[allow(clippy::large_enum_variant)]
 pub enum Directive<'source> {
-    AssertReturn(AssertReturn),
-    AssertTrap(AssertTrap),
+    AssertReturn(AssertReturn<'source>),
+    AssertTrap(AssertTrap<'source>),
     AssertMalformed(AssertMalformed),
     AssertInvalid(AssertInvalid<'source>),
     AssertUnlinkable(AssertUnlinkable<'source>),
-    AssertExhaustion(AssertExhaustion),
+    AssertExhaustion(AssertExhaustion<'source>),
     Register(Register),
-    Invoke(Invoke),
+    Invoke(Invoke<'source>),
 }
 
-// (invoke {name} {constant}*)
-pub struct Invoke {
+// (invoke {id}? {name} {constant}*)
+pub struct Invoke<'source> {
     pub start: usize,
+    pub id: Option<&'source str>,
     pub name: String,
     pub args: Vec<Const>,
 }
 
-// (register {string})
+// (register {name})
 pub struct Register {
     pub start: usize,
     pub name: String,
 }
 
 // (assert_return (invoke {name} {constant}*) {constant}?)
-pub struct AssertReturn {
+pub struct AssertReturn<'source> {
     pub start: usize,
-    pub invoke: Invoke,
+    pub invoke: Invoke<'source>,
     pub expected: Option<Const>,
 }
 
 // (assert_trap (invoke {name} {constant}*) {string})
-pub struct AssertTrap {
+pub struct AssertTrap<'source> {
     pub start: usize,
-    pub invoke: Invoke,
+    pub invoke: Invoke<'source>,
     pub expected: String,
 }
 
@@ -112,8 +113,8 @@ pub struct AssertUnlinkable<'source> {
 }
 
 // (assert_exhaustion (invoke {name} {constant}*) {string})
-pub struct AssertExhaustion {
+pub struct AssertExhaustion<'source> {
     pub start: usize,
-    pub invoke: Invoke,
+    pub invoke: Invoke<'source>,
     pub expected: String,
 }

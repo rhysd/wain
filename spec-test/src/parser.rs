@@ -230,6 +230,16 @@ impl<'s> Parser<'s> {
             x => self.unexpected_token(x, format!("'(' for '{}'", directive)),
         }
     }
+
+    fn parse_maybe_id(&mut self) -> Result<'s, Option<&'s str>> {
+        if let (Some(Token::Ident(id)), _) = self.peek()? {
+            let id = *id;
+            self.tokens.next();
+            Ok(Some(id))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 pub trait Parse<'source>: Sized {
@@ -456,10 +466,11 @@ impl<'s> Parse<'s> for Const {
     }
 }
 
-// (invoke {name} {constant}*)
-impl<'s> Parse<'s> for Invoke {
+// (invoke {id}? {name} {constant}*)
+impl<'s> Parse<'s> for Invoke<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.parse_start("invoke")?;
+        let id = parser.parse_maybe_id()?;
         let name = parser.parse()?;
 
         let mut args = vec![];
@@ -468,11 +479,16 @@ impl<'s> Parse<'s> for Invoke {
         }
 
         expect!(parser, Token::RParen);
-        Ok(Invoke { start, name, args })
+        Ok(Invoke {
+            start,
+            id,
+            name,
+            args,
+        })
     }
 }
 
-// (register {string})
+// (register {name})
 impl<'s> Parse<'s> for Register {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.parse_start("register")?;
@@ -483,7 +499,7 @@ impl<'s> Parse<'s> for Register {
 }
 
 // (assert_return (invoke {name} {constant}*) {constant}?)
-impl<'s> Parse<'s> for AssertReturn {
+impl<'s> Parse<'s> for AssertReturn<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.parse_start("assert_return")?;
         let invoke = parser.parse()?;
@@ -504,7 +520,7 @@ impl<'s> Parse<'s> for AssertReturn {
 }
 
 // (assert_trap (invoke {name} {constant}*) {string})
-impl<'s> Parse<'s> for AssertTrap {
+impl<'s> Parse<'s> for AssertTrap<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.parse_start("assert_trap")?;
         let invoke = parser.parse()?;
@@ -585,7 +601,7 @@ impl<'s> Parse<'s> for AssertUnlinkable<'s> {
 }
 
 // (assert_unlinkable (module ...) {string})
-impl<'s> Parse<'s> for AssertExhaustion {
+impl<'s> Parse<'s> for AssertExhaustion<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.parse_start("assert_exhaustion")?;
         let invoke = parser.parse()?;
@@ -880,6 +896,14 @@ mod tests {
         assert_eq!(i.args.len(), 2);
         assert_eq!(i.args[0], Const::I32(123));
         assert_eq!(i.args[1], Const::F64(1.23));
+
+        let i: Invoke = Parser::new(r#"(invoke $Func "e" (i32.const 42))"#)
+            .parse()
+            .unwrap();
+        assert_eq!(i.id, Some("$Func"));
+        assert_eq!(i.name, "e");
+        assert_eq!(i.args.len(), 1);
+        assert_eq!(i.args[0], Const::I32(42));
     }
 
     #[test]
