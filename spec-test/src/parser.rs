@@ -664,6 +664,8 @@ impl<'s> Parse<'s> for TestSuite<'s> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use std::fs;
 
     #[test]
     fn embedded_module() {
@@ -1049,6 +1051,28 @@ mod tests {
         assert_eq!(t.directives.len(), 4);
         for i in 0..4 {
             assert!(matches!(t.directives[i], Directive::AssertReturn(_)));
+        }
+    }
+
+    #[test]
+    fn official_test_suites() {
+        // /path/to/wain/spec-test
+        let mut dir = env::current_dir().unwrap();
+        dir.push("wasm-testsuite");
+
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if let Some(file) = path.file_name() {
+                if file.to_str().unwrap().ends_with(".wast") {
+                    let content = fs::read_to_string(&path).unwrap();
+                    match Parser::new(&content).parse::<TestSuite>() {
+                        Err(err) => panic!("parse error at {:?}: {}", path, err),
+                        Ok(testsuite) => {
+                            assert!(testsuite.test_cases.len() > 0);
+                        }
+                    }
+                }
+            }
         }
     }
 }
