@@ -38,6 +38,7 @@ pub struct Parser<'source> {
     source: &'source str,
     tokens: LookAhead<Lexer<'source>>,
     current_pos: usize,
+    prev_error: Option<Box<Error<'source>>>,
 }
 
 impl<'s> Parser<'s> {
@@ -46,6 +47,7 @@ impl<'s> Parser<'s> {
             source,
             tokens: LookAhead::new(Lexer::new(source)),
             current_pos: 0,
+            prev_error: None,
         }
     }
 
@@ -101,15 +103,20 @@ impl<'s> Parser<'s> {
         Ok((t1, t2))
     }
 
-    fn error(&self, kind: ErrorKind<'s>) -> Box<Error<'s>> {
-        Error::new(kind, self.source, self.current_pos)
+    fn error(&mut self, kind: ErrorKind<'s>) -> Box<Error<'s>> {
+        let mut err = Error::new(kind, self.source, self.current_pos);
+        if let Some(mut prev) = mem::replace(&mut self.prev_error, None) {
+            prev.prev_error = None; // Do not chain all errors
+            err.prev_error = Some(prev);
+        }
+        err
     }
 
-    fn fail<T>(&self, kind: ErrorKind<'s>) -> Result<'s, T> {
+    fn fail<T>(&mut self, kind: ErrorKind<'s>) -> Result<'s, T> {
         Err(self.error(kind))
     }
 
-    fn unexpected<T, E: Into<Cow<'static, str>>>(&self, expected: E) -> Result<'s, T> {
+    fn unexpected<T, E: Into<Cow<'static, str>>>(&mut self, expected: E) -> Result<'s, T> {
         self.fail(ErrorKind::Unexpected {
             expected: expected.into(),
             token: None,
@@ -117,7 +124,7 @@ impl<'s> Parser<'s> {
     }
 
     fn unexpected_token<T, E: Into<Cow<'static, str>>>(
-        &self,
+        &mut self,
         token: Option<Token<'s>>,
         expected: E,
     ) -> Result<'s, T> {
@@ -129,7 +136,7 @@ impl<'s> Parser<'s> {
         Parse::parse(self)
     }
 
-    fn parse_escaped(&self, s: &'s str) -> Result<'s, Vec<u8>> {
+    fn parse_escaped(&mut self, s: &'s str) -> Result<'s, Vec<u8>> {
         let mut buf = vec![];
         let mut chars = s.char_indices();
         while let Some((_, c)) = chars.next() {
@@ -203,7 +210,7 @@ impl<'s> Parser<'s> {
         Ok(buf)
     }
 
-    fn parse_escaped_text(&self, s: &'s str) -> Result<'s, String> {
+    fn parse_escaped_text(&mut self, s: &'s str) -> Result<'s, String> {
         let bytes = self.parse_escaped(s)?;
         match String::from_utf8(bytes) {
             Ok(s) => Ok(s),
@@ -629,29 +636,37 @@ impl<'s> Parse<'s> for Directive<'s> {
 
 impl<'s> Parse<'s> for TestCase<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        // `parser.parse::<EmbeddedModule>()` eats tokens. When reaching 'else' clause, `parser`'s
-        // lexer is no longer available. To parse from start, remember the lexer before calling
-        // `parser.parse::<EmbeddedModule>() by clone.
+        // `parser.parse::<EmbeddedModule>()` eats tokens. When reaching 'Err(err) => { ... }' clause,
+        // `parser`'s lexer is no longer available. To parse from start, remember the lexer before
+        // calling `parser.parse::<EmbeddedModule>() by clone.
         // This is mandatory since Wasm parser is LL(1). To avoid the clone, LL(2) is necessary.
         let prev_lexer = parser.clone_lexer();
 
-        let module = if let Ok(module) = parser.parse::<EmbeddedModule>() {
-            match module.embedded {
+        let module = match parser.parse::<EmbeddedModule>() {
+            Ok(module) => match module.embedded {
                 Embedded::Quote(text) => TestModule::Quote(text),
                 Embedded::Binary(bin) => TestModule::Binary(bin),
+            },
+            Err(err) => {
+                parser.prev_error = Some(err);
+                // Here parser.lexer already ate some tokens. To parser from
+                let mut wat_parser = WatParser::with_lexer(prev_lexer);
+                let parsed = wat_parser.parse()?; // text -> wat
+                let root = wat2wasm(parsed, wat_parser.source())?; // wat -> ast
+                parser.replace_lexer(wat_parser.into_lexer());
+                TestModule::Inline(root)
             }
-        } else {
-            // Here parser.lexer already ate some tokens. To parser from
-            let mut wat_parser = WatParser::with_lexer(prev_lexer);
-            let parsed = wat_parser.parse()?; // text -> wat
-            let root = wat2wasm(parsed, wat_parser.source())?; // wat -> ast
-            parser.replace_lexer(wat_parser.into_lexer());
-            TestModule::Inline(root)
         };
 
         let mut directives = vec![];
-        while let Ok(directive) = parser.parse() {
-            directives.push(directive);
+        loop {
+            match parser.parse::<Directive>() {
+                Ok(directive) => directives.push(directive),
+                Err(err) => {
+                    parser.prev_error = Some(err);
+                    break;
+                }
+            }
         }
 
         Ok(TestCase { module, directives })

@@ -44,11 +44,17 @@ pub struct Error<'source> {
     pub pos: usize,
     source: &'source str,
     kind: ErrorKind<'source>,
+    pub prev_error: Option<Box<Error<'source>>>,
 }
 
 impl<'s> Error<'s> {
     pub fn new(kind: ErrorKind<'s>, source: &'s str, pos: usize) -> Box<Error<'s>> {
-        Box::new(Error { pos, source, kind })
+        Box::new(Error {
+            pos,
+            source,
+            kind,
+            prev_error: None,
+        })
     }
 }
 
@@ -98,7 +104,17 @@ impl<'s> fmt::Display for Error<'s> {
             }
             InvalidHexFloat { ty } => write!(f, "invalid hex float number literal for {}", ty)?,
         }
-        describe_position(f, self.source, self.pos)
+        describe_position(f, self.source, self.pos)?;
+
+        if let Some(prev) = &self.prev_error {
+            write!(
+                f,
+                "\n\nabove error may be caused by below previous error: {}",
+                prev
+            )?;
+        }
+
+        Ok(())
     }
 }
 
