@@ -291,31 +291,39 @@ impl<'s> Parse<'s> for EmbeddedModule {
 impl<'s> Parse<'s> for Const {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         macro_rules! parse_int_fn {
-            ($name:ident, $ty:ty) => {
+            ($name:ident, $int:ty, $uint:ty) => {
                 fn $name<'s>(
                     parser: &mut Parser<'s>,
                     sign: Sign,
                     base: NumBase,
                     digits: &'s str,
-                ) -> Result<'s, $ty> {
+                ) -> Result<'s, $int> {
+                    // Operand of iNN.const is in range of iNN::min_value() <= i <= uNN::max_value().
+                    // When the value is over iNN::max_value(), it is parsed as uNN and bitcasted to iNN.
                     let parsed = if base == NumBase::Hex {
-                        <$ty>::from_str_radix(&digits.replace('_', ""), 16)
+                        <$uint>::from_str_radix(&digits.replace('_', ""), 16)
                     } else {
                         digits.replace('_', "").parse()
                     };
 
                     match parsed {
-                        Ok(i) => Ok(sign.apply(i)),
+                        Ok(u) if sign == Sign::Plus => Ok(u as $int),
+                        Ok(u) if u == <$int>::max_value() as $uint + 1 => Ok(<$int>::min_value()), // u as $int causes overflow
+                        Ok(u) if u <= <$int>::max_value() as $uint => Ok(-(u as $int)),
+                        Ok(u) => parser.fail(ErrorKind::TooSmallInt {
+                            ty: stringify!($int),
+                            digits: u as u64,
+                        }),
                         Err(e) => parser.fail(ErrorKind::InvalidInt {
-                            ty: stringify!($ty),
+                            ty: stringify!($int),
                             err: e,
                         }),
                     }
                 }
             };
         }
-        parse_int_fn!(parse_i32, i32);
-        parse_int_fn!(parse_i64, i64);
+        parse_int_fn!(parse_i32, i32, u32);
+        parse_int_fn!(parse_i64, i64, u64);
 
         macro_rules! parse_float_fn {
             ($name:ident, $ty:ty) => {
@@ -719,11 +727,61 @@ mod tests {
         assert_eq!(p("(i32.const 123)").unwrap(), Const::I32(123));
         assert_eq!(p("(i32.const 0xedf)").unwrap(), Const::I32(0xedf));
         assert_eq!(p("(i32.const -123)").unwrap(), Const::I32(-123));
+        assert_eq!(
+            p(r#"(i32.const 2147483647)"#).unwrap(),
+            Const::I32(2147483647), // INT32_MAX
+        );
+        assert_eq!(
+            p(r#"(i32.const 0x7fffffff)"#).unwrap(),
+            Const::I32(0x7fffffff), // INT32_MAX
+        );
+        assert_eq!(
+            p(r#"(i32.const -2147483648)"#).unwrap(),
+            Const::I32(-2147483648), // INT32_MIN
+        );
+        assert_eq!(
+            p(r#"(i32.const -0x80000000)"#).unwrap(),
+            Const::I32(-0x80000000), // INT32_MAX
+        );
+        assert_eq!(
+            p(r#"(i32.const 0xfedc6543)"#).unwrap(),
+            Const::I32(-19110589), // INT32_MAX < i < UINT32_MAX
+        );
+        assert_eq!(p(r#"(i32.const 4294967295)"#).unwrap(), Const::I32(-1)); // UINT32_MAX
+        assert_eq!(p(r#"(i32.const 0xffffffff)"#).unwrap(), Const::I32(-1)); // UINT32_MAX
 
         assert_eq!(p("(i64.const 0)").unwrap(), Const::I64(0));
         assert_eq!(p("(i64.const 123)").unwrap(), Const::I64(123));
         assert_eq!(p("(i64.const 0xedf)").unwrap(), Const::I64(0xedf));
         assert_eq!(p("(i64.const -123)").unwrap(), Const::I64(-123));
+        assert_eq!(
+            p(r#"(i64.const 9223372036854775807)"#).unwrap(),
+            Const::I64(9223372036854775807), // INT64_MAX
+        );
+        assert_eq!(
+            p(r#"(i64.const -9223372036854775808)"#).unwrap(),
+            Const::I64(-9223372036854775808), // INT64_MIN
+        );
+        assert_eq!(
+            p(r#"(i64.const 0x7fffffffffffffff)"#).unwrap(),
+            Const::I64(0x7fffffffffffffff), // INT64_MAX
+        );
+        assert_eq!(
+            p(r#"(i64.const -0x8000000000000000)"#).unwrap(),
+            Const::I64(-0x8000000000000000), // INT64_MIN
+        );
+        assert_eq!(
+            p(r#"(i64.const 0x8000000000000000)"#).unwrap(),
+            Const::I64(-9223372036854775808), // INT64_MAX + 1
+        );
+        assert_eq!(
+            p(r#"(i64.const 0xffffffffffffffff)"#).unwrap(),
+            Const::I64(-1), // UINT64_MAX
+        );
+        assert_eq!(
+            p(r#"(i64.const 18446744073709551615)"#).unwrap(),
+            Const::I64(-1), // UINT64_MAX
+        );
 
         assert_eq!(p("(f32.const 0)").unwrap(), Const::F32(0.0));
         assert_eq!(p("(f32.const 123)").unwrap(), Const::F32(123.0));

@@ -24,6 +24,10 @@ pub enum ErrorKind<'source> {
         ty: &'static str,
         err: ParseIntError,
     },
+    TooSmallInt {
+        ty: &'static str,
+        digits: u64,
+    },
     InvalidFloat {
         ty: &'static str,
         err: ParseFloatError,
@@ -88,6 +92,7 @@ impl<'s> fmt::Display for Error<'s> {
                 write!(f, "invalid string literal '{}': {}", lit, reason)?
             }
             InvalidInt { ty, err } => write!(f, "invalid int literal for {}: {}", ty, err)?,
+            TooSmallInt { ty, digits } => write!(f, "-{} is too small value for {}", digits, ty)?,
             InvalidFloat { ty, err } => {
                 write!(f, "invalid float number literal for {}: {}", ty, err)?
             }
