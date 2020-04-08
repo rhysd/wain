@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod error;
 mod parser;
 mod wast;

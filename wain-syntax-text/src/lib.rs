@@ -1,4 +1,4 @@
-#![deny(unsafe_code)]
+#![forbid(unsafe_code)]
 #![allow(clippy::cognitive_complexity)]
 
 extern crate wain_ast;
