@@ -533,17 +533,17 @@ impl<'s> Parser<'s> {
 }
 
 // TODO: Use trait rather than macros to avoid duplication of implementations
-macro_rules! parse_integer_function {
-    ($name:ident, $int:ty) => {
+macro_rules! parse_uint_function {
+    ($name:ident, $uint:ty) => {
         fn $name<'s>(
             parser: &Parser<'s>,
             input: &'s str,
             base: NumBase,
             sign: Sign,
             offset: usize,
-        ) -> Result<'s, $int> {
+        ) -> Result<'s, $uint> {
             let radix = base.radix();
-            let mut ret: $int = 0;
+            let mut ret: $uint = 0;
             for c in input.chars() {
                 if c == '_' {
                     // Skip delimiter
@@ -551,13 +551,13 @@ macro_rules! parse_integer_function {
                 }
                 if let Some(d) = c.to_digit(radix) {
                     if let Some(added) = ret
-                        .checked_mul(radix as $int)
-                        .and_then(|i| i.checked_add(d as $int))
+                        .checked_mul(radix as $uint)
+                        .and_then(|i| i.checked_add(d as $uint))
                     {
                         ret = added;
                     } else {
                         return parser.cannot_parse_num(
-                            concat!("too big or small integer for ", stringify!($int)),
+                            concat!("too big integer for ", stringify!($uint)),
                             input,
                             base,
                             sign,
@@ -579,9 +579,9 @@ macro_rules! parse_integer_function {
     };
 }
 
-parse_integer_function!(parse_u8_str, u8);
-parse_integer_function!(parse_u32_str, u32);
-parse_integer_function!(parse_u64_str, u64);
+parse_uint_function!(parse_u8_str, u8);
+parse_uint_function!(parse_u32_str, u32);
+parse_uint_function!(parse_u64_str, u64);
 
 macro_rules! parse_float_number_function {
     ($name:ident, $float:ty) => {
@@ -1730,16 +1730,20 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             // https://webassembly.github.io/spec/core/text/instructions.html#numeric-instructions
             // Constants
             "i32.const" => {
+                // Note: i32.const operand takes range of i32::min_value() <= i <= u32::max_value()
+                // When the value is over i32::max_value(), it is treated as u32 value and bitcasted to i32
                 let ((sign, base, digits), offset) = match_token!(self.parser, "integer for i32.const operand", Token::Int(s, b, d) => (s, b, d));
                 let u = parse_u32_str(self.parser, digits, base, sign, offset)?;
-                if u == 0x8000_0000 && sign == Sign::Minus {
-                    // In this case `u as i32` causes overflow
+                if sign == Sign::Plus {
+                    InsnKind::I32Const(u as i32)
+                } else if u == i32::max_value() as u32 + 1 {
+                    // u as i32 causes overflow
                     InsnKind::I32Const(i32::min_value())
-                } else if u < 0x8000_0000 {
-                    InsnKind::I32Const(sign.apply(u as i32))
+                } else if u <= i32::max_value() as u32 {
+                    InsnKind::I32Const(-(u as i32))
                 } else {
                     return self.parser.cannot_parse_num(
-                        "too large or small integer for i32",
+                        "too small integer for i32",
                         digits,
                         base,
                         sign,
@@ -1748,15 +1752,20 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                 }
             }
             "i64.const" => {
+                // Note: i64.const operand takes range of i64::min_value() <= i <= u64::max_value()
+                // When the value is over i64::max_value(), it is treated as u64 value and bitcasted to i64
                 let ((sign, base, digits), offset) = match_token!(self.parser, "integer for i64.const operand", Token::Int(s, b, d) => (s, b, d));
                 let u = parse_u64_str(self.parser, digits, base, sign, offset)?;
-                if u == 0x8000_0000_0000_0000 && sign == Sign::Minus {
+                if sign == Sign::Plus {
+                    InsnKind::I64Const(u as i64)
+                } else if u == i64::max_value() as u64 + 1 {
+                    // u as i64 causes overflow
                     InsnKind::I64Const(i64::min_value())
-                } else if u < 0x8000_0000_0000_0000 {
-                    InsnKind::I64Const(sign.apply(u as i64))
+                } else if u <= i64::max_value() as u64 {
+                    InsnKind::I64Const(-(u as i64))
                 } else {
                     return self.parser.cannot_parse_num(
-                        "too large or small integer for i64",
+                        "too small integer for i64",
                         digits,
                         base,
                         sign,
@@ -4165,31 +4174,36 @@ mod tests {
         assert_insn!(r#"i32.const 0x7fffffff"#, [I32Const(0x7fffffff)]); // INT32_MAX
         assert_insn!(r#"i32.const -2147483648"#, [I32Const(-2147483648)]); // INT32_MIN
         assert_insn!(r#"i32.const -0x80000000"#, [I32Const(-0x80000000)]); // INT32_MAX
+        assert_insn!(r#"i32.const 0xfedc6543"#, [I32Const(-19110589)]); // INT32_MAX < i < UINT32_MAX
+        assert_insn!(r#"i32.const 4294967295"#, [I32Const(-1)]); // UINT32_MAX
+        assert_insn!(r#"i32.const 0xffffffff"#, [I32Const(-1)]); // UINT32_MAX
 
         assert_error!(
             r#"i32.const 0.123"#,
             Vec<Instruction<'_>>,
             UnexpectedToken{ expected: "integer for i32.const operand", .. }
         );
+        // uint32_max + 1
         assert_error!(
-            r#"i32.const 0x80000000"#,
+            r#"i32.const 4294967296"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too large or small integer for i32", .. }
+            CannotParseNum{ reason: "too big integer for u32", .. }
         );
+        // uint32_max + 1
         assert_error!(
-            r#"i32.const 0x99999999"#,
+            r#"i32.const 0x100000000"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too large or small integer for i32", .. }
+            CannotParseNum{ reason: "too big integer for u32", .. }
         );
         assert_error!(
             r#"i32.const -0x80000001"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too large or small integer for i32", .. }
+            CannotParseNum{ reason: "too small integer for i32", .. }
         );
         assert_error!(
             r#"i32.const -0x99999999"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too large or small integer for i32", .. }
+            CannotParseNum{ reason: "too small integer for i32", .. }
         );
 
         assert_insn!(r#"i64.const 0"#, [I64Const(0)]);
@@ -4215,6 +4229,18 @@ mod tests {
             r#"i64.const -0x8000000000000000"#, // INT64_MIN
             [I64Const(-0x8000000000000000)]
         );
+        assert_insn!(
+            r#"i64.const 0x8000000000000000"#, // INT64_MAX + 1
+            [I64Const(-9223372036854775808)]
+        );
+        assert_insn!(
+            r#"i64.const 0xffffffffffffffff"#, // UINT64_MAX
+            [I64Const(-1)]
+        );
+        assert_insn!(
+            r#"i64.const 18446744073709551615"#, // UINT64_MAX
+            [I64Const(-1)]
+        );
 
         assert_error!(
             r#"i64.const 0.123"#,
@@ -4222,24 +4248,24 @@ mod tests {
             UnexpectedToken{ expected: "integer for i64.const operand", .. }
         );
         assert_error!(
-            r#"i64.const 0x8000000000000000"#,
+            r#"i64.const 0x10000000000000000"#, // UINT64_MAX + 1
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too large or small integer for i64", .. }
+            CannotParseNum{ reason: "too big integer for u64", .. }
         );
         assert_error!(
-            r#"i64.const 0x9999999999999999"#,
+            r#"i64.const 18446744073709551616"#, // UINT64_MAX + 1
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too large or small integer for i64", .. }
+            CannotParseNum{ reason: "too big integer for u64", .. }
         );
         assert_error!(
             r#"i64.const -0x8000000000000001"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too large or small integer for i64", .. }
+            CannotParseNum{ reason: "too small integer for i64", .. }
         );
         assert_error!(
             r#"i64.const -0x9999999999999999"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too large or small integer for i64", .. }
+            CannotParseNum{ reason: "too small integer for i64", .. }
         );
 
         assert_insn!(r#"f32.const 42"#, [F32Const(f)] if *f == 42.0);
