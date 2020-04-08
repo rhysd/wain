@@ -1360,64 +1360,55 @@ impl<'s> Parse<'s> for Func<'s> {
 
         let id = parser.maybe_ident("identifier for func field")?;
         let idx = parser.ctx.func_indices.new_idx(id, start)?;
-        let func = match parser
-            .peek_fold_start("'import', 'export' or typeuse in func field")?
-            .0
-        {
-            Some("import") => {
-                // `(func $id (import "m" "n") {typeuse})` is a syntax sugar of
-                // `(import "m" "n" (func $id {typeuse}))`
-                parser.opening_paren("import in func")?;
-                parser.eat_token(); // Eat 'import' keyword
-                let import = parser.parse()?;
-                parser.closing_paren("import in func")?;
-                let ty = parser.parse()?;
-                Func {
-                    start,
-                    id,
-                    ty,
-                    kind: FuncKind::Import(import),
+        loop {
+            match parser
+                .peek_fold_start("'import', 'export' or typeuse in func field")?
+                .0
+            {
+                Some("import") => {
+                    // `(func $id (import "m" "n") {typeuse})` is a syntax sugar of
+                    // `(import "m" "n" (func $id {typeuse}))`
+                    parser.opening_paren("import in func")?;
+                    parser.eat_token(); // Eat 'import' keyword
+                    let import = parser.parse()?;
+                    parser.closing_paren("import in func")?;
+                    let ty = parser.parse()?;
+                    parser.closing_paren("func")?;
+                    return Ok(Func {
+                        start,
+                        id,
+                        ty,
+                        kind: FuncKind::Import(import),
+                    });
+                }
+                Some("export") => {
+                    // `(func $id (export "n") {typeuse})` is a syntax sugar of
+                    // `(export "n" (func $id)) (func $id {typeuse})`
+                    let export_start = parser.opening_paren("export in func")?;
+                    parser.eat_token(); // Eat 'export' keyword
+                    let name = parser.parse()?;
+                    parser.closing_paren("export in func")?;
+                    parser.ctx.exports.push(Export {
+                        start: export_start,
+                        name,
+                        kind: ExportKind::Func,
+                        idx: Index::Num(idx),
+                    });
+                }
+                _ => {
+                    let ty = parser.parse()?;
+                    let locals = parser.parse()?;
+                    let body = parser.parse()?;
+                    parser.closing_paren("func")?;
+                    return Ok(Func {
+                        start,
+                        id,
+                        ty,
+                        kind: FuncKind::Body { locals, body },
+                    });
                 }
             }
-            Some("export") => {
-                // `(func $id (export "n") {typeuse})` is a syntax sugar of
-                // `(export "n" (func $id)) (func $id {typeuse})`
-                let export_start = parser.opening_paren("export in func")?;
-                parser.eat_token(); // Eat 'export' keyword
-                let name = parser.parse()?;
-                parser.closing_paren("export in func")?;
-                parser.ctx.exports.push(Export {
-                    start: export_start,
-                    name,
-                    kind: ExportKind::Func,
-                    idx: Index::Num(idx),
-                });
-
-                let ty = parser.parse()?;
-                let locals = parser.parse()?;
-                let body = parser.parse()?;
-                Func {
-                    start,
-                    id,
-                    ty,
-                    kind: FuncKind::Body { locals, body },
-                }
-            }
-            _ => {
-                let ty = parser.parse()?;
-                let locals = parser.parse()?;
-                let body = parser.parse()?;
-                Func {
-                    start,
-                    id,
-                    ty,
-                    kind: FuncKind::Body { locals, body },
-                }
-            }
-        };
-
-        parser.closing_paren("func")?;
-        Ok(func)
+        }
     }
 }
 
@@ -2905,6 +2896,7 @@ mod tests {
                 (result i32)
                 (result i32))
         "#, FuncType<'_>, FuncType{ params, results, .. } if params.len() == 2 && results.len() == 2);
+        // Abbreviation
 
         assert_error!(r#"func"#, FuncType<'_>, MissingParen{ paren: '(', .. });
         assert_error!(r#"(type"#, FuncType<'_>, UnexpectedToken{ expected: "'func' keyword", .. });
@@ -3680,6 +3672,65 @@ mod tests {
                 ..
             } if params.is_empty() && results[0].ty == ValType::I32 && locals.is_empty()
         );
+        // Multiple exports
+        let parser = assert_parse!(
+            r#"(func (export "a") (export "b") (export "c"))"#,
+            Func<'_>,
+            Func {
+                ..
+            }
+        );
+        assert!(matches!(parser.ctx.exports.as_slice(), [
+            Export {
+                name: Name(n1),
+                kind: ExportKind::Func,
+                idx: Index::Num(0),
+                ..
+            },
+            Export {
+                name: Name(n2),
+                kind: ExportKind::Func,
+                idx: Index::Num(0),
+                ..
+            },
+            Export {
+                name: Name(n3),
+                kind: ExportKind::Func,
+                idx: Index::Num(0),
+                ..
+            },
+        ] if n1 == "a" && n2 == "b" && n3 == "c"));
+        let parser = assert_parse!(
+            r#"(func $f (export "a") (export "b") (type 0) (local i32 f64) (i32.const 10))"#,
+            Func<'_>,
+            Func {
+                id: Some("$f"),
+                ty: TypeUse {
+                    idx: Index::Num(0),
+                    ..
+                },
+                kind: FuncKind::Body {
+                    locals,
+                    body,
+                },
+                ..
+            }
+            if locals.len() == 2 && body.len() == 1
+        );
+        assert!(matches!(parser.ctx.exports.as_slice(), [
+            Export {
+                name: Name(n1),
+                kind: ExportKind::Func,
+                idx: Index::Num(0),
+                ..
+            },
+            Export {
+                name: Name(n2),
+                kind: ExportKind::Func,
+                idx: Index::Num(0),
+                ..
+            },
+        ] if n1 == "a" && n2 == "b"));
     }
 
     macro_rules! assert_insn {
