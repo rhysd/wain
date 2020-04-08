@@ -23,7 +23,7 @@ jobs:
           RUST_BACKTRACE: 1
         run: cargo test --color always --all
       - name: Build sources
-        run: cargo build --color always
+        run: cargo build --color always --all
       - name: Run hello.wasm for sanity test
         run: cargo run -- examples/hello/hello.wasm
       - name: Run hello.wat for sanity test
@@ -39,7 +39,7 @@ jobs:
           cargo fmt --version
           cargo clippy --version
       - run: cargo fmt -- --color always --check
-      - run: cargo clippy --color always -- -D warnings
+      - run: cargo clippy --color always --all -- -D warnings
   examples:
     name: examples
     runs-on: ubuntu-latest

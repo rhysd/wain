@@ -522,12 +522,11 @@ impl<'s> Parse<'s> for AssertMalformed {
 impl<'s> Parse<'s> for ast::Root<'s, TextSource<'s>> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         // Check it starts with (module
-        let msg = "starting with '(module' for module argument";
         match parser.peek()? {
             (Some(Token::LParen), Some(Token::Keyword("module"))) => { /* ok */ }
             (Some(Token::LParen), t) | (t, _) => {
                 let t = t.cloned();
-                return parser.unexpected_token(t, msg);
+                return parser.unexpected_token(t, "starting with '(module' for module argument");
             }
         }
 
@@ -1056,19 +1055,21 @@ mod tests {
 
     #[test]
     fn official_test_suites() {
-        // /path/to/wain/spec-test
         let mut dir = env::current_dir().unwrap();
         dir.push("wasm-testsuite");
 
-        for entry in fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            if let Some(file) = path.file_name() {
-                if file.to_str().unwrap().ends_with(".wast") {
-                    let content = fs::read_to_string(&path).unwrap();
-                    match Parser::new(&content).parse::<TestSuite>() {
-                        Err(err) => panic!("parse error at {:?}: {}", path, err),
-                        Ok(testsuite) => {
-                            assert!(testsuite.test_cases.len() > 0);
+        // When submodule is not cloned, skip this test case
+        if let Ok(dirs) = fs::read_dir(dir) {
+            for entry in dirs {
+                let path = entry.unwrap().path();
+                if let Some(file) = path.file_name() {
+                    if file.to_str().unwrap().ends_with(".wast") {
+                        let content = fs::read_to_string(&path).unwrap();
+                        match Parser::new(&content).parse::<TestSuite>() {
+                            Err(err) => panic!("parse error at {:?}: {}", path, err),
+                            Ok(testsuite) => {
+                                assert!(testsuite.test_cases.len() > 0);
+                            }
                         }
                     }
                 }
