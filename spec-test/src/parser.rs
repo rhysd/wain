@@ -225,7 +225,7 @@ impl<'s> Parser<'s> {
     }
 }
 
-trait Parse<'source>: Sized {
+pub trait Parse<'source>: Sized {
     fn parse(parser: &mut Parser<'source>) -> Result<'source, Self>;
 }
 
@@ -614,7 +614,7 @@ impl<'s> Parse<'s> for Directive<'s> {
             Some(Token::Keyword("invoke")) => Ok(Directive::Invoke(parser.parse()?)),
             t => {
                 let t = t.cloned();
-                return parser.unexpected_token(t, "keyword for WAST directive");
+                parser.unexpected_token(t, "keyword for WAST directive")
             }
         }
     }

@@ -11,7 +11,7 @@ pub use parser::Parser;
 use source::BinarySource;
 use wain_ast::Root;
 
-pub fn parse<'s>(input: &'s [u8]) -> Result<'s, Root<'s, BinarySource<'s>>> {
+pub fn parse(input: &[u8]) -> Result<'_, Root<'_, BinarySource<'_>>> {
     let mut parser = Parser::new(input);
     parser.parse()
 }

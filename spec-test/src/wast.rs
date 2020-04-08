@@ -34,6 +34,8 @@ pub struct TestSuite<'source> {
     pub test_cases: Vec<TestCase<'source>>,
 }
 
+// Allow Inline variant makes this enum large since this code is used only in tests
+#[allow(clippy::large_enum_variant)]
 pub enum TestModule<'source> {
     Quote(String),
     Binary(Vec<u8>),
@@ -45,6 +47,8 @@ pub struct TestCase<'source> {
     pub directives: Vec<Directive<'source>>,
 }
 
+// Allow AssertUnlinkable variant makes this enum large since this code is used only in tests
+#[allow(clippy::large_enum_variant)]
 pub enum Directive<'source> {
     AssertReturn(AssertReturn),
     AssertTrap(AssertTrap),
