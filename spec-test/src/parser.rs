@@ -551,12 +551,23 @@ impl<'s> Parse<'s> for AssertReturn<'s> {
 impl<'s> Parse<'s> for AssertTrap<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.parse_start("assert_trap")?;
-        let invoke = parser.parse()?;
+        let pred = match parser.peek()? {
+            (Some(Token::LParen), Some(Token::Keyword("invoke"))) => {
+                TrapPredicate::Invoke(parser.parse()?)
+            }
+            (Some(Token::LParen), Some(Token::Keyword("module"))) => {
+                TrapPredicate::Module(parser.parse()?)
+            }
+            (Some(Token::LParen), t) | (t, _) => {
+                let t = t.cloned();
+                return parser.unexpected_token(t, "'invoke' or 'module' for assert_trap");
+            }
+        };
         let expected = parser.parse()?;
         expect!(parser, Token::RParen);
         Ok(AssertTrap {
             start,
-            invoke,
+            pred,
             expected,
         })
     }
@@ -577,7 +588,7 @@ impl<'s> Parse<'s> for AssertMalformed {
     }
 }
 
-// inline module in assert_invalid and assert_unlinkable
+// inline module in assert_invalid, assert_trap and assert_unlinkable
 impl<'s> Parse<'s> for ast::Root<'s, TextSource<'s>> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         // Check it starts with (module
@@ -1001,10 +1012,38 @@ mod tests {
         .parse()
         .unwrap();
 
-        assert_eq!(a.invoke.name, "32_good5");
-        assert_eq!(a.invoke.args.len(), 1);
-        assert_eq!(a.invoke.args[0], Const::I32(65508));
         assert_eq!(a.expected, "out of bounds memory access");
+        match a.pred {
+            TrapPredicate::Invoke(invoke) => {
+                assert_eq!(invoke.name, "32_good5");
+                assert_eq!(invoke.args.len(), 1);
+                assert_eq!(invoke.args[0], Const::I32(65508));
+            }
+            _ => panic!("expected invoke"),
+        }
+
+        let a: AssertTrap = Parser::new(
+            r#"
+            (assert_trap
+              (module $hello
+                (import "Ms" "memory" (memory 1))
+                (func $main (unreachable))
+                (start $main)
+              )
+              "unreachable"
+            )
+            "#,
+        )
+        .parse()
+        .unwrap();
+
+        assert_eq!(a.expected, "unreachable");
+        match a.pred {
+            TrapPredicate::Module(root) => {
+                assert_eq!(root.module.id, Some("$hello"));
+            }
+            _ => panic!("expected invoke"),
+        }
     }
 
     #[test]

@@ -88,9 +88,14 @@ pub enum AssertReturn<'source> {
 }
 
 // (assert_trap (invoke {name} {constant}*) {string})
+// (assert_trap (module ...) {string})
+pub enum TrapPredicate<'source> {
+    Invoke(Invoke<'source>),
+    Module(ast::Root<'source, TextSource<'source>>),
+}
 pub struct AssertTrap<'source> {
     pub start: usize,
-    pub invoke: Invoke<'source>,
+    pub pred: TrapPredicate<'source>,
     pub expected: String,
 }
 
