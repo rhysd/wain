@@ -38,7 +38,7 @@ pub struct Parser<'source> {
     source: &'source str,
     tokens: LookAhead<Lexer<'source>>,
     current_pos: usize,
-    prev_error: Option<Box<Error<'source>>>,
+    ignored_error: Option<Box<Error<'source>>>,
 }
 
 impl<'s> Parser<'s> {
@@ -47,7 +47,7 @@ impl<'s> Parser<'s> {
             source,
             tokens: LookAhead::new(Lexer::new(source)),
             current_pos: 0,
-            prev_error: None,
+            ignored_error: None,
         }
     }
 
@@ -105,9 +105,9 @@ impl<'s> Parser<'s> {
 
     fn error(&mut self, kind: ErrorKind<'s>) -> Box<Error<'s>> {
         let mut err = Error::new(kind, self.source, self.current_pos);
-        if let Some(mut prev) = mem::replace(&mut self.prev_error, None) {
-            prev.prev_error = None; // Do not chain all errors
-            err.prev_error = Some(prev);
+        if let Some(mut ignored) = mem::replace(&mut self.ignored_error, None) {
+            ignored.prev_error = None; // Do not chain all errors
+            err.prev_error = Some(ignored);
         }
         err
     }
@@ -642,6 +642,29 @@ impl<'s> Parse<'s> for Directive<'s> {
             }
             Some(Token::Keyword("register")) => Ok(Directive::Register(parser.parse()?)),
             Some(Token::Keyword("invoke")) => Ok(Directive::Invoke(parser.parse()?)),
+            Some(Token::Keyword("module")) => {
+                // `parser.parse::<EmbeddedModule>()` eats tokens. When reaching 'Err(err) => { ... }'
+                // clause, `parser`'s lexer is no longer available. To parse from start, remember the
+                // lexer before calling `parser.parse::<EmbeddedModule>() by clone.
+                // This is mandatory since Wasm parser is LL(1). To avoid the clone, LL(2) is necessary.
+                let prev_lexer = parser.clone_lexer();
+
+                match parser.parse::<EmbeddedModule>() {
+                    Ok(module) => match module.embedded {
+                        Embedded::Quote(text) => Ok(Directive::QuoteModule(text)),
+                        Embedded::Binary(bin) => Ok(Directive::BinaryModule(bin)),
+                    },
+                    Err(err) => {
+                        parser.ignored_error = Some(err);
+                        // Here parser.lexer already ate some tokens. To parser from
+                        let mut wat_parser = WatParser::with_lexer(prev_lexer);
+                        let parsed = wat_parser.parse()?; // text -> wat
+                        let root = wat2wasm(parsed, wat_parser.source())?; // wat -> ast
+                        parser.replace_lexer(wat_parser.into_lexer());
+                        Ok(Directive::InlineModule(root))
+                    }
+                }
+            }
             t => {
                 let t = t.cloned();
                 parser.unexpected_token(t, "keyword for WAST directive")
@@ -650,52 +673,13 @@ impl<'s> Parse<'s> for Directive<'s> {
     }
 }
 
-impl<'s> Parse<'s> for TestCase<'s> {
+impl<'s> Parse<'s> for Root<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        // `parser.parse::<EmbeddedModule>()` eats tokens. When reaching 'Err(err) => { ... }' clause,
-        // `parser`'s lexer is no longer available. To parse from start, remember the lexer before
-        // calling `parser.parse::<EmbeddedModule>() by clone.
-        // This is mandatory since Wasm parser is LL(1). To avoid the clone, LL(2) is necessary.
-        let prev_lexer = parser.clone_lexer();
-
-        let module = match parser.parse::<EmbeddedModule>() {
-            Ok(module) => match module.embedded {
-                Embedded::Quote(text) => TestModule::Quote(text),
-                Embedded::Binary(bin) => TestModule::Binary(bin),
-            },
-            Err(err) => {
-                parser.prev_error = Some(err);
-                // Here parser.lexer already ate some tokens. To parser from
-                let mut wat_parser = WatParser::with_lexer(prev_lexer);
-                let parsed = wat_parser.parse()?; // text -> wat
-                let root = wat2wasm(parsed, wat_parser.source())?; // wat -> ast
-                parser.replace_lexer(wat_parser.into_lexer());
-                TestModule::Inline(root)
-            }
-        };
-
         let mut directives = vec![];
-        loop {
-            match parser.parse::<Directive>() {
-                Ok(directive) => directives.push(directive),
-                Err(err) => {
-                    parser.prev_error = Some(err);
-                    break;
-                }
-            }
-        }
-
-        Ok(TestCase { module, directives })
-    }
-}
-
-impl<'s> Parse<'s> for TestSuite<'s> {
-    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        let mut test_cases = vec![];
         while !parser.is_done()? {
-            test_cases.push(parser.parse()?);
+            directives.push(parser.parse()?);
         }
-        Ok(TestSuite { test_cases })
+        Ok(Root { directives })
     }
 }
 
@@ -1067,28 +1051,38 @@ mod tests {
     }
 
     #[test]
-    fn test_case() {
-        let tc: TestCase = Parser::new(
+    fn directive() {
+        let d: Directive = Parser::new(
             r#"
             (module
               (func (export "br") (block (br 0)))
               (func (export "br_if") (block (br_if 0 (i32.const 1))))
               (func (export "br_table") (block (br_table 0 (i32.const 0))))
             )
-            (assert_return (invoke "br"))
-            (assert_return (invoke "br_if"))
-            (assert_return (invoke "br_table"))
             "#,
         )
         .parse()
         .unwrap();
-        assert!(matches!(tc.module, TestModule::Inline(_)));
-        assert_eq!(tc.directives.len(), 3);
-        for i in 0..3 {
-            assert!(matches!(tc.directives[i], Directive::AssertReturn(_)));
-        }
+        assert!(matches!(d, Directive::InlineModule(_)));
 
-        let tc: TestCase = Parser::new(
+        let d: Directive = Parser::new(r#"(assert_return (invoke "br"))"#)
+            .parse()
+            .unwrap();
+        assert!(matches!(d, Directive::AssertReturn(_)));
+
+        let d: Directive = Parser::new(
+            r#"
+            (assert_invalid
+              (module (memory 0) (func (drop (i32.load8_s align=2 (i32.const 0)))))
+              "alignment must not be larger than natural"
+            )
+            "#,
+        )
+        .parse()
+        .unwrap();
+        assert!(matches!(d, Directive::AssertInvalid(_)));
+
+        let d: Directive = Parser::new(
             r#"
             (module binary "\00asm\01\00\00\00")
             (assert_return (invoke "br"))
@@ -1096,14 +1090,17 @@ mod tests {
         )
         .parse()
         .unwrap();
-        assert!(matches!(tc.module, TestModule::Binary(_)));
-        assert_eq!(tc.directives.len(), 1);
-        assert!(matches!(tc.directives[0], Directive::AssertReturn(_)));
+        assert!(matches!(d, Directive::BinaryModule(_)));
+
+        let d: Directive = Parser::new(r#"(module quote "(memory $foo 1)" "(memory $foo 1)")"#)
+            .parse()
+            .unwrap();
+        assert!(matches!(d, Directive::QuoteModule(_)));
     }
 
     #[test]
-    fn test_suite() {
-        let ts: TestSuite = Parser::new(
+    fn root() {
+        let root: Root = Parser::new(
             r#"
             (module
               (func (export "br") (block (br 0)))
@@ -1130,24 +1127,20 @@ mod tests {
         .parse()
         .unwrap();
 
-        assert_eq!(ts.test_cases.len(), 4);
+        assert_eq!(root.directives.len(), 11);
 
-        let t = &ts.test_cases[0];
-        assert!(matches!(t.module, TestModule::Inline(_)));
-        assert_eq!(t.directives.len(), 3);
-        for i in 0..3 {
-            assert!(matches!(t.directives[i], Directive::AssertReturn(_)));
-        }
-
-        assert!(matches!(ts.test_cases[1].module, TestModule::Binary(_)));
-        assert!(matches!(ts.test_cases[2].module, TestModule::Binary(_)));
-
-        let t = &ts.test_cases[3];
-        assert!(matches!(t.module, TestModule::Inline(_)));
-        assert_eq!(t.directives.len(), 4);
-        for i in 0..4 {
-            assert!(matches!(t.directives[i], Directive::AssertReturn(_)));
-        }
+        let d = root.directives;
+        assert!(matches!(d[0], Directive::InlineModule(_)));
+        assert!(matches!(d[1], Directive::AssertReturn(_)));
+        assert!(matches!(d[2], Directive::AssertReturn(_)));
+        assert!(matches!(d[3], Directive::AssertReturn(_)));
+        assert!(matches!(d[4], Directive::BinaryModule(_)));
+        assert!(matches!(d[5], Directive::BinaryModule(_)));
+        assert!(matches!(d[6], Directive::InlineModule(_)));
+        assert!(matches!(d[7], Directive::AssertReturn(_)));
+        assert!(matches!(d[8], Directive::AssertReturn(_)));
+        assert!(matches!(d[9], Directive::AssertReturn(_)));
+        assert!(matches!(d[10], Directive::AssertReturn(_)));
     }
 
     #[test]
@@ -1163,10 +1156,10 @@ mod tests {
                 if let Some(file) = path.file_name() {
                     if file.to_str().unwrap().ends_with(".wast") {
                         let content = fs::read_to_string(&path).unwrap();
-                        match Parser::new(&content).parse::<TestSuite>() {
+                        match Parser::new(&content).parse::<Root>() {
                             Err(err) => panic!("parse error at {:?} ({}): {}", path, count, err),
-                            Ok(testsuite) => {
-                                assert!(testsuite.test_cases.len() > 0);
+                            Ok(root) => {
+                                assert!(root.directives.len() > 0);
                             }
                         }
                         count += 1;

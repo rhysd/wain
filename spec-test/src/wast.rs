@@ -30,20 +30,7 @@ pub enum Const {
     ArithmeticNan,
 }
 
-pub struct TestSuite<'source> {
-    pub test_cases: Vec<TestCase<'source>>,
-}
-
-// Allow Inline variant makes this enum large since this code is used only in tests
-#[allow(clippy::large_enum_variant)]
-pub enum TestModule<'source> {
-    Quote(String),
-    Binary(Vec<u8>),
-    Inline(ast::Root<'source, TextSource<'source>>),
-}
-
-pub struct TestCase<'source> {
-    pub module: TestModule<'source>,
+pub struct Root<'source> {
     pub directives: Vec<Directive<'source>>,
 }
 
@@ -58,6 +45,9 @@ pub enum Directive<'source> {
     AssertExhaustion(AssertExhaustion<'source>),
     Register(Register),
     Invoke(Invoke<'source>),
+    QuoteModule(String),
+    BinaryModule(Vec<u8>),
+    InlineModule(ast::Root<'source, TextSource<'source>>),
 }
 
 // (invoke {id}? {name} {constant}*)
