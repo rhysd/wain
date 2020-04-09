@@ -43,7 +43,7 @@ pub enum Directive<'source> {
     AssertInvalid(AssertInvalid<'source>),
     AssertUnlinkable(AssertUnlinkable<'source>),
     AssertExhaustion(AssertExhaustion<'source>),
-    Register(Register),
+    Register(Register<'source>),
     Invoke(Invoke<'source>),
     QuoteModule(String),
     BinaryModule(Vec<u8>),
@@ -58,10 +58,11 @@ pub struct Invoke<'source> {
     pub args: Vec<Const>,
 }
 
-// (register {name})
-pub struct Register {
+// (register {name} {id}?)
+pub struct Register<'source> {
     pub start: usize,
     pub name: String,
+    pub id: Option<&'source str>,
 }
 
 // (get {id}? {name})

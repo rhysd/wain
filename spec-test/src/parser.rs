@@ -489,12 +489,13 @@ impl<'s> Parse<'s> for Invoke<'s> {
 }
 
 // (register {name})
-impl<'s> Parse<'s> for Register {
+impl<'s> Parse<'s> for Register<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.parse_start("register")?;
         let name = parser.parse()?;
+        let id = parser.parse_maybe_id()?;
         expect!(parser, Token::RParen);
-        Ok(Register { start, name })
+        Ok(Register { start, name, id })
     }
 }
 
@@ -921,6 +922,10 @@ mod tests {
     fn register() {
         let r: Register = Parser::new(r#"(register "foo")"#).parse().unwrap();
         assert_eq!(r.name, "foo");
+        assert_eq!(r.id, None);
+        let r: Register = Parser::new(r#"(register "foo" $foo)"#).parse().unwrap();
+        assert_eq!(r.name, "foo");
+        assert_eq!(r.id, Some("$foo"));
     }
 
     #[test]
@@ -1220,18 +1225,30 @@ mod tests {
             let mut count = 1;
             for entry in dirs {
                 let path = entry.unwrap().path();
-                if let Some(file) = path.file_name() {
-                    if file.to_str().unwrap().ends_with(".wast") {
-                        let content = fs::read_to_string(&path).unwrap();
-                        match Parser::new(&content).parse::<Root>() {
-                            Err(err) => panic!("parse error at {:?} ({}): {}", path, count, err),
-                            Ok(root) => {
-                                assert!(root.directives.len() > 0);
-                            }
-                        }
-                        count += 1;
+
+                let file = if let Some(file) = path.file_name() {
+                    file
+                } else {
+                    continue;
+                };
+
+                let file = file.to_str().unwrap();
+                if !file.ends_with(".wast") {
+                    continue;
+                }
+
+                if file == "inline-module.wast" {
+                    continue; // Special case
+                }
+
+                let content = fs::read_to_string(&path).unwrap();
+                match Parser::new(&content).parse::<Root>() {
+                    Err(err) => panic!("parse error at {:?} ({}): {}", path, count, err),
+                    Ok(root) => {
+                        assert!(root.directives.len() > 0);
                     }
                 }
+                count += 1;
             }
         }
     }
