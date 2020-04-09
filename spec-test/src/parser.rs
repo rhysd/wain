@@ -498,24 +498,51 @@ impl<'s> Parse<'s> for Register {
     }
 }
 
+// (get {id}? {name})
+impl<'s> Parse<'s> for GetGlobal<'s> {
+    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
+        let start = parser.parse_start("get")?;
+        let id = parser.parse_maybe_id()?;
+        let name = parser.parse()?;
+        expect!(parser, Token::RParen);
+        Ok(GetGlobal { start, id, name })
+    }
+}
+
 // (assert_return (invoke {name} {constant}*) {constant}?)
 impl<'s> Parse<'s> for AssertReturn<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.parse_start("assert_return")?;
-        let invoke = parser.parse()?;
-
-        let expected = if let (Some(Token::LParen), _) = parser.peek()? {
-            Some(parser.parse()?)
-        } else {
-            None
-        };
-
-        expect!(parser, Token::RParen);
-        Ok(AssertReturn {
-            start,
-            invoke,
-            expected,
-        })
+        match parser.peek()? {
+            (Some(Token::LParen), Some(Token::Keyword("invoke"))) => {
+                let invoke = parser.parse()?;
+                let expected = if let (Some(Token::LParen), _) = parser.peek()? {
+                    Some(parser.parse()?)
+                } else {
+                    None
+                };
+                expect!(parser, Token::RParen);
+                Ok(AssertReturn::Invoke {
+                    start,
+                    invoke,
+                    expected,
+                })
+            }
+            (Some(Token::LParen), Some(Token::Keyword("get"))) => {
+                let get = parser.parse()?;
+                let expected = parser.parse()?;
+                expect!(parser, Token::RParen);
+                Ok(AssertReturn::Global {
+                    start,
+                    get,
+                    expected,
+                })
+            }
+            (Some(Token::LParen), t) | (t, _) => {
+                let t = t.cloned();
+                parser.unexpected_token(t, "'(invoke' or '(get' for assert_return")
+            }
+        }
     }
 }
 
@@ -907,18 +934,58 @@ mod tests {
         .parse()
         .unwrap();
 
-        assert_eq!(a.invoke.name, "8u_good1");
-        assert_eq!(a.invoke.args.len(), 1);
-        assert_eq!(a.invoke.args[0], Const::I32(0));
-        assert_eq!(a.expected, Some(Const::I32(97)));
+        match a {
+            AssertReturn::Invoke {
+                invoke, expected, ..
+            } => {
+                assert_eq!(invoke.name, "8u_good1");
+                assert_eq!(invoke.args.len(), 1);
+                assert_eq!(invoke.args[0], Const::I32(0));
+                assert_eq!(expected, Some(Const::I32(97)));
+            }
+            _ => panic!("expected invoke"),
+        }
 
         let a: AssertReturn = Parser::new(r#"(assert_return (invoke "type-i32"))"#)
             .parse()
             .unwrap();
 
-        assert_eq!(a.invoke.name, "type-i32");
-        assert!(a.invoke.args.is_empty());
-        assert_eq!(a.expected, None);
+        match a {
+            AssertReturn::Invoke {
+                invoke, expected, ..
+            } => {
+                assert_eq!(invoke.name, "type-i32");
+                assert!(invoke.args.is_empty());
+                assert_eq!(expected, None);
+            }
+            _ => panic!("expected invoke"),
+        }
+
+        let a: AssertReturn = Parser::new(r#"(assert_return (get "e") (i32.const 42))"#)
+            .parse()
+            .unwrap();
+
+        match a {
+            AssertReturn::Global { get, expected, .. } => {
+                assert_eq!(get.id, None);
+                assert_eq!(get.name, "e");
+                assert_eq!(expected, Const::I32(42));
+            }
+            _ => panic!("expected global"),
+        }
+
+        let a: AssertReturn = Parser::new(r#"(assert_return (get $Global "e") (i32.const 42))"#)
+            .parse()
+            .unwrap();
+
+        match a {
+            AssertReturn::Global { get, expected, .. } => {
+                assert_eq!(get.id, Some("$Global"));
+                assert_eq!(get.name, "e");
+                assert_eq!(expected, Const::I32(42));
+            }
+            _ => panic!("expected global"),
+        }
     }
 
     #[test]

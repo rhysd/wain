@@ -64,11 +64,26 @@ pub struct Register {
     pub name: String,
 }
 
-// (assert_return (invoke {name} {constant}*) {constant}?)
-pub struct AssertReturn<'source> {
+// (get {id}? {name})
+pub struct GetGlobal<'source> {
     pub start: usize,
-    pub invoke: Invoke<'source>,
-    pub expected: Option<Const>,
+    pub id: Option<&'source str>,
+    pub name: String,
+}
+
+// (assert_return (invoke {name} {constant}*) {constant}?)
+// (assert_return (get {id}? {name}) {constant})
+pub enum AssertReturn<'source> {
+    Invoke {
+        start: usize,
+        invoke: Invoke<'source>,
+        expected: Option<Const>,
+    },
+    Global {
+        start: usize,
+        get: GetGlobal<'source>,
+        expected: Const,
+    },
 }
 
 // (assert_trap (invoke {name} {constant}*) {string})
