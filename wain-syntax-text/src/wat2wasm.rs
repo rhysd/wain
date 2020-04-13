@@ -127,17 +127,11 @@ impl<'s> LabelStack<'s> {
             }
         };
 
-        if let Some(idx) = self.find(label) {
-            return Err(TransformError::new(
-                TransformErrorKind::IdAlreadyDefined {
-                    id: label,
-                    idx,
-                    what: "label",
-                },
-                offset,
-                self.source,
-            ));
-        }
+        // Note: Labels can be redefined.
+        //
+        //   (block $l (result i32)
+        //     (block $l (result i32) (i32.const 2))
+        //   )
 
         self.stack.push(Some(label));
         Ok(())
