@@ -1788,16 +1788,16 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                                 Sign::Plus,
                                 offset,
                             )?;
-                            if payload_u < 0x40_0000 || 0x80_0000 <= payload_u {
+                            if payload_u == 0 || 0x80_0000 <= payload_u {
                                 return self.parser.cannot_parse_num(
-                                    "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23",
+                                    "payload of NaN for f32 must be in range of 1 <= payload < 2^23",
                                     payload,
                                     NumBase::Hex,
                                     Sign::Plus,
                                     offset,
                                 );
                             }
-                            // NaN boxing. 2^22 <= payload_u < 2^23 and floating point number is in IEEE754 format.
+                            // NaN boxing. 1 <= payload_u < 2^23 and floating point number is in IEEE754 format.
                             // This will encode the payload into fraction of NaN.
                             //   0x{sign}11111111{payload}
                             let sign = match sign {
@@ -1881,16 +1881,16 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                                 Sign::Plus,
                                 offset,
                             )?;
-                            if payload_u < 0x8_0000_0000_0000 || 0x10_0000_0000_0000 <= payload_u {
+                            if payload_u == 0 || 0x10_0000_0000_0000 <= payload_u {
                                 return self.parser.cannot_parse_num(
-                                    "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52",
+                                    "payload of NaN for f64 must be in range of 1 <= payload < 2^52",
                                     payload,
                                     NumBase::Hex,
                                     Sign::Plus,
                                     offset,
                                 );
                             }
-                            // NaN boxing. 2^51 <= payload_u < 2^52 and floating point number is in IEEE754 format.
+                            // NaN boxing. 1 <= payload_u < 2^52 and floating point number is in IEEE754 format.
                             // This will encode the payload into fraction of NaN.
                             //   0x{sign}11111111111{payload}
                             let sign = match sign {
@@ -4344,19 +4344,20 @@ mod tests {
         assert_insn!(r#"f32.const inf"#, [F32Const(f)] if *f == f32::INFINITY);
         assert_insn!(r#"f32.const nan"#, [F32Const(f)] if f.is_nan());
         assert_insn!(r#"f32.const nan:0x401234"#, [F32Const(f)] if f.is_nan());
+        assert_insn!(r#"f32.const nan:0x1"#, [F32Const(f)] if f.is_nan());
         assert_insn!(r#"f32.const -inf"#, [F32Const(f)] if *f == f32::NEG_INFINITY);
         assert_insn!(r#"f32.const -nan"#, [F32Const(f)] if f.is_nan());
         assert_insn!(r#"f32.const -nan:0x401234"#, [F32Const(f)] if f.is_nan());
 
         assert_error!(
-            r#"f32.const nan:0x1234"#,
+            r#"f32.const nan:0x0"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23", .. }
+            CannotParseNum{ reason: "payload of NaN for f32 must be in range of 1 <= payload < 2^23", .. }
         );
         assert_error!(
             r#"f32.const nan:0x100_0000"#, // Larger than 0x80_0000
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "payload of NaN for f32 must be in range of 2^22 <= payload < 2^23", .. }
+            CannotParseNum{ reason: "payload of NaN for f32 must be in range of 1 <= payload < 2^23", .. }
         );
 
         assert_insn!(r#"f64.const 42"#, [F64Const(f)] if *f == 42.0);
@@ -4381,19 +4382,20 @@ mod tests {
         assert_insn!(r#"f64.const inf"#, [F64Const(f)] if *f == f64::INFINITY);
         assert_insn!(r#"f64.const nan"#, [F64Const(f)] if f.is_nan());
         assert_insn!(r#"f64.const nan:0x8_0000_0000_1245"#, [F64Const(f)] if f.is_nan());
+        assert_insn!(r#"f64.const nan:0x1"#, [F64Const(f)] if f.is_nan());
         assert_insn!(r#"f64.const -inf"#, [F64Const(f)] if *f == f64::NEG_INFINITY);
         assert_insn!(r#"f64.const -nan"#, [F64Const(f)] if f.is_nan());
         assert_insn!(r#"f64.const -nan:0x8_0000_0000_1245"#, [F64Const(f)] if f.is_nan());
 
         assert_error!(
-            r#"f64.const nan:0x1234"#,
+            r#"f64.const nan:0x0"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52", .. }
+            CannotParseNum{ reason: "payload of NaN for f64 must be in range of 1 <= payload < 2^52", .. }
         );
         assert_error!(
             r#"f64.const nan:0x20_0000_0000_0000"#, // Larger than 0x10_0000_0000_0000
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "payload of NaN for f64 must be in range of 2^51 <= payload < 2^52", .. }
+            CannotParseNum{ reason: "payload of NaN for f64 must be in range of 1 <= payload < 2^52", .. }
         );
     }
 
