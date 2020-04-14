@@ -1,4 +1,4 @@
-use crate::error::{Error, ErrorKind, Result};
+use crate::error::{Error, ParseKind, Result};
 use crate::wast::*;
 use std::borrow::Cow;
 use std::char;
@@ -103,8 +103,8 @@ impl<'s> Parser<'s> {
         Ok((t1, t2))
     }
 
-    fn error(&mut self, kind: ErrorKind<'s>) -> Box<Error<'s>> {
-        let mut err = Error::new(kind, self.source, self.current_pos);
+    fn error(&mut self, kind: ParseKind<'s>) -> Box<Error<'s>> {
+        let mut err = Error::parse_error(kind, self.source, self.current_pos);
         if let Some(mut ignored) = mem::replace(&mut self.ignored_error, None) {
             ignored.prev_error = None; // Do not chain all errors
             err.prev_error = Some(ignored);
@@ -112,12 +112,12 @@ impl<'s> Parser<'s> {
         err
     }
 
-    fn fail<T>(&mut self, kind: ErrorKind<'s>) -> Result<'s, T> {
+    fn fail<T>(&mut self, kind: ParseKind<'s>) -> Result<'s, T> {
         Err(self.error(kind))
     }
 
     fn unexpected<T, E: Into<Cow<'static, str>>>(&mut self, expected: E) -> Result<'s, T> {
-        self.fail(ErrorKind::Unexpected {
+        self.fail(ParseKind::Unexpected {
             expected: expected.into(),
             token: None,
         })
@@ -129,7 +129,7 @@ impl<'s> Parser<'s> {
         expected: E,
     ) -> Result<'s, T> {
         let expected = expected.into();
-        self.fail(ErrorKind::Unexpected { expected, token })
+        self.fail(ParseKind::Unexpected { expected, token })
     }
 
     pub fn parse<P: Parse<'s>>(&mut self) -> Result<'s, P> {
@@ -161,7 +161,7 @@ impl<'s> Parser<'s> {
                                         Some((i, '}')) => break i,
                                         Some(_) => continue,
                                         None => {
-                                            return self.fail(ErrorKind::InvalidStringLiteral {
+                                            return self.fail(ParseKind::InvalidStringLiteral {
                                                 lit: s,
                                                 reason: "invalid \\u{xxxx} format",
                                             });
@@ -175,14 +175,14 @@ impl<'s> Parser<'s> {
                                     let mut b = [0; 4];
                                     buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
                                 } else {
-                                    return self.fail(ErrorKind::InvalidStringLiteral {
+                                    return self.fail(ParseKind::InvalidStringLiteral {
                                         lit: s,
                                         reason: "invalid code point in \\u{xxxx}",
                                     });
                                 }
                             }
                             _ => {
-                                return self.fail(ErrorKind::InvalidStringLiteral {
+                                return self.fail(ParseKind::InvalidStringLiteral {
                                     lit: s,
                                     reason: "invalid \\u{xxxx} format",
                                 })
@@ -197,7 +197,7 @@ impl<'s> Parser<'s> {
                                 buf.push((hi * 16 + lo) as u8);
                             }
                             _ => {
-                                return self.fail(ErrorKind::InvalidStringLiteral {
+                                return self.fail(ParseKind::InvalidStringLiteral {
                                     lit: s,
                                     reason: "invalid \\XX format",
                                 })
@@ -214,7 +214,7 @@ impl<'s> Parser<'s> {
         let bytes = self.parse_escaped(s)?;
         match String::from_utf8(bytes) {
             Ok(s) => Ok(s),
-            Err(e) => self.fail(ErrorKind::Utf8Error(e)),
+            Err(e) => self.fail(ParseKind::Utf8Error(e)),
         }
     }
 
@@ -327,11 +327,11 @@ impl<'s> Parse<'s> for Const {
                         Ok(u) if sign == Sign::Plus => Ok(u as $int),
                         Ok(u) if u == <$int>::max_value() as $uint + 1 => Ok(<$int>::min_value()), // u as $int causes overflow
                         Ok(u) if u <= <$int>::max_value() as $uint => Ok(-(u as $int)),
-                        Ok(u) => parser.fail(ErrorKind::TooSmallInt {
+                        Ok(u) => parser.fail(ParseKind::TooSmallInt {
                             ty: stringify!($int),
                             digits: u as u64,
                         }),
-                        Err(e) => parser.fail(ErrorKind::InvalidInt {
+                        Err(e) => parser.fail(ParseKind::InvalidInt {
                             ty: stringify!($int),
                             err: e,
                         }),
@@ -362,7 +362,7 @@ impl<'s> Parse<'s> for Const {
                         }
                         return match s.parse::<$ty>() {
                             Ok(f) => Ok(sign.apply(f)),
-                            Err(e) => parser.fail(ErrorKind::InvalidFloat {
+                            Err(e) => parser.fail(ParseKind::InvalidFloat {
                                 ty: stringify!($ty),
                                 err: e,
                             }),
@@ -381,7 +381,7 @@ impl<'s> Parse<'s> for Const {
                         } else if c == '_' {
                             continue;
                         } else {
-                            return parser.fail(ErrorKind::InvalidHexFloat {
+                            return parser.fail(ParseKind::InvalidHexFloat {
                                 ty: stringify!($ty),
                             });
                         }
@@ -395,7 +395,7 @@ impl<'s> Parse<'s> for Const {
                         } else if c == '_' {
                             continue;
                         } else {
-                            return parser.fail(ErrorKind::InvalidHexFloat {
+                            return parser.fail(ParseKind::InvalidHexFloat {
                                 ty: stringify!($ty),
                             });
                         }
@@ -406,7 +406,7 @@ impl<'s> Parse<'s> for Const {
                         let i = match digits.replace('_', "").parse::<i32>() {
                             Ok(i) => sign.apply(i),
                             Err(_) => {
-                                return parser.fail(ErrorKind::InvalidHexFloat {
+                                return parser.fail(ParseKind::InvalidHexFloat {
                                     ty: stringify!($ty),
                                 })
                             }

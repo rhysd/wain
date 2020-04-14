@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
+use std::path::PathBuf;
 use std::string::FromUtf8Error;
 use wain_syntax_text::lexer::{LexError, Token};
 use wain_syntax_text::parser::ParseError;
@@ -8,6 +9,10 @@ use wain_syntax_text::source::describe_position;
 use wain_syntax_text::wat2wasm::TransformError;
 
 pub enum ErrorKind<'source> {
+    Parse(ParseKind<'source>),
+}
+
+pub enum ParseKind<'source> {
     Unexpected {
         expected: Cow<'static, str>,
         token: Option<Token<'source>>,
@@ -45,65 +50,88 @@ pub struct Error<'source> {
     source: &'source str,
     kind: ErrorKind<'source>,
     pub prev_error: Option<Box<Error<'source>>>,
+    file: Option<PathBuf>,
 }
 
 impl<'s> Error<'s> {
-    pub fn new(kind: ErrorKind<'s>, source: &'s str, pos: usize) -> Box<Error<'s>> {
+    pub fn parse_error(kind: ParseKind<'s>, source: &'s str, pos: usize) -> Box<Error<'s>> {
         Box::new(Error {
             pos,
             source,
-            kind,
+            kind: ErrorKind::Parse(kind),
             prev_error: None,
+            file: None,
         })
+    }
+
+    pub fn set_file(&mut self, p: PathBuf) {
+        self.file = Some(p);
     }
 }
 
-macro_rules! from_error {
+macro_rules! parse_error_from {
     ($from:ty, $kind:ident) => {
         impl<'s> From<Box<$from>> for Box<Error<'s>> {
             fn from(err: Box<$from>) -> Box<Error<'s>> {
                 let source = err.source();
                 let offset = err.offset();
-                Error::new(ErrorKind::$kind(*err), source, offset)
+                Error::parse_error(ParseKind::$kind(*err), source, offset)
             }
         }
     };
 }
-from_error!(LexError<'s>, Lex);
-from_error!(ParseError<'s>, ParseWat);
-from_error!(TransformError<'s>, Wat2Wasm);
+parse_error_from!(LexError<'s>, Lex);
+parse_error_from!(ParseError<'s>, ParseWat);
+parse_error_from!(TransformError<'s>, Wat2Wasm);
 
 impl<'s> fmt::Display for Error<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use ErrorKind::*;
-        match &self.kind {
-            Lex(err) => write!(f, "lexer error: {}", err)?,
-            ParseWat(err) => write!(f, "parse error on parsing WAT module: {}", err)?,
-            Wat2Wasm(err) => write!(f, "could not transform from WAT to WASM: {}", err)?,
-            Unexpected {
-                expected,
-                token: None,
-            } => write!(f, "unexpected token while {} is expected", expected)?,
-            Unexpected {
-                expected,
-                token: Some(token),
-            } => write!(
-                f,
-                "unexpected token {} while {} is expected",
-                token, expected
-            )?,
-            EndOfFile { expected } => write!(f, "unxpected EOF while {} is expected", expected)?,
-            Utf8Error(err) => write!(f, "cannot parse text as UTF-8: {}", err)?,
-            InvalidStringLiteral { lit, reason } => {
-                write!(f, "invalid string literal '{}': {}", lit, reason)?
+        let doing = match &self.kind {
+            ErrorKind::Parse(kind) => {
+                use ParseKind::*;
+                match kind {
+                    Lex(err) => write!(f, "lexer error: {}", err)?,
+                    ParseWat(err) => write!(f, "parse error on parsing WAT module: {}", err)?,
+                    Wat2Wasm(err) => write!(f, "could not transform from WAT to WASM: {}", err)?,
+                    Unexpected {
+                        expected,
+                        token: None,
+                    } => write!(f, "unexpected token while {} is expected", expected)?,
+                    Unexpected {
+                        expected,
+                        token: Some(token),
+                    } => write!(
+                        f,
+                        "unexpected token {} while {} is expected",
+                        token, expected
+                    )?,
+                    EndOfFile { expected } => {
+                        write!(f, "unxpected EOF while {} is expected", expected)?
+                    }
+                    Utf8Error(err) => write!(f, "cannot parse text as UTF-8: {}", err)?,
+                    InvalidStringLiteral { lit, reason } => {
+                        write!(f, "invalid string literal '{}': {}", lit, reason)?
+                    }
+                    InvalidInt { ty, err } => write!(f, "invalid int literal for {}: {}", ty, err)?,
+                    TooSmallInt { ty, digits } => {
+                        write!(f, "-{} is too small value for {}", digits, ty)?
+                    }
+                    InvalidFloat { ty, err } => {
+                        write!(f, "invalid float number literal for {}: {}", ty, err)?
+                    }
+                    InvalidHexFloat { ty } => {
+                        write!(f, "invalid hex float number literal for {}", ty)?
+                    }
+                }
+                "parsing"
             }
-            InvalidInt { ty, err } => write!(f, "invalid int literal for {}: {}", ty, err)?,
-            TooSmallInt { ty, digits } => write!(f, "-{} is too small value for {}", digits, ty)?,
-            InvalidFloat { ty, err } => {
-                write!(f, "invalid float number literal for {}: {}", ty, err)?
-            }
-            InvalidHexFloat { ty } => write!(f, "invalid hex float number literal for {}", ty)?,
+        };
+
+        write!(f, " while {}", doing)?;
+        if let Some(path) = &self.file {
+            write!(f, " '{:?}'", path)?;
         }
+
         describe_position(f, self.source, self.pos)?;
 
         if let Some(prev) = &self.prev_error {
