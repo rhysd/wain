@@ -31,6 +31,7 @@ pub enum Const {
 }
 
 pub struct Root<'source> {
+    pub start: usize,
     pub directives: Vec<Directive<'source>>,
 }
 
@@ -45,9 +46,25 @@ pub enum Directive<'source> {
     AssertExhaustion(AssertExhaustion<'source>),
     Register(Register<'source>),
     Invoke(Invoke<'source>),
-    QuoteModule(String),
-    BinaryModule(Vec<u8>),
+    EmbeddedModule(EmbeddedModule),
     InlineModule(ast::Root<'source, TextSource<'source>>),
+}
+impl<'s> Directive<'s> {
+    pub fn start_pos(&self) -> usize {
+        match self {
+            Directive::AssertReturn(AssertReturn::Invoke { start, .. }) => *start,
+            Directive::AssertReturn(AssertReturn::Global { start, .. }) => *start,
+            Directive::AssertTrap(a) => a.start,
+            Directive::AssertMalformed(a) => a.start,
+            Directive::AssertInvalid(a) => a.start,
+            Directive::AssertUnlinkable(a) => a.start,
+            Directive::AssertExhaustion(a) => a.start,
+            Directive::Register(r) => r.start,
+            Directive::Invoke(i) => i.start,
+            Directive::EmbeddedModule(m) => m.start,
+            Directive::InlineModule(r) => r.module.start,
+        }
+    }
 }
 
 // (invoke {id}? {name} {constant}*)

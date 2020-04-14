@@ -689,10 +689,7 @@ impl<'s> Parse<'s> for Directive<'s> {
                 let prev_lexer = parser.clone_lexer();
 
                 match parser.parse::<EmbeddedModule>() {
-                    Ok(module) => match module.embedded {
-                        Embedded::Quote(text) => Ok(Directive::QuoteModule(text)),
-                        Embedded::Binary(bin) => Ok(Directive::BinaryModule(bin)),
-                    },
+                    Ok(module) => Ok(Directive::EmbeddedModule(module)),
                     Err(err) => {
                         parser.ignored_error = Some(err);
                         // Here parser.lexer already ate some tokens. To parser from
@@ -718,7 +715,8 @@ impl<'s> Parse<'s> for Root<'s> {
         while !parser.is_done()? {
             directives.push(parser.parse()?);
         }
-        Ok(Root { directives })
+        let start = directives.get(0).map(Directive::start_pos).unwrap_or(0);
+        Ok(Root { start, directives })
     }
 }
 
@@ -1201,12 +1199,24 @@ mod tests {
         )
         .parse()
         .unwrap();
-        assert!(matches!(d, Directive::BinaryModule(_)));
+        assert!(matches!(
+            d,
+            Directive::EmbeddedModule(EmbeddedModule {
+                embedded: Embedded::Binary(_),
+                ..
+            })
+        ));
 
         let d: Directive = Parser::new(r#"(module quote "(memory $foo 1)" "(memory $foo 1)")"#)
             .parse()
             .unwrap();
-        assert!(matches!(d, Directive::QuoteModule(_)));
+        assert!(matches!(
+            d,
+            Directive::EmbeddedModule(EmbeddedModule {
+                embedded: Embedded::Quote(_),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1245,8 +1255,8 @@ mod tests {
         assert!(matches!(d[1], Directive::AssertReturn(_)));
         assert!(matches!(d[2], Directive::AssertReturn(_)));
         assert!(matches!(d[3], Directive::AssertReturn(_)));
-        assert!(matches!(d[4], Directive::BinaryModule(_)));
-        assert!(matches!(d[5], Directive::BinaryModule(_)));
+        assert!(matches!(d[4], Directive::EmbeddedModule(_)));
+        assert!(matches!(d[5], Directive::EmbeddedModule(_)));
         assert!(matches!(d[6], Directive::InlineModule(_)));
         assert!(matches!(d[7], Directive::AssertReturn(_)));
         assert!(matches!(d[8], Directive::AssertReturn(_)));
