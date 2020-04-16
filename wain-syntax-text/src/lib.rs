@@ -3,9 +3,8 @@
 
 extern crate wain_ast;
 
-mod compose;
-
 pub mod ast;
+pub mod compose;
 pub mod lexer;
 pub mod parser;
 pub mod source;
@@ -17,10 +16,21 @@ use source::TextSource;
 use std::fmt;
 use wat2wasm::{wat2wasm, TransformError};
 
+// TODO: Unify all error types into one error type
 pub enum Error<'source> {
     Parse(Box<ParseError<'source>>),
     Transform(Box<TransformError<'source>>),
     Compose(Box<ComposeError<'source>>),
+}
+
+impl<'s> Error<'s> {
+    pub fn location(&self) -> (&'s str, usize) {
+        match self {
+            Error::Parse(e) => (e.source(), e.offset()),
+            Error::Transform(e) => (e.source(), e.offset()),
+            Error::Compose(e) => (e.source(), e.offset()),
+        }
+    }
 }
 
 macro_rules! from_errors {

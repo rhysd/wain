@@ -3,6 +3,8 @@ use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
 use std::path::PathBuf;
 use std::string::FromUtf8Error;
+use wain_syntax_binary as binary;
+use wain_syntax_text as wat;
 use wain_syntax_text::lexer::{LexError, Token};
 use wain_syntax_text::parser::ParseError;
 use wain_syntax_text::source::describe_position;
@@ -10,6 +12,7 @@ use wain_syntax_text::wat2wasm::TransformError;
 
 pub enum ErrorKind<'source> {
     Parse(ParseKind<'source>),
+    Run(RunKind<'source>),
 }
 
 pub enum ParseKind<'source> {
@@ -45,12 +48,18 @@ pub enum ParseKind<'source> {
     Wat2Wasm(TransformError<'source>),
 }
 
+pub enum RunKind<'source> {
+    NotImplementedYet,
+    ParseQuoteFailure(wat::Error<'source>),
+    ParseBinaryFailure(binary::Error<'source>),
+}
+
 pub struct Error<'source> {
     pub pos: usize,
     source: &'source str,
     kind: ErrorKind<'source>,
     pub prev_error: Option<Box<Error<'source>>>,
-    file: Option<PathBuf>,
+    path: Option<PathBuf>,
 }
 
 impl<'s> Error<'s> {
@@ -60,12 +69,22 @@ impl<'s> Error<'s> {
             source,
             kind: ErrorKind::Parse(kind),
             prev_error: None,
-            file: None,
+            path: None,
         })
     }
 
-    pub fn set_file(&mut self, p: PathBuf) {
-        self.file = Some(p);
+    pub fn run_error(kind: RunKind<'s>, source: &'s str, pos: usize) -> Box<Error<'s>> {
+        Box::new(Error {
+            pos,
+            source,
+            kind: ErrorKind::Run(kind),
+            prev_error: None,
+            path: None,
+        })
+    }
+
+    pub fn set_path<P: Into<PathBuf>>(&mut self, p: P) {
+        self.path = Some(p.into());
     }
 }
 
@@ -83,6 +102,13 @@ macro_rules! parse_error_from {
 parse_error_from!(LexError<'s>, Lex);
 parse_error_from!(ParseError<'s>, ParseWat);
 parse_error_from!(TransformError<'s>, Wat2Wasm);
+
+impl<'s> From<wat::Error<'s>> for Box<Error<'s>> {
+    fn from(err: wat::Error<'s>) -> Box<Error<'s>> {
+        let (source, pos) = err.location();
+        Error::run_error(RunKind::ParseQuoteFailure(err), source, pos)
+    }
+}
 
 impl<'s> fmt::Display for Error<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -125,11 +151,24 @@ impl<'s> fmt::Display for Error<'s> {
                 }
                 "parsing"
             }
+            ErrorKind::Run(kind) => {
+                use RunKind::*;
+                match kind {
+                    ParseQuoteFailure(err) => write!(f, "cannot parse quoted module: {}", err)?,
+                    ParseBinaryFailure(err) => write!(
+                        f,
+                        "cannot parse binary module at offset {}: {}",
+                        err.pos, err,
+                    )?,
+                    NotImplementedYet => write!(f, "this directive is not implemented yet")?,
+                }
+                "running"
+            }
         };
 
         write!(f, " while {}", doing)?;
-        if let Some(path) = &self.file {
-            write!(f, " '{:?}'", path)?;
+        if let Some(name) = &self.path {
+            write!(f, " {:?}", name)?;
         }
 
         describe_position(f, self.source, self.pos)?;

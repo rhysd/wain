@@ -20,6 +20,15 @@ pub struct ComposeError<'source> {
     msg: String,
 }
 
+impl<'s> ComposeError<'s> {
+    pub fn source(&self) -> &'s str {
+        self.source
+    }
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+}
+
 impl<'s> fmt::Display for ComposeError<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("module ")?;
