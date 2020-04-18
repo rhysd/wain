@@ -194,8 +194,23 @@ impl<W: Write> Runner<W> {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
+enum KnownModule<'s> {
+    Val(ast::Module<'s>),     // Own embedded module (quote, binary)
+    Ref(&'s ast::Module<'s>), // Borrow inline module
+}
+
+impl<'s> AsRef<ast::Module<'s>> for KnownModule<'s> {
+    fn as_ref(&self) -> &ast::Module<'s> {
+        match self {
+            KnownModule::Val(m) => m,
+            KnownModule::Ref(m) => m,
+        }
+    }
+}
+
 struct KnownModules<'s> {
-    mods: Vec<(ast::Module<'s>, usize)>,
+    mods: Vec<(KnownModule<'s>, usize)>,
     source: &'s str,
 }
 
@@ -206,19 +221,27 @@ impl<'s> KnownModules<'s> {
             source,
         }
     }
+
     fn push(&mut self, m: ast::Module<'s>, pos: usize) {
-        self.mods.push((m, pos));
+        self.mods.push((KnownModule::Val(m), pos));
+    }
+
+    fn push_ref(&mut self, m: &'s ast::Module<'s>) {
+        self.mods.push((KnownModule::Ref(m), m.start));
     }
 
     fn find(&self, id: Option<&'s str>, pos: usize) -> Result<'s, (&ast::Module<'s>, usize)> {
         let searched = if let Some(id) = id {
-            self.mods.iter().rev().find(|(m, _)| m.id == Some(id))
+            self.mods
+                .iter()
+                .rev()
+                .find(|(m, _)| m.as_ref().id == Some(id))
         } else {
             self.mods.last()
         };
         let (m, pos) = searched
             .ok_or_else(|| Error::run_error(RunKind::ModuleNotFound(id), self.source, pos))?;
-        Ok((m, *pos))
+        Ok((m.as_ref(), *pos))
     }
 }
 
@@ -259,6 +282,10 @@ impl<'a> Tester<'a> {
     ) -> Result<'a, ()> {
         use wast::Directive::*;
         match directive {
+            InlineModule(root) => {
+                known.push_ref(&root.module);
+                Ok(())
+            }
             EmbeddedModule(wast::EmbeddedModule {
                 embedded: wast::Embedded::Quote(text),
                 start,
