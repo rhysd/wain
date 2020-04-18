@@ -6,8 +6,10 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use wain_ast as ast;
+use wain_exec::{DefaultImporter, Machine, Value};
 use wain_syntax_binary as binary;
 use wain_syntax_text as wat;
+use wain_validate::validate;
 
 const SKIPPED: &[&str] = &["linking.wast"];
 
@@ -19,6 +21,34 @@ mod color {
     pub const BLUE: &[u8] = b"\x1b[94m";
 }
 
+struct Discard;
+
+impl io::Read for Discard {
+    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+        Ok(0)
+    }
+}
+
+impl io::Write for Discard {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn const_value(c: &wast::Const) -> Option<Value> {
+    use wast::Const::*;
+    match c {
+        I32(i) => Some(Value::I32(*i)),
+        I64(i) => Some(Value::I64(*i)),
+        F32(f) => Some(Value::F32(*f)),
+        F64(f) => Some(Value::F64(*f)),
+        _ => None,
+    }
+}
+
 #[derive(Default)]
 pub struct Summary {
     total: u32,
@@ -28,6 +58,15 @@ pub struct Summary {
 }
 
 impl Summary {
+    fn new(passed: u32, failed: u32, skipped: u32) -> Self {
+        Self {
+            total: passed + failed + skipped,
+            passed,
+            failed,
+            skipped,
+        }
+    }
+
     fn println<W: Write>(&self, mut out: W) {
         writeln!(
             out,
@@ -54,11 +93,6 @@ impl Summary {
         self.passed += 1;
     }
 
-    fn skip(&mut self) {
-        self.total += 1;
-        self.skipped += 1;
-    }
-
     pub fn success(&self) -> bool {
         self.failed == 0
     }
@@ -74,9 +108,10 @@ impl<W: Write> Runner<W> {
         Runner { out }
     }
 
-    fn report<D: fmt::Display>(&mut self, nth: usize, total: usize, path: &Path, err: D) {
+    fn report<D: fmt::Display>(&mut self, nth: usize, total: usize, err: D) {
+        // Note: Path is included in error message
         self.out.write_all(color::RED).unwrap();
-        writeln!(&mut self.out, "\n[{}/{}] {:?}", nth, total, path).unwrap();
+        write!(&mut self.out, "\n[{}/{}] ", nth, total).unwrap();
         self.out.write_all(color::RESET).unwrap();
         writeln!(&mut self.out, "{}", err).unwrap();
     }
@@ -113,43 +148,34 @@ impl<W: Write> Runner<W> {
 
         let sum = if file == "inline-module.wast" {
             // special case
-            let mut sum = Summary::default();
             if let Err(err) = wat::parse(&source) {
-                self.report(1, 1, &path, err);
-                sum.fail();
+                self.report(1, 1, err);
+                Summary::new(0, 1, 0)
             } else {
-                sum.pass();
+                Summary::new(1, 0, 0)
             }
-            sum
         } else {
-            let mut sum = Summary::default();
             match Parser::new(&source).parse::<wast::Root<'_>>() {
                 Err(err) => {
-                    self.report(1, 1, &path, err);
-                    sum.fail();
-                    sum
+                    self.report(1, 1, err);
+                    Summary::new(0, 1, 0)
                 }
+                Ok(_) if SKIPPED.contains(&file) => Summary::new(1, 0, 1),
                 Ok(root) => {
-                    sum.pass(); // parse success
-                    if SKIPPED.contains(&file) {
-                        sum.skip();
-                        sum
-                    } else {
-                        let mut tester = Tester {
-                            sum,
-                            errs: vec![],
-                            source: &source,
-                            root: &root,
-                        };
-                        tester.test();
-                        let num_errs = tester.errs.len();
-                        for (idx, err) in tester.errs.iter_mut().enumerate() {
-                            let nth = idx + 1;
-                            err.set_path(&path);
-                            self.report(nth, num_errs, &path, err);
-                        }
-                        tester.sum
+                    let mut tester = Tester {
+                        sum: Summary::new(1, 0, 0),
+                        errs: vec![],
+                        source: &source,
+                        root: &root,
+                    };
+                    tester.test();
+                    let num_errs = tester.errs.len();
+                    for (idx, err) in tester.errs.iter_mut().enumerate() {
+                        let nth = idx + 1;
+                        err.set_path(&path);
+                        self.report(nth, num_errs, err);
                     }
+                    tester.sum
                 }
             }
         };
@@ -165,6 +191,34 @@ impl<W: Write> Runner<W> {
         self.out.write_all(color::RESET).unwrap();
 
         Ok(sum)
+    }
+}
+
+struct KnownModules<'s> {
+    mods: Vec<(ast::Module<'s>, usize)>,
+    source: &'s str,
+}
+
+impl<'s> KnownModules<'s> {
+    fn new(source: &'s str) -> Self {
+        KnownModules {
+            mods: vec![],
+            source,
+        }
+    }
+    fn push(&mut self, m: ast::Module<'s>, pos: usize) {
+        self.mods.push((m, pos));
+    }
+
+    fn find(&self, id: Option<&'s str>, pos: usize) -> Result<'s, (&ast::Module<'s>, usize)> {
+        let searched = if let Some(id) = id {
+            self.mods.iter().rev().find(|(m, _)| m.id == Some(id))
+        } else {
+            self.mods.last()
+        };
+        let (m, pos) = searched
+            .ok_or_else(|| Error::run_error(RunKind::ModuleNotFound(id), self.source, pos))?;
+        Ok((m, *pos))
     }
 }
 
@@ -191,7 +245,7 @@ impl<'a> Tester<'a> {
     }
 
     fn test(&mut self) {
-        let mut modules = vec![];
+        let mut modules = KnownModules::new(self.source);
         for directive in self.root.directives.iter() {
             let result = self.test_directive(directive, &mut modules);
             self.check(result);
@@ -201,7 +255,7 @@ impl<'a> Tester<'a> {
     fn test_directive(
         &mut self,
         directive: &'a wast::Directive<'a>,
-        known_modules: &mut Vec<(ast::Module<'a>, usize)>,
+        known: &mut KnownModules<'a>,
     ) -> Result<'a, ()> {
         use wast::Directive::*;
         match directive {
@@ -210,10 +264,10 @@ impl<'a> Tester<'a> {
                 start,
             }) => {
                 // Use inner module's source and offset
-                let parsed = wat::parse(text).map_err(Into::into);
-                if let Some(root) = self.check(parsed) {
-                    known_modules.push((root.module, *start));
-                }
+                let root = wat::parse(text)?;
+                validate(&root)?;
+                known.push(root.module, *start);
+                Ok(())
             }
             EmbeddedModule(wast::EmbeddedModule {
                 embedded: wast::Embedded::Binary(bin),
@@ -221,21 +275,68 @@ impl<'a> Tester<'a> {
             }) => {
                 // Since binary format parse error contains &[u8] as source, it is not available
                 // for crate::error::Error.
-                let parsed = binary::parse(bin).map_err(|err| {
+                let root = binary::parse(bin).map_err(|err| {
                     Error::run_error(RunKind::ParseBinaryFailure(*err), self.source, *start)
-                });
-                if let Some(root) = self.check(parsed) {
-                    known_modules.push((root.module, *start));
+                })?;
+
+                validate(&root).map_err(|err| {
+                    Error::run_error(RunKind::InvalidBinary(*err), self.source, *start)
+                })?;
+
+                known.push(root.module, *start);
+
+                Ok(())
+            }
+            AssertReturn(wast::AssertReturn::Invoke {
+                start,
+                invoke,
+                expected,
+            }) => {
+                let (module, mod_pos) = known.find(invoke.id, *start)?;
+                let importer = DefaultImporter::with_stdio(Discard, Discard);
+                let mut machine = Machine::instantiate(module, importer).map_err(|err| {
+                    Error::run_error(RunKind::Trapped(*err), self.source, mod_pos)
+                })?;
+
+                let args: Box<[Value]> = invoke
+                    .args
+                    .iter()
+                    .map(const_value)
+                    .collect::<Option<_>>()
+                    .unwrap();
+                let ret = machine.invoke(&invoke.name, &args).map_err(|err| {
+                    Error::run_error(RunKind::Trapped(*err), self.source, mod_pos)
+                })?;
+
+                if let (Some(expected), Some(actual)) = (*expected, ret) {
+                    use wast::Const::*;
+                    let ok = match &expected {
+                        I32(_) | I64(_) | F32(_) | F64(_) => {
+                            const_value(&expected).unwrap() == actual
+                        }
+                        // TODO: Check payload for arithmetic NaN
+                        CanonicalNan | ArithmeticNan => match actual {
+                            Value::F32(f) => f.is_nan(),
+                            Value::F64(f) => f.is_nan(),
+                            _ => false,
+                        },
+                    };
+
+                    if !ok {
+                        return Err(Error::run_error(
+                            RunKind::InvokeUnexpectedReturn { actual, expected },
+                            self.source,
+                            *start,
+                        ));
+                    }
                 }
+                Ok(())
             }
-            d => {
-                return Err(Error::run_error(
-                    RunKind::NotImplementedYet,
-                    self.source,
-                    d.start_pos(),
-                ))
-            }
+            d => Err(Error::run_error(
+                RunKind::NotImplementedYet,
+                self.source,
+                d.start_pos(),
+            )),
         }
-        Ok(())
     }
 }

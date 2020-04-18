@@ -1,14 +1,19 @@
+use crate::wast;
 use std::borrow::Cow;
 use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
 use std::path::PathBuf;
 use std::string::FromUtf8Error;
+use wain_ast::source::Source;
+use wain_exec::{trap, Value};
 use wain_syntax_binary as binary;
+use wain_syntax_binary::source::BinarySource;
 use wain_syntax_text as wat;
 use wain_syntax_text::lexer::{LexError, Token};
 use wain_syntax_text::parser::ParseError;
-use wain_syntax_text::source::describe_position;
+use wain_syntax_text::source::{describe_position, TextSource};
 use wain_syntax_text::wat2wasm::TransformError;
+use wain_validate as validate;
 
 pub enum ErrorKind<'source> {
     Parse(ParseKind<'source>),
@@ -52,6 +57,14 @@ pub enum RunKind<'source> {
     NotImplementedYet,
     ParseQuoteFailure(wat::Error<'source>),
     ParseBinaryFailure(binary::Error<'source>),
+    InvalidText(validate::Error<TextSource<'source>>),
+    InvalidBinary(validate::Error<BinarySource<'source>>),
+    ModuleNotFound(Option<&'source str>),
+    Trapped(trap::Trap),
+    InvokeUnexpectedReturn {
+        actual: Value,
+        expected: wast::Const,
+    },
 }
 
 pub struct Error<'source> {
@@ -109,6 +122,13 @@ impl<'s> From<wat::Error<'s>> for Box<Error<'s>> {
         Error::run_error(RunKind::ParseQuoteFailure(err), source, pos)
     }
 }
+impl<'s> From<Box<validate::Error<TextSource<'s>>>> for Box<Error<'s>> {
+    fn from(err: Box<validate::Error<TextSource<'s>>>) -> Box<Error<'s>> {
+        let s = err.source().raw();
+        let o = err.offset();
+        Error::run_error(RunKind::InvalidText(*err), s, o)
+    }
+}
 
 impl<'s> fmt::Display for Error<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -154,13 +174,23 @@ impl<'s> fmt::Display for Error<'s> {
             ErrorKind::Run(kind) => {
                 use RunKind::*;
                 match kind {
+                    NotImplementedYet => write!(f, "this directive is not implemented yet")?,
                     ParseQuoteFailure(err) => write!(f, "cannot parse quoted module: {}", err)?,
                     ParseBinaryFailure(err) => write!(
                         f,
                         "cannot parse binary module at offset {}: {}",
                         err.pos, err,
                     )?,
-                    NotImplementedYet => write!(f, "this directive is not implemented yet")?,
+                    InvalidText(err) => write!(f, "invalid text module: {}", err)?,
+                    InvalidBinary(err) => write!(f, "invalid binary module: {}", err)?,
+                    ModuleNotFound(Some(id)) => write!(f, "module '{}' is not found", id)?,
+                    ModuleNotFound(None) => write!(f, "no module is found")?,
+                    Trapped(trap) => write!(f, "execution was trapped: {}", trap)?,
+                    InvokeUnexpectedReturn { actual, expected } => write!(
+                        f,
+                        "assert_return expected '{:?}' but got '{}'",
+                        expected, actual
+                    )?,
                 }
                 "running"
             }

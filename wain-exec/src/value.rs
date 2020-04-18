@@ -3,8 +3,8 @@ use std::fmt;
 use std::mem::size_of;
 use wain_ast::ValType;
 
-#[cfg_attr(test, derive(Debug, PartialEq))]
-#[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq)]
 pub enum Value {
     I32(i32),
     I64(i64),

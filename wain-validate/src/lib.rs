@@ -8,7 +8,9 @@ extern crate wain_ast;
 mod error;
 mod insn;
 
-use error::{Error, ErrorKind, Result};
+pub use error::{Error, Result};
+
+use error::ErrorKind;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use wain_ast::source::Source;

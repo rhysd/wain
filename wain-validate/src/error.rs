@@ -155,6 +155,14 @@ impl<S: Source> Error<S> {
             when,
         })
     }
+
+    pub fn source(&self) -> &S {
+        &self.source
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
 }
 
 pub type Result<T, S> = ::std::result::Result<T, Box<Error<S>>>;

@@ -17,8 +17,7 @@ pub struct EmbeddedModule {
 }
 
 // Argument of assertion and invoke
-#[cfg_attr(test, derive(Debug))]
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Const {
     I32(i32),
     I64(i64),

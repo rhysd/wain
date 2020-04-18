@@ -2,6 +2,8 @@
 
 extern crate wain_ast;
 
+pub mod trap;
+
 mod cast;
 mod globals;
 mod import;
@@ -9,7 +11,6 @@ mod machine;
 mod memory;
 mod stack;
 mod table;
-mod trap;
 mod value;
 
 pub use import::{
