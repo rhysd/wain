@@ -182,8 +182,11 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         for insn in body.iter() {
             match insn.execute(self, &frame)? {
                 ExecState::Continue => {}
-                ExecState::Ret => break,
-                ExecState::Breaking(_) => unreachable!(), // thanks to validation, this does not occur
+                // When using br or br_if outside control instructions, it unwinds execution in
+                // the function body. Label with empty continuation is put before invoking the
+                // function body (11.). It means that breaking outside control instructions will be
+                // caught by this label.
+                ExecState::Ret | ExecState::Breaking(_) => break,
             }
         }
 
