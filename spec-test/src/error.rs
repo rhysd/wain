@@ -65,6 +65,7 @@ pub enum RunKind<'source> {
         actual: Value,
         expected: wast::Const,
     },
+    InvokeTrapExpected(Option<Value>),
 }
 
 pub struct Error<'source> {
@@ -98,6 +99,10 @@ impl<'s> Error<'s> {
 
     pub fn set_path<P: Into<PathBuf>>(&mut self, p: P) {
         self.path = Some(p.into());
+    }
+
+    pub fn kind(&self) -> &ErrorKind<'s> {
+        &self.kind
     }
 }
 
@@ -190,6 +195,15 @@ impl<'s> fmt::Display for Error<'s> {
                         f,
                         "assert_return expected '{:?}' but got '{}'",
                         expected, actual
+                    )?,
+                    InvokeTrapExpected(None) => write!(
+                        f,
+                        "expected trap while invocation but it unexpectedly returned"
+                    )?,
+                    InvokeTrapExpected(Some(ret)) => write!(
+                        f,
+                        "expected trap while invocation but it unexpectedly returned {}",
+                        ret
                     )?,
                 }
                 "running"

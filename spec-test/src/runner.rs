@@ -1,4 +1,4 @@
-use crate::error::{Error, Result, RunKind};
+use crate::error::{Error, ErrorKind, Result, RunKind};
 use crate::parser::Parser;
 use crate::wast;
 use std::fmt;
@@ -137,13 +137,17 @@ impl<W: Write> Runner<W> {
         }
 
         self.out.write_all(color::BLUE).unwrap();
-        writeln!(&mut self.out, "\nTotal Results of {} files:", num_files).unwrap();
+        writeln!(&mut self.out, "\nResults of {} files:", num_files).unwrap();
         total.println(&mut self.out);
         self.out.write_all(color::RESET).unwrap();
         Ok(total.failed == 0)
     }
 
     pub fn run_file(&mut self, path: &Path, file: &str) -> io::Result<Summary> {
+        self.out.write_all(color::YELLOW).unwrap();
+        writeln!(&mut self.out, "\nStart: {:?}", path).unwrap();
+        self.out.write_all(color::RESET).unwrap();
+
         let source = fs::read_to_string(&path)?;
 
         let sum = if file == "inline-module.wast" {
@@ -186,7 +190,7 @@ impl<W: Write> Runner<W> {
             color::YELLOW
         };
         self.out.write_all(color).unwrap();
-        writeln!(&mut self.out, "\nResults of {:?}:", path).unwrap();
+        writeln!(&mut self.out, "\nEnd {:?}:", path).unwrap();
         sum.println(&mut self.out);
         self.out.write_all(color::RESET).unwrap();
 
@@ -275,8 +279,32 @@ impl<'a> Tester<'a> {
         }
     }
 
+    fn invoke(
+        &self,
+        invoke: &wast::Invoke<'a>,
+        known: &mut KnownModules<'a>,
+        pos: usize,
+    ) -> Result<'a, Option<Value>> {
+        let (module, mod_pos) = known.find(invoke.id, pos)?;
+        let importer = DefaultImporter::with_stdio(Discard, Discard);
+        let mut machine = Machine::instantiate(module, importer)
+            .map_err(|err| Error::run_error(RunKind::Trapped(*err), self.source, mod_pos))?;
+
+        let args: Box<[Value]> = invoke
+            .args
+            .iter()
+            .map(const_value)
+            .collect::<Option<_>>()
+            .unwrap();
+        let ret = machine
+            .invoke(&invoke.name, &args)
+            .map_err(|err| Error::run_error(RunKind::Trapped(*err), self.source, mod_pos))?;
+
+        Ok(ret)
+    }
+
     fn test_directive(
-        &mut self,
+        &self,
         directive: &'a wast::Directive<'a>,
         known: &mut KnownModules<'a>,
     ) -> Result<'a, ()> {
@@ -319,22 +347,7 @@ impl<'a> Tester<'a> {
                 invoke,
                 expected,
             }) => {
-                let (module, mod_pos) = known.find(invoke.id, *start)?;
-                let importer = DefaultImporter::with_stdio(Discard, Discard);
-                let mut machine = Machine::instantiate(module, importer).map_err(|err| {
-                    Error::run_error(RunKind::Trapped(*err), self.source, mod_pos)
-                })?;
-
-                let args: Box<[Value]> = invoke
-                    .args
-                    .iter()
-                    .map(const_value)
-                    .collect::<Option<_>>()
-                    .unwrap();
-                let ret = machine.invoke(&invoke.name, &args).map_err(|err| {
-                    Error::run_error(RunKind::Trapped(*err), self.source, mod_pos)
-                })?;
-
+                let ret = self.invoke(invoke, known, *start)?;
                 if let (Some(expected), Some(actual)) = (*expected, ret) {
                     use wast::Const::*;
                     let ok = match &expected {
@@ -358,6 +371,54 @@ impl<'a> Tester<'a> {
                     }
                 }
                 Ok(())
+            }
+            AssertTrap(wast::AssertTrap {
+                start,
+                expected: _expected,
+                pred: wast::TrapPredicate::Invoke(invoke),
+            }) => {
+                match self.invoke(invoke, known, *start) {
+                    Ok(r) => Err(Error::run_error(
+                        RunKind::InvokeTrapExpected(r),
+                        self.source,
+                        invoke.start,
+                    )),
+                    Err(err) if matches!(err.kind(), ErrorKind::Run(RunKind::Trapped(_trap))) => {
+                        // Expected path. Execution was trapped
+                        //
+                        // TODO: Check trap reason is what we expected.
+                        // `_expected` is an expected error message as string but we don't conform
+                        // the message. So we need to have logic for mapping from expected message
+                        // to our error.
+                        Ok(())
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            AssertTrap(wast::AssertTrap {
+                start,
+                expected: _expected,
+                pred: wast::TrapPredicate::Module(root),
+            }) => {
+                validate(root)?;
+                let importer = DefaultImporter::with_stdio(Discard, Discard);
+                let mut machine = Machine::instantiate(&root.module, importer).map_err(|err| {
+                    Error::run_error(RunKind::Trapped(*err), self.source, root.module.start)
+                })?;
+                match machine.execute() {
+                    Ok(_) => Err(Error::run_error(
+                        RunKind::InvokeTrapExpected(None),
+                        self.source,
+                        *start,
+                    )),
+                    Err(_trap) => {
+                        // TODO: Check trap reason is what we expected.
+                        // `_expected` is an expected error message as string but we don't conform
+                        // the message. So we need to have logic for mapping from expected message
+                        // to our error.
+                        Ok(())
+                    }
+                }
             }
             d => Err(Error::run_error(
                 RunKind::NotImplementedYet,
