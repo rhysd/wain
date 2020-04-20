@@ -142,7 +142,7 @@ fn unwrap<T, E: std::fmt::Display>(phase: &'static str, result: Result<T, E>) ->
 
 fn run<S: wain_ast::source::Source>(ast: wain_ast::Root<'_, S>) -> wain_exec::Run {
     unwrap("validation", wain_validate::validate(&ast));
-    unwrap("running wasm", wain_exec::execute(ast.module))
+    unwrap("running wasm", wain_exec::execute(&ast.module))
 }
 
 #[cfg(feature = "binary")]

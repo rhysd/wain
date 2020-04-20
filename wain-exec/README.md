@@ -62,7 +62,7 @@ if let Err(err) = validate(&tree) {
 }
 
 // Execute module
-match execute(tree.module) {
+match execute(&tree.module) {
     Ok(run) => {
         if let Run::Warning(msg) = run {
             eprintln!("Warning: {}", msg);

@@ -125,7 +125,7 @@ fn main() {
     }
 
     // Execute module
-    match execute(tree.module) {
+    match execute(&tree.module) {
         Ok(Run::Success) => {}
         Ok(Run::Warning(msg)) => eprintln!("Warning: {}", msg),
         Err(trap) => eprintln!("Execution was trapped: {}", trap),
