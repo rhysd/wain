@@ -1,6 +1,7 @@
 use crate::error::{Error, ErrorKind, Result, RunKind};
 use crate::parser::Parser;
 use crate::wast;
+use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
@@ -198,54 +199,70 @@ impl<W: Write> Runner<W> {
     }
 }
 
-#[allow(clippy::large_enum_variant)]
-enum KnownModule<'s> {
-    Val(ast::Module<'s>),     // Own embedded module (quote, binary)
-    Ref(&'s ast::Module<'s>), // Borrow inline module
+type MachineForTest<'m, 's> = Machine<'m, 's, DefaultImporter<Discard, Discard>>;
+type IndexToModule<'s> = HashMap<usize, (ast::Module<'s>, usize)>;
+
+struct Instances<'mods, 'src: 'mods> {
+    machines: Vec<(MachineForTest<'mods, 'src>, usize)>,
+    idx_to_mod: &'mods IndexToModule<'src>,
+    source: &'src str,
 }
 
-impl<'s> AsRef<ast::Module<'s>> for KnownModule<'s> {
-    fn as_ref(&self) -> &ast::Module<'s> {
-        match self {
-            KnownModule::Val(m) => m,
-            KnownModule::Ref(m) => m,
-        }
-    }
-}
-
-struct KnownModules<'s> {
-    mods: Vec<(KnownModule<'s>, usize)>,
-    source: &'s str,
-}
-
-impl<'s> KnownModules<'s> {
-    fn new(source: &'s str) -> Self {
-        KnownModules {
-            mods: vec![],
+impl<'m, 's> Instances<'m, 's> {
+    fn new(idx_to_mod: &'m IndexToModule<'s>, source: &'s str) -> Self {
+        Instances {
+            machines: vec![],
+            idx_to_mod,
             source,
         }
     }
 
-    fn push(&mut self, m: ast::Module<'s>, pos: usize) {
-        self.mods.push((KnownModule::Val(m), pos));
+    fn new_machine(
+        &self,
+        m: &'m ast::Module<'s>,
+        pos: usize,
+    ) -> Result<'s, MachineForTest<'m, 's>> {
+        let importer = DefaultImporter::with_stdio(Discard, Discard);
+        let machine = Machine::instantiate(m, importer)
+            .map_err(|err| Error::run_error(RunKind::Trapped(*err), self.source, pos))?;
+        Ok(machine)
     }
 
-    fn push_ref(&mut self, m: &'s ast::Module<'s>) {
-        self.mods.push((KnownModule::Ref(m), m.start));
+    fn push_with_idx(&mut self, directive_idx: usize) -> Result<'s, ()> {
+        let (module, pos) = self.idx_to_mod.get(&directive_idx).unwrap();
+        self.push(module, *pos)
     }
 
-    fn find(&self, id: Option<&'s str>, pos: usize) -> Result<'s, (&ast::Module<'s>, usize)> {
+    fn push(&mut self, module: &'m ast::Module<'s>, pos: usize) -> Result<'s, ()> {
+        let machine = self.new_machine(module, pos)?;
+        self.machines.push((machine, pos));
+        Ok(())
+    }
+
+    fn find(
+        &mut self,
+        id: Option<&'s str>,
+        pos: usize,
+    ) -> Result<'s, (&mut MachineForTest<'m, 's>, usize)> {
         let searched = if let Some(id) = id {
-            self.mods
-                .iter()
+            self.machines
+                .iter_mut()
                 .rev()
-                .find(|(m, _)| m.as_ref().id == Some(id))
+                .find(|(m, _)| m.module().id == Some(id))
         } else {
-            self.mods.last()
+            self.machines.last_mut()
         };
-        let (m, pos) = searched
-            .ok_or_else(|| Error::run_error(RunKind::ModuleNotFound(id), self.source, pos))?;
-        Ok((m.as_ref(), *pos))
+
+        // Note: ok_or_else is not available due to nested borrow of `self`
+        if let Some((m, mod_pos)) = searched {
+            Ok((m, *mod_pos))
+        } else {
+            Err(Error::run_error(
+                RunKind::ModuleNotFound(id),
+                self.source,
+                pos,
+            ))
+        }
     }
 }
 
@@ -271,24 +288,77 @@ impl<'a> Tester<'a> {
         }
     }
 
+    fn parse_embedded_module(
+        &self,
+        m: &'a wast::EmbeddedModule,
+    ) -> Result<'a, (ast::Module<'a>, usize)> {
+        match &m.embedded {
+            wast::Embedded::Quote(text) => {
+                let root = wat::parse(text).map_err(|err| {
+                    Error::run_error(RunKind::ParseQuoteFailure(err), self.source, m.start)
+                })?;
+
+                validate(&root).map_err(|err| {
+                    Error::run_error(RunKind::InvalidText(*err), self.source, m.start)
+                })?;
+
+                Ok((root.module, m.start))
+            }
+            wast::Embedded::Binary(bin) => {
+                let root = binary::parse(bin).map_err(|err| {
+                    Error::run_error(RunKind::ParseBinaryFailure(*err), self.source, m.start)
+                })?;
+
+                validate(&root).map_err(|err| {
+                    Error::run_error(RunKind::InvalidBinary(*err), self.source, m.start)
+                })?;
+
+                Ok((root.module, m.start))
+            }
+        }
+    }
+
+    fn parse_embedded_modules(&mut self) -> IndexToModule<'a> {
+        let mut mods = HashMap::new();
+        for (idx, directive) in self.root.directives.iter().enumerate() {
+            if let wast::Directive::EmbeddedModule(e) = directive {
+                if let Some(m) = self.check(self.parse_embedded_module(e)) {
+                    mods.insert(idx, m);
+                }
+            }
+        }
+        mods
+    }
+
     fn test(&mut self) {
-        let mut modules = KnownModules::new(self.source);
-        for directive in self.root.directives.iter() {
-            let result = self.test_directive(directive, &mut modules);
+        // Parse and validate modules at first
+        let idx_to_mod = self.parse_embedded_modules();
+
+        // Give up assertions check when some module cannot be parsed because some target modules
+        // for assertion don't exist
+        if self.sum.failed > 0 {
+            let num_directives = self.root.directives.len() as u32;
+            let num_modules = idx_to_mod.len() as u32;
+            let skipped = num_directives - num_modules - self.sum.failed;
+            self.sum.total += skipped;
+            self.sum.skipped += skipped;
+            return;
+        }
+
+        let mut instances = Instances::new(&idx_to_mod, self.source);
+        for (idx, directive) in self.root.directives.iter().enumerate() {
+            let result = self.test_directive(idx, directive, &mut instances);
             self.check(result);
         }
     }
 
-    fn invoke(
+    fn invoke<'m>(
         &self,
         invoke: &wast::Invoke<'a>,
-        known: &mut KnownModules<'a>,
+        instances: &mut Instances<'m, 'a>,
         pos: usize,
     ) -> Result<'a, Option<Value>> {
-        let (module, mod_pos) = known.find(invoke.id, pos)?;
-        let importer = DefaultImporter::with_stdio(Discard, Discard);
-        let mut machine = Machine::instantiate(module, importer)
-            .map_err(|err| Error::run_error(RunKind::Trapped(*err), self.source, mod_pos))?;
+        let (machine, mod_pos) = instances.find(invoke.id, pos)?;
 
         let args: Box<[Value]> = invoke
             .args
@@ -303,51 +373,22 @@ impl<'a> Tester<'a> {
         Ok(ret)
     }
 
-    fn test_directive(
+    fn test_directive<'m>(
         &self,
+        idx: usize,
         directive: &'a wast::Directive<'a>,
-        known: &mut KnownModules<'a>,
+        instances: &mut Instances<'m, 'a>,
     ) -> Result<'a, ()> {
         use wast::Directive::*;
         match directive {
-            InlineModule(root) => {
-                known.push_ref(&root.module);
-                Ok(())
-            }
-            EmbeddedModule(wast::EmbeddedModule {
-                embedded: wast::Embedded::Quote(text),
-                start,
-            }) => {
-                // Use inner module's source and offset
-                let root = wat::parse(text)?;
-                validate(&root)?;
-                known.push(root.module, *start);
-                Ok(())
-            }
-            EmbeddedModule(wast::EmbeddedModule {
-                embedded: wast::Embedded::Binary(bin),
-                start,
-            }) => {
-                // Since binary format parse error contains &[u8] as source, it is not available
-                // for crate::error::Error.
-                let root = binary::parse(bin).map_err(|err| {
-                    Error::run_error(RunKind::ParseBinaryFailure(*err), self.source, *start)
-                })?;
-
-                validate(&root).map_err(|err| {
-                    Error::run_error(RunKind::InvalidBinary(*err), self.source, *start)
-                })?;
-
-                known.push(root.module, *start);
-
-                Ok(())
-            }
+            InlineModule(root) => instances.push(&root.module, root.module.start),
+            EmbeddedModule(_) => instances.push_with_idx(idx),
             AssertReturn(wast::AssertReturn::Invoke {
                 start,
                 invoke,
                 expected,
             }) => {
-                let ret = self.invoke(invoke, known, *start)?;
+                let ret = self.invoke(invoke, instances, *start)?;
                 if let (Some(expected), Some(actual)) = (*expected, ret) {
                     use wast::Const::*;
                     let ok = match &expected {
@@ -377,7 +418,7 @@ impl<'a> Tester<'a> {
                 expected: _expected,
                 pred: wast::TrapPredicate::Invoke(invoke),
             }) => {
-                match self.invoke(invoke, known, *start) {
+                match self.invoke(invoke, instances, *start) {
                     Ok(r) => Err(Error::run_error(
                         RunKind::InvokeTrapExpected(r),
                         self.source,

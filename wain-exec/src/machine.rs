@@ -129,6 +129,10 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         })
     }
 
+    pub fn module(&self) -> &'m ast::Module<'s> {
+        &self.module
+    }
+
     // Returns if it has return value on stack or not
     fn invoke_import(
         &mut self,
