@@ -133,6 +133,25 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         &self.module
     }
 
+    pub fn memory(&self) -> &Memory {
+        &self.memory
+    }
+
+    pub fn get_global(&self, name: &str) -> Option<Value> {
+        let maybe_idx = self.module.exports.iter().find_map(|e| {
+            if let ast::ExportKind::Global(idx) = e.kind {
+                if e.name.0 == name {
+                    return Some(idx);
+                }
+            }
+            None
+        });
+        maybe_idx.map(|idx| {
+            let ty = self.module.globals[idx as usize].ty;
+            self.globals.get_any(idx, ty)
+        })
+    }
+
     // Returns if it has return value on stack or not
     fn invoke_import(
         &mut self,

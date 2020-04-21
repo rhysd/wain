@@ -1,6 +1,6 @@
 use crate::trap::{Result, Trap};
 use crate::value::{LittleEndian, Value};
-use wain_ast::{Global, GlobalKind, InsnKind};
+use wain_ast::{Global, GlobalKind, InsnKind, ValType};
 
 // Fixed-size any values store indexed in advance
 #[cfg_attr(test, derive(Debug))]
@@ -11,7 +11,7 @@ pub struct Globals {
 
 impl Globals {
     // 5. https://webassembly.github.io/spec/core/exec/modules.html#instantiation
-    pub fn instantiate<'s>(ast: &[Global<'s>]) -> Result<Self> {
+    pub(crate) fn instantiate<'s>(ast: &[Global<'s>]) -> Result<Self> {
         let mut offsets = Vec::with_capacity(ast.len());
 
         fn global_value<'s>(idx: usize, globals: &[Global<'s>]) -> Result<Value> {
@@ -86,6 +86,15 @@ impl Globals {
         assert!((idx as usize) < self.offsets.len());
         let offset = self.offsets[idx as usize];
         LittleEndian::read(&self.bytes, offset)
+    }
+
+    pub fn get_any(&self, idx: u32, ty: ValType) -> Value {
+        match ty {
+            ValType::I32 => Value::I32(self.get(idx)),
+            ValType::I64 => Value::I64(self.get(idx)),
+            ValType::F32 => Value::F32(self.get(idx)),
+            ValType::F64 => Value::F64(self.get(idx)),
+        }
     }
 }
 
