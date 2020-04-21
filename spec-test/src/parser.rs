@@ -276,7 +276,7 @@ impl<'s> Parse<'s> for EmbeddedModule {
                         Some(Token::RParen) => {
                             return Ok(EmbeddedModule {
                                 start,
-                                embedded: Embedded::Quote(text),
+                                src: EmbeddedSrc::Quote(text),
                             });
                         }
                         x => return parser.unexpected_token(x, "string for module quote or ')'"),
@@ -293,7 +293,7 @@ impl<'s> Parse<'s> for EmbeddedModule {
                         Some(Token::RParen) => {
                             return Ok(EmbeddedModule {
                                 start,
-                                embedded: Embedded::Binary(bin),
+                                src: EmbeddedSrc::Binary(bin),
                             });
                         }
                         x => return parser.unexpected_token(x, "string for module binary or ')'"),
@@ -737,9 +737,9 @@ mod tests {
         "#;
         let m: EmbeddedModule = Parser::new(s).parse().unwrap();
         let b: &[u8] = &[0, b'a', b's', b'm', 0x1, 0, 0, 0, 0x5, 0x4, 1, 0, 0x82, 0];
-        match m.embedded {
-            Embedded::Binary(bin) => assert_eq!(bin.as_slice(), b),
-            Embedded::Quote(s) => panic!("not a binary: {}", s),
+        match m.src {
+            EmbeddedSrc::Binary(bin) => assert_eq!(bin.as_slice(), b),
+            EmbeddedSrc::Quote(s) => panic!("not a binary: {}", s),
         }
 
         let s = r#"
@@ -749,9 +749,9 @@ mod tests {
         "#;
         let m: EmbeddedModule = Parser::new(s).parse().unwrap();
         let expected = r#"(memory $foo 1)(memory $foo 1)"#;
-        match m.embedded {
-            Embedded::Quote(s) => assert_eq!(&s, expected),
-            Embedded::Binary(b) => panic!("not a text: {:?}", b),
+        match m.src {
+            EmbeddedSrc::Quote(s) => assert_eq!(&s, expected),
+            EmbeddedSrc::Binary(b) => panic!("not a text: {:?}", b),
         }
 
         // Identifier is ignored
@@ -1057,7 +1057,7 @@ mod tests {
         .parse()
         .unwrap();
 
-        assert!(matches!(a.module.embedded, Embedded::Quote(_)));
+        assert!(matches!(a.module.src, EmbeddedSrc::Quote(_)));
         assert_eq!(a.expected, "alignment");
 
         let a: AssertMalformed = Parser::new(
@@ -1069,7 +1069,7 @@ mod tests {
         .parse()
         .unwrap();
 
-        assert!(matches!(a.module.embedded, Embedded::Binary(_)));
+        assert!(matches!(a.module.src, EmbeddedSrc::Binary(_)));
         assert_eq!(a.expected, "integer too large");
     }
 
@@ -1202,7 +1202,7 @@ mod tests {
         assert!(matches!(
             d,
             Directive::EmbeddedModule(EmbeddedModule {
-                embedded: Embedded::Binary(_),
+                src: EmbeddedSrc::Binary(_),
                 ..
             })
         ));
@@ -1213,7 +1213,7 @@ mod tests {
         assert!(matches!(
             d,
             Directive::EmbeddedModule(EmbeddedModule {
-                embedded: Embedded::Quote(_),
+                src: EmbeddedSrc::Quote(_),
                 ..
             })
         ));

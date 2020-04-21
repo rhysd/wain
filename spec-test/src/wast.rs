@@ -7,13 +7,13 @@ use wain_syntax_text::source::TextSource;
 
 // (module quote *{string})
 // (module binary *{string})
-pub enum Embedded {
+pub enum EmbeddedSrc {
     Quote(String),
     Binary(Vec<u8>),
 }
 pub struct EmbeddedModule {
     pub start: usize,
-    pub embedded: Embedded,
+    pub src: EmbeddedSrc,
 }
 
 // Argument of assertion and invoke

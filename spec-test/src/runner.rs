@@ -185,10 +185,12 @@ impl<W: Write> Runner<W> {
             }
         };
 
-        let color = if sum.failed == 0 {
-            color::GREEN
-        } else {
+        let color = if sum.failed > 0 {
+            color::RED
+        } else if sum.skipped > 0 {
             color::YELLOW
+        } else {
+            color::GREEN
         };
         self.out.write_all(color).unwrap();
         writeln!(&mut self.out, "\nEnd {:?}:", path).unwrap();
@@ -264,6 +266,22 @@ impl<'m, 's> Instances<'m, 's> {
             ))
         }
     }
+
+    fn invoke(&mut self, invoke: &wast::Invoke<'s>, pos: usize) -> Result<'s, Option<Value>> {
+        let (machine, mod_pos) = self.find(invoke.id, pos)?;
+
+        let args: Box<[Value]> = invoke
+            .args
+            .iter()
+            .map(const_value)
+            .collect::<Option<_>>()
+            .unwrap();
+        let ret = machine
+            .invoke(&invoke.name, &args)
+            .map_err(|err| Error::run_error(RunKind::Trapped(*err), self.source, mod_pos))?;
+
+        Ok(ret)
+    }
 }
 
 struct Tester<'a> {
@@ -292,8 +310,8 @@ impl<'a> Tester<'a> {
         &self,
         m: &'a wast::EmbeddedModule,
     ) -> Result<'a, (ast::Module<'a>, usize)> {
-        match &m.embedded {
-            wast::Embedded::Quote(text) => {
+        match &m.src {
+            wast::EmbeddedSrc::Quote(text) => {
                 let root = wat::parse(text).map_err(|err| {
                     Error::run_error(RunKind::ParseQuoteFailure(err), self.source, m.start)
                 })?;
@@ -304,7 +322,7 @@ impl<'a> Tester<'a> {
 
                 Ok((root.module, m.start))
             }
-            wast::Embedded::Binary(bin) => {
+            wast::EmbeddedSrc::Binary(bin) => {
                 let root = binary::parse(bin).map_err(|err| {
                     Error::run_error(RunKind::ParseBinaryFailure(*err), self.source, m.start)
                 })?;
@@ -352,27 +370,6 @@ impl<'a> Tester<'a> {
         }
     }
 
-    fn invoke<'m>(
-        &self,
-        invoke: &wast::Invoke<'a>,
-        instances: &mut Instances<'m, 'a>,
-        pos: usize,
-    ) -> Result<'a, Option<Value>> {
-        let (machine, mod_pos) = instances.find(invoke.id, pos)?;
-
-        let args: Box<[Value]> = invoke
-            .args
-            .iter()
-            .map(const_value)
-            .collect::<Option<_>>()
-            .unwrap();
-        let ret = machine
-            .invoke(&invoke.name, &args)
-            .map_err(|err| Error::run_error(RunKind::Trapped(*err), self.source, mod_pos))?;
-
-        Ok(ret)
-    }
-
     fn test_directive<'m>(
         &self,
         idx: usize,
@@ -388,7 +385,7 @@ impl<'a> Tester<'a> {
                 invoke,
                 expected,
             }) => {
-                let ret = self.invoke(invoke, instances, *start)?;
+                let ret = instances.invoke(invoke, *start)?;
                 if let (Some(expected), Some(actual)) = (*expected, ret) {
                     use wast::Const::*;
                     let ok = match &expected {
@@ -418,7 +415,7 @@ impl<'a> Tester<'a> {
                 expected: _expected,
                 pred: wast::TrapPredicate::Invoke(invoke),
             }) => {
-                match self.invoke(invoke, instances, *start) {
+                match instances.invoke(invoke, *start) {
                     Ok(r) => Err(Error::run_error(
                         RunKind::InvokeTrapExpected(r),
                         self.source,
