@@ -14,13 +14,22 @@ use wain_validate::validate;
 
 const SKIPPED: &[&str] = &["linking.wast"];
 
-// TODO: Use empty slices for Windows
+#[cfg(not(windows))]
 mod color {
     pub const RESET: &[u8] = b"\x1b[0m";
     pub const RED: &[u8] = b"\x1b[91m";
     pub const GREEN: &[u8] = b"\x1b[92m";
     pub const YELLOW: &[u8] = b"\x1b[93m";
     pub const BLUE: &[u8] = b"\x1b[94m";
+}
+
+#[cfg(windows)]
+mod color {
+    pub const RESET: &[u8] = b"";
+    pub const RED: &[u8] = b"";
+    pub const GREEN: &[u8] = b"";
+    pub const YELLOW: &[u8] = b"";
+    pub const BLUE: &[u8] = b"";
 }
 
 struct Discard;
