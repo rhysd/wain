@@ -14,6 +14,7 @@ use wain_validate::validate;
 
 const SKIPPED: &[&str] = &["linking.wast"];
 
+// TODO: Use empty slices for Windows
 mod color {
     pub const RESET: &[u8] = b"\x1b[0m";
     pub const RED: &[u8] = b"\x1b[91m";
@@ -36,17 +37,6 @@ impl io::Write for Discard {
     }
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
-    }
-}
-
-fn const_value(c: &wast::Const) -> Option<Value> {
-    use wast::Const::*;
-    match c {
-        I32(i) => Some(Value::I32(*i)),
-        I64(i) => Some(Value::I64(*i)),
-        F32(f) => Some(Value::F32(*f)),
-        F64(f) => Some(Value::F64(*f)),
-        _ => None,
     }
 }
 
@@ -94,6 +84,16 @@ impl Summary {
         self.passed += 1;
     }
 
+    fn color(&self) -> &'static [u8] {
+        if self.failed > 0 {
+            color::RED
+        } else if self.skipped > 0 {
+            color::YELLOW
+        } else {
+            color::GREEN
+        }
+    }
+
     pub fn success(&self) -> bool {
         self.failed == 0
     }
@@ -137,7 +137,7 @@ impl<W: Write> Runner<W> {
             num_files += 1;
         }
 
-        self.out.write_all(color::BLUE).unwrap();
+        self.out.write_all(total.color()).unwrap();
         writeln!(&mut self.out, "\nResults of {} files:", num_files).unwrap();
         total.println(&mut self.out);
         self.out.write_all(color::RESET).unwrap();
@@ -145,7 +145,7 @@ impl<W: Write> Runner<W> {
     }
 
     pub fn run_file(&mut self, path: &Path, file: &str) -> io::Result<Summary> {
-        self.out.write_all(color::YELLOW).unwrap();
+        self.out.write_all(color::BLUE).unwrap();
         writeln!(&mut self.out, "\nStart: {:?}", path).unwrap();
         self.out.write_all(color::RESET).unwrap();
 
@@ -165,7 +165,10 @@ impl<W: Write> Runner<W> {
                     self.report(1, 1, err);
                     Summary::new(0, 1, 0)
                 }
-                Ok(_) if SKIPPED.contains(&file) => Summary::new(1, 0, 1),
+                Ok(root) if SKIPPED.contains(&file) => {
+                    // All directives are skipped for this file
+                    Summary::new(1, 0, root.directives.len() as u32)
+                }
                 Ok(root) => {
                     let mut tester = Tester {
                         sum: Summary::new(1, 0, 0),
@@ -185,13 +188,7 @@ impl<W: Write> Runner<W> {
             }
         };
 
-        let color = if sum.failed > 0 {
-            color::RED
-        } else if sum.skipped > 0 {
-            color::YELLOW
-        } else {
-            color::GREEN
-        };
+        let color = sum.color();
         self.out.write_all(color).unwrap();
         writeln!(&mut self.out, "\nEnd {:?}:", path).unwrap();
         sum.println(&mut self.out);
@@ -267,15 +264,10 @@ impl<'m, 's> Instances<'m, 's> {
         }
     }
 
-    fn invoke(&mut self, invoke: &wast::Invoke<'s>, pos: usize) -> Result<'s, Option<Value>> {
-        let (machine, mod_pos) = self.find(invoke.id, pos)?;
+    fn invoke(&mut self, invoke: &wast::Invoke<'s>) -> Result<'s, Option<Value>> {
+        let (machine, mod_pos) = self.find(invoke.id, invoke.start)?;
 
-        let args: Box<[Value]> = invoke
-            .args
-            .iter()
-            .map(const_value)
-            .collect::<Option<_>>()
-            .unwrap();
+        let args: Box<[Value]> = invoke.args.iter().map(|c| c.to_value().unwrap()).collect();
         let ret = machine
             .invoke(&invoke.name, &args)
             .map_err(|err| Error::run_error(RunKind::Trapped(*err), self.source, mod_pos))?;
@@ -385,22 +377,9 @@ impl<'a> Tester<'a> {
                 invoke,
                 expected,
             }) => {
-                let ret = instances.invoke(invoke, *start)?;
+                let ret = instances.invoke(invoke)?;
                 if let (Some(expected), Some(actual)) = (*expected, ret) {
-                    use wast::Const::*;
-                    let ok = match &expected {
-                        I32(_) | I64(_) | F32(_) | F64(_) => {
-                            const_value(&expected).unwrap() == actual
-                        }
-                        // TODO: Check payload for arithmetic NaN
-                        CanonicalNan | ArithmeticNan => match actual {
-                            Value::F32(f) => f.is_nan(),
-                            Value::F64(f) => f.is_nan(),
-                            _ => false,
-                        },
-                    };
-
-                    if !ok {
+                    if !expected.matches(&actual) {
                         return Err(Error::run_error(
                             RunKind::InvokeUnexpectedReturn { actual, expected },
                             self.source,
@@ -410,19 +389,51 @@ impl<'a> Tester<'a> {
                 }
                 Ok(())
             }
-            AssertTrap(wast::AssertTrap {
+            AssertReturn(wast::AssertReturn::Global {
+                start,
+                get,
+                expected,
+            }) => {
+                let (machine, _) = instances.find(get.id, *start)?;
+                if let Some(actual) = machine.get_global(&get.name) {
+                    if expected.matches(&actual) {
+                        Ok(())
+                    } else {
+                        Err(Error::run_error(
+                            RunKind::InvokeUnexpectedReturn {
+                                actual,
+                                expected: *expected,
+                            },
+                            self.source,
+                            *start,
+                        ))
+                    }
+                } else {
+                    Err(Error::run_error(
+                        RunKind::GlobalNotFound(get.name.clone()),
+                        self.source,
+                        *start,
+                    ))
+                }
+            }
+            AssertExhaustion(wast::AssertExhaustion {
+                start,
+                expected,
+                invoke,
+            })
+            | AssertTrap(wast::AssertTrap {
                 start,
                 expected,
                 pred: wast::TrapPredicate::Invoke(invoke),
             }) => {
-                match instances.invoke(invoke, *start) {
+                match instances.invoke(invoke) {
                     Ok(ret) => Err(Error::run_error(
                         RunKind::InvokeTrapExpected {
                             ret,
                             expected: expected.clone(),
                         },
                         self.source,
-                        invoke.start,
+                        *start,
                     )),
                     Err(err) if matches!(err.kind(), ErrorKind::Run(RunKind::Trapped(_trap))) => {
                         // Expected path. Execution was trapped
@@ -457,18 +468,79 @@ impl<'a> Tester<'a> {
                     )),
                     Err(_trap) => {
                         // TODO: Check trap reason is what we expected.
-                        // `_expected` is an expected error message as string but we don't conform
+                        // `expected` is an expected error message as string but we don't conform
                         // the message. So we need to have logic for mapping from expected message
                         // to our error.
                         Ok(())
                     }
                 }
             }
-            d => Err(Error::run_error(
+            AssertInvalid(wast::AssertInvalid {
+                start,
+                wat,
+                expected,
+            }) => match validate(wat) {
+                Ok(()) => Err(Error::run_error(
+                    RunKind::UnexpectedValid {
+                        expected: expected.clone(),
+                    },
+                    self.source,
+                    *start,
+                )),
+                Err(_err) => {
+                    // TODO: Check validation error is what we expected.
+                    // `expected` is an expected error message as string but we don't conform the
+                    // message. We need to have logic for mapping from the expected message to our error.
+                    Ok(())
+                }
+            },
+            AssertMalformed(wast::AssertMalformed {
+                start,
+                module,
+                expected,
+            }) => {
+                let success = match &module.src {
+                    wast::EmbeddedSrc::Quote(text) => match wat::parse(text) {
+                        Ok(_) => true,
+                        Err(_err) => {
+                            // TODO: Check parse error is what we expected.
+                            // `expected` is an expected error message as string but we don't conform
+                            // the message. We need to have logic for mapping from the expected message
+                            // to our error.
+                            false
+                        }
+                    },
+                    wast::EmbeddedSrc::Binary(bin) => match binary::parse(bin) {
+                        Ok(_) => true,
+                        Err(_err) => {
+                            // TODO: Check parse error is what we expected.
+                            // `expected` is an expected error message as string but we don't conform
+                            // the message. We need to have logic for mapping from the expected message
+                            // to our error.
+                            false
+                        }
+                    },
+                };
+
+                if success {
+                    Err(Error::run_error(
+                        RunKind::ExpectedParseError {
+                            expected: expected.clone(),
+                        },
+                        self.source,
+                        *start,
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            Register(wast::Register { start, .. })
+            | AssertUnlinkable(wast::AssertUnlinkable { start, .. }) => Err(Error::run_error(
                 RunKind::NotImplementedYet,
                 self.source,
-                d.start_pos(),
+                *start,
             )),
+            Invoke(invoke) => instances.invoke(invoke).map(|_| ()),
         }
     }
 }

@@ -3,6 +3,7 @@
 // test cases.
 
 use wain_ast as ast;
+use wain_exec::Value;
 use wain_syntax_text::source::TextSource;
 
 // (module quote *{string})
@@ -27,6 +28,32 @@ pub enum Const {
     CanonicalNan,
     // nan:arithmetic
     ArithmeticNan,
+}
+
+impl Const {
+    pub fn matches(self, v: &Value) -> bool {
+        use Const::*;
+        match self {
+            I32(_) | I64(_) | F32(_) | F64(_) => &self.to_value().unwrap() == v,
+            // TODO: Check payload for arithmetic NaN
+            CanonicalNan | ArithmeticNan => match v {
+                Value::F32(f) => f.is_nan(),
+                Value::F64(f) => f.is_nan(),
+                _ => false,
+            },
+        }
+    }
+
+    pub fn to_value(self) -> Option<Value> {
+        use Const::*;
+        match self {
+            I32(i) => Some(Value::I32(i)),
+            I64(i) => Some(Value::I64(i)),
+            F32(f) => Some(Value::F32(f)),
+            F64(f) => Some(Value::F64(f)),
+            _ => None,
+        }
+    }
 }
 
 pub struct Root<'source> {

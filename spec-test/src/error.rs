@@ -69,6 +69,13 @@ pub enum RunKind<'source> {
         ret: Option<Value>,
         expected: String,
     },
+    UnexpectedValid {
+        expected: String,
+    },
+    ExpectedParseError {
+        expected: String,
+    },
+    GlobalNotFound(String),
 }
 
 pub struct Error<'source> {
@@ -193,7 +200,7 @@ impl<'s> fmt::Display for Error<'s> {
                     InvalidBinary(err) => write!(f, "invalid binary module: {}", err)?,
                     ModuleNotFound(Some(id)) => write!(f, "module '{}' is not found", id)?,
                     ModuleNotFound(None) => write!(f, "no module is found")?,
-                    Trapped(trap) => write!(f, "execution was trapped: {}", trap)?,
+                    Trapped(trap) => write!(f, "execution was unexpectedly trapped: {}", trap)?,
                     InvokeUnexpectedReturn { actual, expected } => write!(
                         f,
                         "assert_return expected '{:?}' but got '{}'",
@@ -209,6 +216,21 @@ impl<'s> fmt::Display for Error<'s> {
                         "expected trap with message '{}' while invocation but it unexpectedly returned {} successfully",
                         expected,
                         ret,
+                    )?,
+                    UnexpectedValid { expected } => write!(
+                        f,
+                        "expected invalid error with message '{}' but got no error",
+                        expected,
+                    )?,
+                    ExpectedParseError { expected } => write!(
+                        f,
+                        "expected parse error with message '{}' but it was successfully done",
+                        expected,
+                    )?,
+                    GlobalNotFound(name) => write!(
+                        f,
+                        "exported global variable '{}' is not found",
+                        name,
                     )?,
                 }
                 "running"
