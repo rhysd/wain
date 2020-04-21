@@ -412,12 +412,15 @@ impl<'a> Tester<'a> {
             }
             AssertTrap(wast::AssertTrap {
                 start,
-                expected: _expected,
+                expected,
                 pred: wast::TrapPredicate::Invoke(invoke),
             }) => {
                 match instances.invoke(invoke, *start) {
-                    Ok(r) => Err(Error::run_error(
-                        RunKind::InvokeTrapExpected(r),
+                    Ok(ret) => Err(Error::run_error(
+                        RunKind::InvokeTrapExpected {
+                            ret,
+                            expected: expected.clone(),
+                        },
                         self.source,
                         invoke.start,
                     )),
@@ -425,7 +428,7 @@ impl<'a> Tester<'a> {
                         // Expected path. Execution was trapped
                         //
                         // TODO: Check trap reason is what we expected.
-                        // `_expected` is an expected error message as string but we don't conform
+                        // `expected` is an expected error message as string but we don't conform
                         // the message. So we need to have logic for mapping from expected message
                         // to our error.
                         Ok(())
@@ -435,7 +438,7 @@ impl<'a> Tester<'a> {
             }
             AssertTrap(wast::AssertTrap {
                 start,
-                expected: _expected,
+                expected,
                 pred: wast::TrapPredicate::Module(root),
             }) => {
                 validate(root)?;
@@ -445,7 +448,10 @@ impl<'a> Tester<'a> {
                 })?;
                 match machine.execute() {
                     Ok(_) => Err(Error::run_error(
-                        RunKind::InvokeTrapExpected(None),
+                        RunKind::InvokeTrapExpected {
+                            ret: None,
+                            expected: expected.clone(),
+                        },
                         self.source,
                         *start,
                     )),

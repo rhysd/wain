@@ -65,7 +65,10 @@ pub enum RunKind<'source> {
         actual: Value,
         expected: wast::Const,
     },
-    InvokeTrapExpected(Option<Value>),
+    InvokeTrapExpected {
+        ret: Option<Value>,
+        expected: String,
+    },
 }
 
 pub struct Error<'source> {
@@ -196,14 +199,16 @@ impl<'s> fmt::Display for Error<'s> {
                         "assert_return expected '{:?}' but got '{}'",
                         expected, actual
                     )?,
-                    InvokeTrapExpected(None) => write!(
+                    InvokeTrapExpected { ret: None, expected } => write!(
                         f,
-                        "expected trap while invocation but it unexpectedly returned"
+                        "expected trap with message '{}' while invocation but it unexpectedly returned successfully",
+                        expected
                     )?,
-                    InvokeTrapExpected(Some(ret)) => write!(
+                    InvokeTrapExpected { ret: Some(ret), expected } => write!(
                         f,
-                        "expected trap while invocation but it unexpectedly returned {}",
-                        ret
+                        "expected trap with message '{}' while invocation but it unexpectedly returned {} successfully",
+                        expected,
+                        ret,
                     )?,
                 }
                 "running"
