@@ -352,6 +352,19 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         self.stack.write_top_bytes(ret);
     }
 
+    fn binop_trap<T, F>(&mut self, op: F) -> Result<()>
+    where
+        T: StackAccess + LittleEndian,
+        F: FnOnce(T, T) -> Result<T>,
+    {
+        // Instead of popping value and pushing the result, directly modify stack top for optimization
+        let c2 = self.stack.pop();
+        let c1 = self.stack.top();
+        let ret = op(c1, c2)?;
+        self.stack.write_top_bytes(ret);
+        Ok(())
+    }
+
     // https://webassembly.github.io/spec/core/exec/instructions.html#exec-testop
     fn testop<T, F>(&mut self, op: F)
     where
@@ -686,11 +699,27 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             I64Mul => machine.binop::<i64, _>(|l, r| l.overflowing_mul(r).0),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-idiv-s
             // Note: overflowing_div is unnecessary since overflow case is undefined behavior
-            I32DivS => machine.binop::<i32, _>(|l, r| l / r),
-            I64DivS => machine.binop::<i64, _>(|l, r| l / r),
+            I32DivS => machine.binop_trap::<i32, _>(|l, r| match l.checked_div(r) {
+                Some(i) => Ok(i),
+                None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+            })?,
+            I64DivS => machine.binop_trap::<i64, _>(|l, r| match l.checked_div(r) {
+                Some(i) => Ok(i),
+                None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+            })?,
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-idiv-u
-            I32DivU => machine.binop::<i32, _>(|l, r| (l as u32 / r as u32) as i32),
-            I64DivU => machine.binop::<i64, _>(|l, r| (l as u64 / r as u64) as i64),
+            I32DivU => {
+                machine.binop_trap::<i32, _>(|l, r| match (l as u32).checked_div(r as u32) {
+                    Some(u) => Ok(u as i32),
+                    None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+                })?
+            }
+            I64DivU => {
+                machine.binop_trap::<i64, _>(|l, r| match (l as u64).checked_div(r as u64) {
+                    Some(u) => Ok(u as i64),
+                    None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+                })?
+            }
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irem-s
             I32RemS => machine.binop::<i32, _>(|l, r| l % r),
             I64RemS => machine.binop::<i64, _>(|l, r| l % r),

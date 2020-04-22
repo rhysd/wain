@@ -9,13 +9,22 @@ use runner::Runner;
 use std::env;
 use std::ffi::OsStr;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::exit;
 
 #[derive(Debug)]
 enum Target {
     File(PathBuf, String),
     Dir(PathBuf),
+}
+
+impl Target {
+    fn path(&self) -> &Path {
+        match self {
+            Target::File(p, _) => p,
+            Target::Dir(p) => p,
+        }
+    }
 }
 
 fn main() -> io::Result<()> {
@@ -38,7 +47,7 @@ fn main() -> io::Result<()> {
         Target::Dir(p)
     };
 
-    println!("Running tests for {:?}...", target);
+    println!("Running tests for {:?}...", target.path());
 
     let stdout = io::stdout();
     let mut runner = Runner::new(stdout.lock());

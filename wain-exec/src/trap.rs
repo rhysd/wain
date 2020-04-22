@@ -56,6 +56,7 @@ pub enum TrapReason {
         args: Box<[Value]>,
         arg_types: Vec<ValType>,
     },
+    DivideByZero,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -200,6 +201,7 @@ impl fmt::Display for Trap {
                 JoinWritable(args, ", "),
                 JoinWritable(arg_types, " "),
             )?,
+            DivideByZero => f.write_str("attempt to divide integer by zero")?,
         }
         write!(
             f,
