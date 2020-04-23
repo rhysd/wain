@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod crash;
 mod error;
 mod parser;
 mod runner;

@@ -76,6 +76,15 @@ pub enum RunKind<'source> {
         expected: String,
     },
     GlobalNotFound(String),
+    DidNotCrash {
+        bin: PathBuf,
+        args: Box<[String]>,
+        stdout: String,
+    },
+    UnexpectedCrash {
+        stderr: String,
+        expected: String,
+    },
 }
 
 pub struct Error<'source> {
@@ -231,6 +240,20 @@ impl<'s> fmt::Display for Error<'s> {
                         f,
                         "exported global variable '{}' is not found",
                         name,
+                    )?,
+                    DidNotCrash {
+                        bin,
+                        args,
+                        stdout,
+                    } => write!(
+                        f,
+                        "running crash-tester did not crash: bin {:?} with args {:?}. stdout: '{}'", bin, args, stdout,
+                    )?,
+                    UnexpectedCrash{stderr, expected} => write!(
+                        f,
+                        "unexpected crash with stderr '{}' while expecting '{}'",
+                        stderr,
+                        expected,
                     )?,
                 }
                 "running"

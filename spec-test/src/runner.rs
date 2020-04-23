@@ -1,3 +1,4 @@
+use crate::crash::CrashTester;
 use crate::error::{Error, ErrorKind, Result, RunKind};
 use crate::parser::Parser;
 use crate::wast;
@@ -111,11 +112,16 @@ impl Summary {
 // Test runner for one .wast file
 pub struct Runner<W: Write> {
     out: W,
+    crasher: CrashTester,
 }
 
 impl<W: Write> Runner<W> {
-    pub fn new(out: W) -> Self {
-        Runner { out }
+    pub fn new(mut out: W) -> Self {
+        write!(&mut out, "Building crash-tester...").unwrap();
+        let crasher = CrashTester::new();
+        writeln!(&mut out, "done").unwrap();
+
+        Runner { out, crasher }
     }
 
     fn report<D: fmt::Display>(&mut self, nth: usize, total: usize, err: D) {
@@ -185,7 +191,7 @@ impl<W: Write> Runner<W> {
                         source: &source,
                         root: &root,
                     };
-                    tester.test();
+                    tester.test(&self.crasher);
                     let num_errs = tester.errs.len();
                     for (idx, err) in tester.errs.iter_mut().enumerate() {
                         let nth = idx + 1;
@@ -349,7 +355,7 @@ impl<'a> Tester<'a> {
         mods
     }
 
-    fn test(&mut self) {
+    fn test(&mut self, crasher: &CrashTester) {
         // Parse and validate modules at first
         let idx_to_mod = self.parse_embedded_modules();
 
@@ -366,7 +372,7 @@ impl<'a> Tester<'a> {
 
         let mut instances = Instances::new(&idx_to_mod, self.source);
         for (idx, directive) in self.root.directives.iter().enumerate() {
-            let result = self.test_directive(idx, directive, &mut instances);
+            let result = self.test_directive(idx, directive, &mut instances, crasher);
             self.check(result);
         }
     }
@@ -376,6 +382,7 @@ impl<'a> Tester<'a> {
         idx: usize,
         directive: &'a wast::Directive<'a>,
         instances: &mut Instances<'m, 'a>,
+        crasher: &CrashTester,
     ) -> Result<'a, ()> {
         use wast::Directive::*;
         match directive {
@@ -425,12 +432,7 @@ impl<'a> Tester<'a> {
                     ))
                 }
             }
-            AssertExhaustion(wast::AssertExhaustion {
-                start,
-                expected,
-                invoke,
-            })
-            | AssertTrap(wast::AssertTrap {
+            AssertTrap(wast::AssertTrap {
                 start,
                 expected,
                 pred: wast::TrapPredicate::Invoke(invoke),
@@ -541,6 +543,30 @@ impl<'a> Tester<'a> {
                     ))
                 } else {
                     Ok(())
+                }
+            }
+            AssertExhaustion(wast::AssertExhaustion {
+                start,
+                expected,
+                invoke,
+            }) => {
+                let (_, mod_pos) = instances.find(invoke.id, invoke.start)?;
+                let stderr =
+                    crasher.test_crash(self.source, mod_pos, &invoke.name, &invoke.args)?;
+                match expected.as_str() {
+                    "call stack exhausted"
+                        if stderr.contains("fatal runtime error: stack overflow") =>
+                    {
+                        Ok(())
+                    }
+                    _ => Err(Error::run_error(
+                        RunKind::UnexpectedCrash {
+                            stderr,
+                            expected: expected.clone(),
+                        },
+                        self.source,
+                        *start,
+                    )),
                 }
             }
             Register(wast::Register { start, .. })

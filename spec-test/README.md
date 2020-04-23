@@ -14,8 +14,16 @@ This crate contains:
 
 Run this crate as command line tool:
 
+Run all tests:
+
 ```
-cargo run
+cargo run --bin spec-test
+```
+
+Run specific tests:
+
+```
+cargo run --bin spec-test -- ./pass/to/test.wast
 ```
 
 For running faster, release build would be useful:
