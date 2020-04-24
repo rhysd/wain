@@ -93,7 +93,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
 
     fn ensure_op_stack_top(&self, expected: Type) -> Result<Type, S> {
         self.ensure_ctrl_frame_not_empty()?;
-        if self.op_stack.len() == self.current_frame.idx {
+        if self.op_stack.len() == self.current_frame.idx || self.op_stack.is_empty() {
             assert!(self.unreachable);
             return Ok(Type::Unknown);
         }
