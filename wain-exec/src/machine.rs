@@ -721,11 +721,27 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
                 })?
             }
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irem-s
-            I32RemS => machine.binop::<i32, _>(|l, r| l % r),
-            I64RemS => machine.binop::<i64, _>(|l, r| l % r),
+            I32RemS => machine.binop_trap::<i32, _>(|l, r| match l.checked_rem(r) {
+                Some(i) => Ok(i),
+                None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+            })?,
+            I64RemS => machine.binop_trap::<i64, _>(|l, r| match l.checked_rem(r) {
+                Some(i) => Ok(i),
+                None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+            })?,
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irem-u
-            I32RemU => machine.binop::<i32, _>(|l, r| (l as u32 % r as u32) as i32),
-            I64RemU => machine.binop::<i64, _>(|l, r| (l as u64 % r as u64) as i64),
+            I32RemU => {
+                machine.binop_trap::<i32, _>(|l, r| match (l as u32).checked_rem(r as u32) {
+                    Some(i) => Ok(i as i32),
+                    None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+                })?
+            }
+            I64RemU => {
+                machine.binop_trap::<i64, _>(|l, r| match (l as u64).checked_rem(r as u64) {
+                    Some(i) => Ok(i as i64),
+                    None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+                })?
+            }
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-iand
             I32And => machine.binop::<i32, _>(|l, r| l & r),
             I64And => machine.binop::<i64, _>(|l, r| l & r),
