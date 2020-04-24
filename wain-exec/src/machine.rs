@@ -758,8 +758,12 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             I32ShrS => machine.binop::<i32, _>(|l, r| l.overflowing_shr(r as u32).0),
             I64ShrS => machine.binop::<i64, _>(|l, r| l.overflowing_shr(r as u32).0),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishr-u
-            I32ShrU => machine.binop::<i32, _>(|l, r| (l as u32 >> r as u32) as i32),
-            I64ShrU => machine.binop::<i64, _>(|l, r| (l as u64 >> r as u64) as i64),
+            I32ShrU => {
+                machine.binop::<i32, _>(|l, r| (l as u32).overflowing_shr(r as u32).0 as i32)
+            }
+            I64ShrU => {
+                machine.binop::<i64, _>(|l, r| (l as u64).overflowing_shr(r as u32).0 as i64)
+            }
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irotl
             I32Rotl => machine.binop::<i32, _>(|l, r| l.rotate_left(r as u32)),
             I64Rotl => machine.binop::<i64, _>(|l, r| l.rotate_left(r as u32)),
