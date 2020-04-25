@@ -201,7 +201,7 @@ impl fmt::Display for Trap {
                 JoinWritable(args, ", "),
                 JoinWritable(arg_types, " "),
             )?,
-            DivideByZero => f.write_str("attempt to divide integer by zero")?,
+            DivideByZero => f.write_str("attempt to divide integer by zero or calculate reminder with zero divisor")?,
         }
         write!(
             f,
