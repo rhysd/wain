@@ -105,6 +105,13 @@ impl Memory {
             }
         }
         let next_len = (next as usize) * PAGE_SIZE;
+        if next_len > u32::max_value() as usize {
+            // Note: WebAssembly spec does not limit max size of memory when no limit is specified
+            // to memory section. However, an address value is u32. When memory size is larger than
+            // UINT32_MAX, there is no way to refer it (except for using static offset value).
+            // And memory_grow.wast expects allocating more than 2^32 - 1 to fail.
+            return -1;
+        }
         self.data.resize(next_len, 0);
         prev as i32
     }
