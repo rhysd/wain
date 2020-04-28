@@ -6,8 +6,12 @@ use std::mem::size_of;
 use wain_ast as ast;
 
 const PAGE_SIZE: usize = 65536; // 64Ki
+const MAX_MEMORY_BYTES: usize = u32::max_value() as usize; // Address space of Wasm is 32bits
 
 // Memory instance
+//
+// Note: It is more efficient to implement memory buffer by memory mapped buffer. However there is
+// no way to use mmap without unsafe.
 pub struct Memory {
     max: Option<u32>,
     data: Vec<u8>,
@@ -105,7 +109,7 @@ impl Memory {
             }
         }
         let next_len = (next as usize) * PAGE_SIZE;
-        if next_len > u32::max_value() as usize {
+        if next_len > MAX_MEMORY_BYTES {
             // Note: WebAssembly spec does not limit max size of memory when no limit is specified
             // to memory section. However, an address value is u32. When memory size is larger than
             // UINT32_MAX, there is no way to refer it (except for using static offset value).

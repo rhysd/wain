@@ -699,41 +699,43 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             I64Mul => machine.binop::<i64, _>(|l, r| l.overflowing_mul(r).0),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-idiv-s
             // Note: According to i32.wast and i64.wast, integer overflow on idiv_s should be trapped.
+            // This is intended behavior: https://github.com/WebAssembly/spec/issues/1185#issuecomment-619412936
             I32DivS => machine.binop_trap::<i32, _>(|l, r| match l.checked_div(r) {
                 Some(i) => Ok(i),
-                None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+                None => Err(Trap::new(TrapReason::DivByZeroOrOverflow, self.start)),
             })?,
             I64DivS => machine.binop_trap::<i64, _>(|l, r| match l.checked_div(r) {
                 Some(i) => Ok(i),
-                None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+                None => Err(Trap::new(TrapReason::DivByZeroOrOverflow, self.start)),
             })?,
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-idiv-u
             I32DivU => {
                 machine.binop_trap::<i32, _>(|l, r| match (l as u32).checked_div(r as u32) {
                     Some(u) => Ok(u as i32),
-                    None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+                    None => Err(Trap::new(TrapReason::DivByZeroOrOverflow, self.start)),
                 })?
             }
             I64DivU => {
                 machine.binop_trap::<i64, _>(|l, r| match (l as u64).checked_div(r as u64) {
                     Some(u) => Ok(u as i64),
-                    None => Err(Trap::new(TrapReason::DivideByZero, self.start)),
+                    None => Err(Trap::new(TrapReason::DivByZeroOrOverflow, self.start)),
                 })?
             }
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irem-s
             // Note: rem_s should not cause overflow. For example, 0x80000000 % -1 causes overflow
             // in Rust, but Wasm test case says it should return 0. Note that Go has special rule
-            // that x % -1 is always 0.
+            // that x % -1 is 0 when x is the most negative value.
+            // This is intended behavior: https://github.com/WebAssembly/spec/issues/1185#issuecomment-619412936
             I32RemS => machine.binop_trap::<i32, _>(|l, r| {
                 if r == 0 {
-                    Err(Trap::new(TrapReason::DivideByZero, self.start))
+                    Err(Trap::new(TrapReason::RemZeroDivisor, self.start))
                 } else {
                     Ok(l.overflowing_rem(r).0)
                 }
             })?,
             I64RemS => machine.binop_trap::<i64, _>(|l, r| {
                 if r == 0 {
-                    Err(Trap::new(TrapReason::DivideByZero, self.start))
+                    Err(Trap::new(TrapReason::RemZeroDivisor, self.start))
                 } else {
                     Ok(l.overflowing_rem(r).0)
                 }
@@ -741,14 +743,14 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irem-u
             I32RemU => machine.binop_trap::<i32, _>(|l, r| {
                 if r == 0 {
-                    Err(Trap::new(TrapReason::DivideByZero, self.start))
+                    Err(Trap::new(TrapReason::RemZeroDivisor, self.start))
                 } else {
                     Ok((l as u32 % r as u32) as i32) // for unsigned integers overflow never occurs
                 }
             })?,
             I64RemU => machine.binop_trap::<i64, _>(|l, r| {
                 if r == 0 {
-                    Err(Trap::new(TrapReason::DivideByZero, self.start))
+                    Err(Trap::new(TrapReason::RemZeroDivisor, self.start))
                 } else {
                     Ok((l as u64 % r as u64) as i64) // for unsigned integers overflow never occurs
                 }
