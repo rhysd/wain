@@ -8,7 +8,7 @@ license = "MIT"
 homepage = "https://github.com/rhysd/wain/tree/master/wain-exec"
 repository = "https://github.com/rhysd/wain"
 readme = "README.md"
-include = ["src/**/*.rs", "Cargo.toml"]
+include = ["src/**/*.rs", "Cargo.toml", "README.md"]
 keywords = ["wasm", "webassembly", "interpreter"]
 categories = ["wasm"]
 
