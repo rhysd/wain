@@ -34,6 +34,12 @@ impl Const {
     pub fn matches(self, v: &Value) -> bool {
         use Const::*;
         match self {
+            F32(l) if l.is_nan() => {
+                matches!(v, Value::F32(r) if r.is_nan() && l.to_bits() == r.to_bits())
+            }
+            F64(l) if l.is_nan() => {
+                matches!(v, Value::F64(r) if r.is_nan() && l.to_bits() == r.to_bits())
+            }
             I32(_) | I64(_) | F32(_) | F64(_) => &self.to_value().unwrap() == v,
             // TODO: Check payload for arithmetic NaN
             CanonicalNan | ArithmeticNan => match v {
