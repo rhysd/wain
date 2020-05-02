@@ -113,15 +113,20 @@ impl Summary {
 pub struct Runner<W: Write> {
     out: W,
     crasher: CrashTester,
+    fast_fail: bool,
 }
 
 impl<W: Write> Runner<W> {
-    pub fn new(mut out: W) -> Self {
+    pub fn new(mut out: W, fast_fail: bool) -> Self {
         write!(&mut out, "Building crash-tester...").unwrap();
         let crasher = CrashTester::new();
         writeln!(&mut out, "done").unwrap();
 
-        Runner { out, crasher }
+        Runner {
+            out,
+            crasher,
+            fast_fail,
+        }
     }
 
     fn report<D: fmt::Display>(&mut self, nth: usize, total: usize, err: D) {
@@ -148,7 +153,11 @@ impl<W: Write> Runner<W> {
                 continue;
             }
 
-            total.merge(&self.run_file(&path, file)?);
+            let sum = self.run_file(&path, file)?;
+            if self.fast_fail && !sum.success() {
+                break;
+            }
+            total.merge(&sum);
             num_files += 1;
         }
 
