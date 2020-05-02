@@ -7,6 +7,7 @@ use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
+use std::time;
 use wain_ast as ast;
 use wain_exec::{DefaultImporter, Machine, Value};
 use wain_syntax_binary as binary;
@@ -140,6 +141,7 @@ impl<W: Write> Runner<W> {
     pub fn run_dir(&mut self, dir: &Path) -> io::Result<bool> {
         let mut total = Summary::default();
         let mut num_files = 0;
+        let start_time = time::SystemTime::now();
 
         let entries = fs::read_dir(dir)?;
         for entry in entries {
@@ -161,8 +163,14 @@ impl<W: Write> Runner<W> {
             num_files += 1;
         }
 
+        let msecs = start_time.elapsed().unwrap().as_millis();
         self.out.write_all(total.color()).unwrap();
-        writeln!(&mut self.out, "\nResults of {} files:", num_files).unwrap();
+        writeln!(
+            &mut self.out,
+            "\nResults of {} files: {} ms",
+            num_files, msecs,
+        )
+        .unwrap();
         total.println(&mut self.out);
         self.out.write_all(color::RESET).unwrap();
         Ok(total.failed == 0)
@@ -174,6 +182,7 @@ impl<W: Write> Runner<W> {
         self.out.write_all(color::RESET).unwrap();
 
         let source = fs::read_to_string(&path)?;
+        let start_time = time::SystemTime::now();
 
         let sum = if file == "inline-module.wast" {
             // special case
@@ -212,9 +221,10 @@ impl<W: Write> Runner<W> {
             }
         };
 
+        let msecs = start_time.elapsed().unwrap().as_millis();
         let color = sum.color();
         self.out.write_all(color).unwrap();
-        writeln!(&mut self.out, "\nEnd {:?}:", path).unwrap();
+        writeln!(&mut self.out, "\nEnd {:?}: {} ms", path, msecs).unwrap();
         sum.println(&mut self.out);
         self.out.write_all(color::RESET).unwrap();
 
