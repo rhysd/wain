@@ -44,10 +44,7 @@ mod tests {
         assert_eq!(f32_to_u32(u32::MAX as f32), u32::MAX);
         assert_eq!(f32_to_u32(u32::MAX as f32 + 0.5), u32::MAX);
         assert_eq!(f32_to_u32(u32::MAX as f32 + 1.0), u32::MAX);
-        assert_eq!(
-            f32_to_u32(u32::MAX as f32 + 10000.0),
-            u32::MAX
-        );
+        assert_eq!(f32_to_u32(u32::MAX as f32 + 10000.0), u32::MAX);
         assert_eq!(f32_to_u32(f32::NAN), 0);
 
         assert_eq!(f32_to_u64(-1.0), 0);
@@ -56,10 +53,7 @@ mod tests {
         assert_eq!(f32_to_u64(u64::MAX as f32), u64::MAX);
         assert_eq!(f32_to_u64(u64::MAX as f32 + 0.5), u64::MAX);
         assert_eq!(f32_to_u64(u64::MAX as f32 + 1.0), u64::MAX);
-        assert_eq!(
-            f32_to_u64(u64::MAX as f32 + 10000.0),
-            u64::MAX
-        );
+        assert_eq!(f32_to_u64(u64::MAX as f32 + 10000.0), u64::MAX);
         assert_eq!(f32_to_u64(f32::NAN), 0);
 
         assert_eq!(f64_to_u32(-1.0), 0);
@@ -68,10 +62,7 @@ mod tests {
         assert_eq!(f64_to_u32(u32::MAX as f64), u32::MAX);
         assert_eq!(f64_to_u32(u32::MAX as f64 + 0.5), u32::MAX);
         assert_eq!(f64_to_u32(u32::MAX as f64 + 1.0), u32::MAX);
-        assert_eq!(
-            f64_to_u32(u32::MAX as f64 + 10000.0),
-            u32::MAX
-        );
+        assert_eq!(f64_to_u32(u32::MAX as f64 + 10000.0), u32::MAX);
         assert_eq!(f64_to_u32(f64::NAN), 0);
 
         assert_eq!(f64_to_u64(-1.0), 0);
@@ -80,10 +71,7 @@ mod tests {
         assert_eq!(f64_to_u64(u64::MAX as f64), u64::MAX);
         assert_eq!(f64_to_u64(u64::MAX as f64 + 0.5), u64::MAX);
         assert_eq!(f64_to_u64(u64::MAX as f64 + 1.0), u64::MAX);
-        assert_eq!(
-            f64_to_u64(u64::MAX as f64 + 10000.0),
-            u64::MAX
-        );
+        assert_eq!(f64_to_u64(u64::MAX as f64 + 10000.0), u64::MAX);
         assert_eq!(f64_to_u64(f64::NAN), 0);
     }
 
@@ -93,68 +81,44 @@ mod tests {
         assert_eq!(f32_to_i32(i32::MIN as f32), i32::MIN);
         assert_eq!(f32_to_i32(i32::MIN as f32 - 1.0), i32::MIN);
         assert_eq!(f32_to_i32(i32::MIN as f32 - 0.5), i32::MIN);
-        assert_eq!(
-            f32_to_i32(i32::MIN as f32 - 10000.0),
-            i32::MIN
-        );
+        assert_eq!(f32_to_i32(i32::MIN as f32 - 10000.0), i32::MIN);
         assert_eq!(f32_to_i32(i32::MAX as f32), i32::MAX);
         assert_eq!(f32_to_i32(i32::MAX as f32 + 0.5), i32::MAX);
         assert_eq!(f32_to_i32(i32::MAX as f32 + 1.0), i32::MAX);
-        assert_eq!(
-            f32_to_i32(i32::MAX as f32 + 10000.0),
-            i32::MAX
-        );
+        assert_eq!(f32_to_i32(i32::MAX as f32 + 10000.0), i32::MAX);
         assert_eq!(f32_to_i32(f32::NAN), 0);
 
         assert_eq!(f32_to_i64(0.0), 0);
         assert_eq!(f32_to_i64(i64::MIN as f32), i64::MIN);
         assert_eq!(f32_to_i64(i64::MIN as f32 - 1.0), i64::MIN);
         assert_eq!(f32_to_i64(i64::MIN as f32 - 0.5), i64::MIN);
-        assert_eq!(
-            f32_to_i64(i64::MIN as f32 - 10000.0),
-            i64::MIN
-        );
+        assert_eq!(f32_to_i64(i64::MIN as f32 - 10000.0), i64::MIN);
         assert_eq!(f32_to_i64(i64::MAX as f32), i64::MAX);
         assert_eq!(f32_to_i64(i64::MAX as f32 + 0.5), i64::MAX);
         assert_eq!(f32_to_i64(i64::MAX as f32 + 1.0), i64::MAX);
-        assert_eq!(
-            f32_to_i64(i64::MAX as f32 + 10000.0),
-            i64::MAX
-        );
+        assert_eq!(f32_to_i64(i64::MAX as f32 + 10000.0), i64::MAX);
         assert_eq!(f32_to_i64(f32::NAN), 0);
 
         assert_eq!(f64_to_i32(0.0), 0);
         assert_eq!(f64_to_i32(i32::MIN as f64), i32::MIN);
         assert_eq!(f64_to_i32(i32::MIN as f64 - 0.5), i32::MIN);
         assert_eq!(f64_to_i32(i32::MIN as f64 - 1.0), i32::MIN);
-        assert_eq!(
-            f64_to_i32(i32::MIN as f64 - 10000.0),
-            i32::MIN
-        );
+        assert_eq!(f64_to_i32(i32::MIN as f64 - 10000.0), i32::MIN);
         assert_eq!(f64_to_i32(i32::MAX as f64), i32::MAX);
         assert_eq!(f64_to_i32(i32::MAX as f64 + 0.5), i32::MAX);
         assert_eq!(f64_to_i32(i32::MAX as f64 + 1.0), i32::MAX);
-        assert_eq!(
-            f64_to_i32(i32::MAX as f64 + 10000.0),
-            i32::MAX
-        );
+        assert_eq!(f64_to_i32(i32::MAX as f64 + 10000.0), i32::MAX);
         assert_eq!(f64_to_i32(f64::NAN), 0);
 
         assert_eq!(f64_to_i64(0.0), 0);
         assert_eq!(f64_to_i64(i64::MIN as f64), i64::MIN);
         assert_eq!(f64_to_i64(i64::MIN as f64 - 0.5), i64::MIN);
         assert_eq!(f64_to_i64(i64::MIN as f64 - 1.0), i64::MIN);
-        assert_eq!(
-            f64_to_i64(i64::MIN as f64 - 10000.0),
-            i64::MIN
-        );
+        assert_eq!(f64_to_i64(i64::MIN as f64 - 10000.0), i64::MIN);
         assert_eq!(f64_to_i64(i64::MAX as f64), i64::MAX);
         assert_eq!(f64_to_i64(i64::MAX as f64 + 0.5), i64::MAX);
         assert_eq!(f64_to_i64(i64::MAX as f64 + 1.0), i64::MAX);
-        assert_eq!(
-            f64_to_i64(i64::MAX as f64 + 10000.0),
-            i64::MAX
-        );
+        assert_eq!(f64_to_i64(i64::MAX as f64 + 10000.0), i64::MAX);
         assert_eq!(f64_to_i64(f64::NAN), 0);
     }
 }
