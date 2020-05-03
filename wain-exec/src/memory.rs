@@ -6,7 +6,7 @@ use std::mem::size_of;
 use wain_ast as ast;
 
 const PAGE_SIZE: usize = 65536; // 64Ki
-const MAX_MEMORY_BYTES: usize = u32::max_value() as usize; // Address space of Wasm is 32bits
+const MAX_MEMORY_BYTES: usize = u32::MAX as usize; // Address space of Wasm is 32bits
 
 // Memory instance
 //

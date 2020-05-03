@@ -1721,16 +1721,16 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             // https://webassembly.github.io/spec/core/text/instructions.html#numeric-instructions
             // Constants
             "i32.const" => {
-                // Note: i32.const operand takes range of i32::min_value() <= i <= u32::max_value()
-                // When the value is over i32::max_value(), it is treated as u32 value and bitcasted to i32
+                // Note: i32.const operand takes range of i32::MIN <= i <= u32::MAX
+                // When the value is over i32::MAX, it is treated as u32 value and bitcasted to i32
                 let ((sign, base, digits), offset) = match_token!(self.parser, "integer for i32.const operand", Token::Int(s, b, d) => (s, b, d));
                 let u = parse_u32_str(self.parser, digits, base, sign, offset)?;
                 if sign == Sign::Plus {
                     InsnKind::I32Const(u as i32)
-                } else if u == i32::max_value() as u32 + 1 {
+                } else if u == i32::MAX as u32 + 1 {
                     // u as i32 causes overflow
-                    InsnKind::I32Const(i32::min_value())
-                } else if u <= i32::max_value() as u32 {
+                    InsnKind::I32Const(i32::MIN)
+                } else if u <= i32::MAX as u32 {
                     InsnKind::I32Const(-(u as i32))
                 } else {
                     return self.parser.cannot_parse_num(
@@ -1743,16 +1743,16 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                 }
             }
             "i64.const" => {
-                // Note: i64.const operand takes range of i64::min_value() <= i <= u64::max_value()
-                // When the value is over i64::max_value(), it is treated as u64 value and bitcasted to i64
+                // Note: i64.const operand takes range of i64::MIN <= i <= u64::MAX
+                // When the value is over i64::MAX, it is treated as u64 value and bitcasted to i64
                 let ((sign, base, digits), offset) = match_token!(self.parser, "integer for i64.const operand", Token::Int(s, b, d) => (s, b, d));
                 let u = parse_u64_str(self.parser, digits, base, sign, offset)?;
                 if sign == Sign::Plus {
                     InsnKind::I64Const(u as i64)
-                } else if u == i64::max_value() as u64 + 1 {
+                } else if u == i64::MAX as u64 + 1 {
                     // u as i64 causes overflow
-                    InsnKind::I64Const(i64::min_value())
-                } else if u <= i64::max_value() as u64 {
+                    InsnKind::I64Const(i64::MIN)
+                } else if u <= i64::MAX as u64 {
                     InsnKind::I64Const(-(u as i64))
                 } else {
                     return self.parser.cannot_parse_num(

@@ -315,8 +315,8 @@ impl<'s> Parse<'s> for Const {
                     base: NumBase,
                     digits: &'s str,
                 ) -> Result<'s, $int> {
-                    // Operand of iNN.const is in range of iNN::min_value() <= i <= uNN::max_value().
-                    // When the value is over iNN::max_value(), it is parsed as uNN and bitcasted to iNN.
+                    // Operand of iNN.const is in range of iNN::MIN <= i <= uNN::MAX.
+                    // When the value is over iNN::MAX, it is parsed as uNN and bitcasted to iNN.
                     let parsed = if base == NumBase::Hex {
                         <$uint>::from_str_radix(&digits.replace('_', ""), 16)
                     } else {
@@ -325,8 +325,8 @@ impl<'s> Parse<'s> for Const {
 
                     match parsed {
                         Ok(u) if sign == Sign::Plus => Ok(u as $int),
-                        Ok(u) if u == <$int>::max_value() as $uint + 1 => Ok(<$int>::min_value()), // u as $int causes overflow
-                        Ok(u) if u <= <$int>::max_value() as $uint => Ok(-(u as $int)),
+                        Ok(u) if u == <$int>::MAX as $uint + 1 => Ok(<$int>::MIN), // u as $int causes overflow
+                        Ok(u) if u <= <$int>::MAX as $uint => Ok(-(u as $int)),
                         Ok(u) => parser.fail(ParseKind::TooSmallInt {
                             ty: stringify!($int),
                             digits: u as u64,

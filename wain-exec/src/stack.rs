@@ -291,11 +291,11 @@ mod tests {
         assert_eq!(s.top::<i32>(), 0);
         s.push(1i32);
         s.push(-1i32);
-        s.push(i32::max_value());
-        s.push(i32::min_value());
+        s.push(i32::MAX);
+        s.push(i32::MIN);
 
-        assert_eq!(s.pop::<i32>(), i32::min_value());
-        assert_eq!(s.pop::<i32>(), i32::max_value());
+        assert_eq!(s.pop::<i32>(), i32::MIN);
+        assert_eq!(s.pop::<i32>(), i32::MAX);
         assert_eq!(s.pop::<i32>(), -1);
         assert_eq!(s.pop::<i32>(), 1);
         assert_eq!(s.pop::<i32>(), 0);
@@ -307,15 +307,15 @@ mod tests {
         s.push(0i64);
         s.push(1i64);
         s.push(-1i64);
-        s.push(i32::max_value() as i64);
-        s.push(i32::min_value() as i64);
-        s.push(i64::max_value());
-        s.push(i64::min_value());
+        s.push(i32::MAX as i64);
+        s.push(i32::MIN as i64);
+        s.push(i64::MAX);
+        s.push(i64::MIN);
 
-        assert_eq!(s.pop::<i64>(), i64::min_value());
-        assert_eq!(s.pop::<i64>(), i64::max_value());
-        assert_eq!(s.pop::<i64>(), i32::min_value() as i64);
-        assert_eq!(s.pop::<i64>(), i32::max_value() as i64);
+        assert_eq!(s.pop::<i64>(), i64::MIN);
+        assert_eq!(s.pop::<i64>(), i64::MAX);
+        assert_eq!(s.pop::<i64>(), i32::MIN as i64);
+        assert_eq!(s.pop::<i64>(), i32::MAX as i64);
         assert_eq!(s.pop::<i64>(), -1);
         assert_eq!(s.pop::<i64>(), 1);
         assert_eq!(s.pop::<i64>(), 0);
@@ -361,15 +361,15 @@ mod tests {
 
     #[test]
     fn any_value() {
-        let i32_s = [0, 1, -1, i32::max_value(), i32::min_value()];
+        let i32_s = [0, 1, -1, i32::MAX, i32::MIN];
         let i64_s = [
             0,
             1,
             -1,
-            i32::max_value() as i64,
-            i32::min_value() as i64,
-            i64::max_value(),
-            i64::min_value(),
+            i32::MAX as i64,
+            i32::MIN as i64,
+            i64::MAX,
+            i64::MIN,
         ];
         let f32_s = [0.0, 3.14, -1.0, f32::INFINITY, f32::NEG_INFINITY, f32::NAN];
         let f64_s = [0.0, 3.14, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN];
