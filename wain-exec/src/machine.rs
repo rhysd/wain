@@ -689,14 +689,14 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             I32Popcnt => machine.unop::<i32, _>(|v| v.count_ones() as i32),
             I64Popcnt => machine.unop::<i64, _>(|v| v.count_ones() as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-iadd
-            I32Add => machine.binop::<i32, _>(|l, r| l.overflowing_add(r).0),
-            I64Add => machine.binop::<i64, _>(|l, r| l.overflowing_add(r).0),
+            I32Add => machine.binop::<i32, _>(|l, r| l.wrapping_add(r)),
+            I64Add => machine.binop::<i64, _>(|l, r| l.wrapping_add(r)),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-isub
-            I32Sub => machine.binop::<i32, _>(|l, r| l.overflowing_sub(r).0),
-            I64Sub => machine.binop::<i64, _>(|l, r| l.overflowing_sub(r).0),
+            I32Sub => machine.binop::<i32, _>(|l, r| l.wrapping_sub(r)),
+            I64Sub => machine.binop::<i64, _>(|l, r| l.wrapping_sub(r)),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-imul
-            I32Mul => machine.binop::<i32, _>(|l, r| l.overflowing_mul(r).0),
-            I64Mul => machine.binop::<i64, _>(|l, r| l.overflowing_mul(r).0),
+            I32Mul => machine.binop::<i32, _>(|l, r| l.wrapping_mul(r)),
+            I64Mul => machine.binop::<i64, _>(|l, r| l.wrapping_mul(r)),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-idiv-s
             // Note: According to i32.wast and i64.wast, integer overflow on idiv_s should be trapped.
             // This is intended behavior: https://github.com/WebAssembly/spec/issues/1185#issuecomment-619412936
@@ -730,14 +730,14 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
                 if r == 0 {
                     Err(Trap::new(TrapReason::RemZeroDivisor, self.start))
                 } else {
-                    Ok(l.overflowing_rem(r).0)
+                    Ok(l.wrapping_rem(r))
                 }
             })?,
             I64RemS => machine.binop_trap::<i64, _>(|l, r| {
                 if r == 0 {
                     Err(Trap::new(TrapReason::RemZeroDivisor, self.start))
                 } else {
-                    Ok(l.overflowing_rem(r).0)
+                    Ok(l.wrapping_rem(r))
                 }
             })?,
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irem-u
@@ -765,18 +765,14 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             I32Xor => machine.binop::<i32, _>(|l, r| l ^ r),
             I64Xor => machine.binop::<i64, _>(|l, r| l ^ r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishl
-            I32Shl => machine.binop::<i32, _>(|l, r| l.overflowing_shl(r as u32).0),
-            I64Shl => machine.binop::<i64, _>(|l, r| l.overflowing_shl(r as u32).0),
+            I32Shl => machine.binop::<i32, _>(|l, r| l.wrapping_shl(r as u32)),
+            I64Shl => machine.binop::<i64, _>(|l, r| l.wrapping_shl(r as u32)),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishr-s
-            I32ShrS => machine.binop::<i32, _>(|l, r| l.overflowing_shr(r as u32).0),
-            I64ShrS => machine.binop::<i64, _>(|l, r| l.overflowing_shr(r as u32).0),
+            I32ShrS => machine.binop::<i32, _>(|l, r| l.wrapping_shr(r as u32)),
+            I64ShrS => machine.binop::<i64, _>(|l, r| l.wrapping_shr(r as u32)),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishr-u
-            I32ShrU => {
-                machine.binop::<i32, _>(|l, r| (l as u32).overflowing_shr(r as u32).0 as i32)
-            }
-            I64ShrU => {
-                machine.binop::<i64, _>(|l, r| (l as u64).overflowing_shr(r as u32).0 as i64)
-            }
+            I32ShrU => machine.binop::<i32, _>(|l, r| (l as u32).wrapping_shr(r as u32) as i32),
+            I64ShrU => machine.binop::<i64, _>(|l, r| (l as u64).wrapping_shr(r as u32) as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-irotl
             I32Rotl => machine.binop::<i32, _>(|l, r| l.rotate_left(r as u32)),
             I64Rotl => machine.binop::<i64, _>(|l, r| l.rotate_left(r as u32)),
