@@ -800,28 +800,20 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
                 // f32::round() is not available because behavior when two values are equally near
                 // is different. For example, 4.5f32.round() is 5.0 but (f32.nearest (f32.const 4.5))
                 // is 4.0.
-                let f2 = f.floor();
-                if (f - f2) == 0.5 {
-                    if f2 % 2.0 == 0.0 {
-                        f2
-                    } else {
-                        f2 + 1.0
-                    }
+                let fround = f.round();
+                if (f - fround).abs() == 0.5 && fround % 2.0 != 0.0 {
+                    f.trunc()
                 } else {
-                    f.round()
+                    fround
                 }
             }),
             F64Nearest => machine.unop::<f64, _>(|f| {
                 // f64::round() is not available for the same reason as f32.nearest
-                let f2 = f.floor();
-                if (f - f2) == 0.5 {
-                    if f2 % 2.0 == 0.0 {
-                        f2
-                    } else {
-                        f2 + 1.0
-                    }
+                let fround = f.round();
+                if (f - fround).abs() == 0.5 && fround % 2.0 != 0.0 {
+                    f.trunc()
                 } else {
-                    f.round()
+                    fround
                 }
             }),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fsqrt
