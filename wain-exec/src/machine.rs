@@ -1059,10 +1059,40 @@ mod tests {
             .unwrap();
         assert!(matches!(f, Value::F32(f) if f == 4.0));
 
+        let f = exec_insns(F32, vec![F32Const(3.5), F32Nearest])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::F32(f) if f == 4.0));
+
+        let f = exec_insns(F32, vec![F32Const(-0.5), F32Nearest])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::F32(f) if f == 0.0 && f.is_sign_negative())); // -0.0
+
+        let f = exec_insns(F32, vec![F32Const(0.5), F32Nearest])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::F32(f) if f == 0.0 && f.is_sign_positive())); // +0.0
+
         let f = exec_insns(F64, vec![F64Const(4.5), F64Nearest])
             .unwrap()
             .unwrap();
         assert!(matches!(f, Value::F64(f) if f == 4.0));
+
+        let f = exec_insns(F64, vec![F64Const(3.5), F64Nearest])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::F64(f) if f == 4.0));
+
+        let f = exec_insns(F64, vec![F64Const(-0.5), F64Nearest])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::F64(f) if f == 0.0 && f.is_sign_negative())); // -0.0
+
+        let f = exec_insns(F64, vec![F64Const(0.5), F64Nearest])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::F64(f) if f == 0.0 && f.is_sign_positive() /* +0.0 */));
     }
 
     #[test]
