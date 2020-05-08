@@ -24,6 +24,7 @@ pub type LocalIdx = u32;
 pub type LabelIdx = u32;
 
 // https://webassembly.github.io/spec/core/syntax/modules.html
+#[derive(Default)]
 pub struct Module<'s> {
     pub start: usize,
     pub id: Option<&'s str>,

@@ -939,10 +939,11 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
 mod tests {
     use super::*;
     use crate::import::DefaultImporter;
+    use std::borrow::Cow;
     use std::env;
     use std::fmt;
     use std::fs;
-    use std::io::{self, Read};
+    use std::io::{self, Read, Write};
     use std::path::PathBuf;
     use std::result;
     use wain_syntax_text::parse;
@@ -953,6 +954,15 @@ mod tests {
     impl Read for Discard {
         fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
             Ok(b.len())
+        }
+    }
+
+    impl Write for Discard {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
         }
     }
 
@@ -999,5 +1009,65 @@ mod tests {
         let (run, stdout) = exec(dir.join("hello_struct.wat"));
         assert_eq!(run, Run::Success);
         assert_eq!(stdout, b"Hello, world\n");
+    }
+
+    #[test]
+    fn floating_point_edge_cases() {
+        use ast::*;
+
+        fn exec(ret: Option<ValType>, insns: Vec<InsnKind>) -> Result<Option<Value>> {
+            let mut results = vec![];
+            if let Some(ty) = ret {
+                results.push(ty);
+            }
+
+            let expr = insns
+                .into_iter()
+                .map(|kind| Instruction { start: 0, kind })
+                .collect();
+
+            let mut module = Module::default();
+            module.memories.push(Memory {
+                start: 0,
+                ty: MemType {
+                    limit: Limits::From(0),
+                },
+                import: None,
+            });
+            module.types.push(FuncType {
+                start: 0,
+                params: vec![],
+                results,
+            });
+            module.funcs.push(Func {
+                start: 0,
+                idx: 0,
+                kind: FuncKind::Body {
+                    locals: vec![],
+                    expr,
+                },
+            });
+            module.exports.push(Export {
+                start: 0,
+                name: Name(Cow::Borrowed("test")),
+                kind: ExportKind::Func(0),
+            });
+
+            let importer = DefaultImporter::with_stdio(Discard, Discard);
+            let mut machine = Machine::instantiate(&module, importer)?;
+            machine.invoke("test", &[])
+        }
+
+        use InsnKind::*;
+
+        let f = exec(Some(ValType::F32), vec![F32Const(4.5), F32Nearest])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::F32(f) if f == 4.0));
+
+        let f = exec(Some(ValType::F64), vec![F64Const(4.5), F64Nearest])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::F64(f) if f == 4.0));
     }
 }
