@@ -1011,63 +1011,93 @@ mod tests {
         assert_eq!(stdout, b"Hello, world\n");
     }
 
+    fn exec_insns(ty: ast::ValType, insns: Vec<ast::InsnKind>) -> Result<Option<Value>> {
+        let expr = insns
+            .into_iter()
+            .map(|kind| ast::Instruction { start: 0, kind })
+            .collect();
+
+        let mut module = ast::Module::default();
+        module.memories.push(ast::Memory {
+            start: 0,
+            ty: ast::MemType {
+                limit: ast::Limits::From(0),
+            },
+            import: None,
+        });
+        module.types.push(ast::FuncType {
+            start: 0,
+            params: vec![],
+            results: vec![ty],
+        });
+        module.funcs.push(ast::Func {
+            start: 0,
+            idx: 0,
+            kind: ast::FuncKind::Body {
+                locals: vec![],
+                expr,
+            },
+        });
+        module.exports.push(ast::Export {
+            start: 0,
+            name: ast::Name(Cow::Borrowed("test")),
+            kind: ast::ExportKind::Func(0),
+        });
+
+        let importer = DefaultImporter::with_stdio(Discard, Discard);
+        let mut machine = Machine::instantiate(&module, importer)?;
+        machine.invoke("test", &[])
+    }
+
     #[test]
     fn floating_point_edge_cases() {
-        use ast::*;
+        use ast::InsnKind::*;
+        use ast::ValType::*;
 
-        fn exec(ret: Option<ValType>, insns: Vec<InsnKind>) -> Result<Option<Value>> {
-            let mut results = vec![];
-            if let Some(ty) = ret {
-                results.push(ty);
-            }
-
-            let expr = insns
-                .into_iter()
-                .map(|kind| Instruction { start: 0, kind })
-                .collect();
-
-            let mut module = Module::default();
-            module.memories.push(Memory {
-                start: 0,
-                ty: MemType {
-                    limit: Limits::From(0),
-                },
-                import: None,
-            });
-            module.types.push(FuncType {
-                start: 0,
-                params: vec![],
-                results,
-            });
-            module.funcs.push(Func {
-                start: 0,
-                idx: 0,
-                kind: FuncKind::Body {
-                    locals: vec![],
-                    expr,
-                },
-            });
-            module.exports.push(Export {
-                start: 0,
-                name: Name(Cow::Borrowed("test")),
-                kind: ExportKind::Func(0),
-            });
-
-            let importer = DefaultImporter::with_stdio(Discard, Discard);
-            let mut machine = Machine::instantiate(&module, importer)?;
-            machine.invoke("test", &[])
-        }
-
-        use InsnKind::*;
-
-        let f = exec(Some(ValType::F32), vec![F32Const(4.5), F32Nearest])
+        let f = exec_insns(F32, vec![F32Const(4.5), F32Nearest])
             .unwrap()
             .unwrap();
         assert!(matches!(f, Value::F32(f) if f == 4.0));
 
-        let f = exec(Some(ValType::F64), vec![F64Const(4.5), F64Nearest])
+        let f = exec_insns(F64, vec![F64Const(4.5), F64Nearest])
             .unwrap()
             .unwrap();
         assert!(matches!(f, Value::F64(f) if f == 4.0));
+    }
+
+    #[test]
+    fn integer_edge_cases() {
+        use ast::InsnKind::*;
+        use ast::ValType::*;
+
+        let f = exec_insns(I32, vec![I32Const(i32::MAX), I32Const(1), I32Add])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::I32(i) if i == i32::MIN));
+
+        let f = exec_insns(I32, vec![I32Const(i32::MIN), I32Const(1), I32Sub])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::I32(i) if i == i32::MAX));
+
+        let f = exec_insns(I32, vec![I32Const(i32::MIN), I32Const(-1), I32Mul])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::I32(i) if i == i32::MIN));
+
+        let f = exec_insns(I64, vec![I64Const(i64::MAX), I64Const(1), I64Add])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::I64(i) if i == i64::MIN));
+
+        let f = exec_insns(I64, vec![I64Const(i64::MIN), I64Const(1), I64Sub])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::I64(i) if i == i64::MAX));
+
+        let f = exec_insns(I64, vec![I64Const(i64::MIN), I64Const(-1), I64Mul])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(f, Value::I64(i) if i == i64::MIN));
     }
 }
