@@ -1050,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn floating_point_edge_cases() {
+    fn nearest_edge_cases() {
         use ast::InsnKind::*;
         use ast::ValType::*;
 
@@ -1096,38 +1096,63 @@ mod tests {
     }
 
     #[test]
-    fn integer_edge_cases() {
+    fn int_overflow() {
         use ast::InsnKind::*;
         use ast::ValType::*;
 
-        let f = exec_insns(I32, vec![I32Const(i32::MAX), I32Const(1), I32Add])
+        let i = exec_insns(I32, vec![I32Const(i32::MAX), I32Const(1), I32Add])
             .unwrap()
             .unwrap();
-        assert!(matches!(f, Value::I32(i) if i == i32::MIN));
+        assert!(matches!(i, Value::I32(i) if i == i32::MIN));
 
-        let f = exec_insns(I32, vec![I32Const(i32::MIN), I32Const(1), I32Sub])
+        let i = exec_insns(I32, vec![I32Const(i32::MIN), I32Const(1), I32Sub])
             .unwrap()
             .unwrap();
-        assert!(matches!(f, Value::I32(i) if i == i32::MAX));
+        assert!(matches!(i, Value::I32(i) if i == i32::MAX));
 
-        let f = exec_insns(I32, vec![I32Const(i32::MIN), I32Const(-1), I32Mul])
+        let i = exec_insns(I32, vec![I32Const(i32::MIN), I32Const(-1), I32Mul])
             .unwrap()
             .unwrap();
-        assert!(matches!(f, Value::I32(i) if i == i32::MIN));
+        assert!(matches!(i, Value::I32(i) if i == i32::MIN));
 
-        let f = exec_insns(I64, vec![I64Const(i64::MAX), I64Const(1), I64Add])
+        let i = exec_insns(I64, vec![I64Const(i64::MAX), I64Const(1), I64Add])
             .unwrap()
             .unwrap();
-        assert!(matches!(f, Value::I64(i) if i == i64::MIN));
+        assert!(matches!(i, Value::I64(i) if i == i64::MIN));
 
-        let f = exec_insns(I64, vec![I64Const(i64::MIN), I64Const(1), I64Sub])
+        let i = exec_insns(I64, vec![I64Const(i64::MIN), I64Const(1), I64Sub])
             .unwrap()
             .unwrap();
-        assert!(matches!(f, Value::I64(i) if i == i64::MAX));
+        assert!(matches!(i, Value::I64(i) if i == i64::MAX));
 
-        let f = exec_insns(I64, vec![I64Const(i64::MIN), I64Const(-1), I64Mul])
+        let i = exec_insns(I64, vec![I64Const(i64::MIN), I64Const(-1), I64Mul])
             .unwrap()
             .unwrap();
-        assert!(matches!(f, Value::I64(i) if i == i64::MIN));
+        assert!(matches!(i, Value::I64(i) if i == i64::MIN));
+    }
+
+    #[test]
+    fn div_rem_edge_cases() {
+        use ast::InsnKind::*;
+        use ast::ValType::*;
+
+        let i = exec_insns(I32, vec![I32Const(i32::MIN), I32Const(-1), I32RemS])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::I32(0)), "{:?}", i);
+
+        let i = exec_insns(I64, vec![I64Const(i64::MIN), I64Const(-1), I64RemS])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::I64(0)), "{:?}", i);
+
+        let e = exec_insns(I32, vec![I32Const(1), I32Const(0), I32RemS]).unwrap_err();
+        assert!(matches!(e.reason, TrapReason::RemZeroDivisor));
+        let e = exec_insns(I32, vec![I32Const(1), I32Const(0), I32RemU]).unwrap_err();
+        assert!(matches!(e.reason, TrapReason::RemZeroDivisor));
+        let e = exec_insns(I64, vec![I64Const(1), I64Const(0), I64RemS]).unwrap_err();
+        assert!(matches!(e.reason, TrapReason::RemZeroDivisor));
+        let e = exec_insns(I64, vec![I64Const(1), I64Const(0), I64RemU]).unwrap_err();
+        assert!(matches!(e.reason, TrapReason::RemZeroDivisor));
     }
 }
