@@ -404,14 +404,15 @@ impl<'s> Parse<'s> for Const {
                     // digits are decimal number e.g. p+1234
                     if let Some((sign, digits)) = exp {
                         let i = match digits.replace('_', "").parse::<i32>() {
-                            Ok(i) => sign.apply(i),
+                            Ok(i) => i,
                             Err(_) => {
                                 return parser.fail(ParseKind::InvalidHexFloat {
                                     ty: stringify!($ty),
                                 })
                             }
                         };
-                        let exp = (2.0 as $ty).powi(i);
+                        let step: $ty = if sign == Sign::Plus { 2.0 } else { 0.5 };
+                        let exp = step.powi(i);
                         f *= exp;
                     }
 
