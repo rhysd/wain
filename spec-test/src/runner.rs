@@ -167,7 +167,7 @@ impl<W: Write> Runner<W> {
         self.out.write_all(total.color()).unwrap();
         writeln!(
             &mut self.out,
-            "\nResults of {} files: {} ms",
+            "\nResults of {} files ({} ms):",
             num_files, msecs,
         )
         .unwrap();
@@ -224,7 +224,7 @@ impl<W: Write> Runner<W> {
         let msecs = start_time.elapsed().unwrap().as_millis();
         let color = sum.color();
         self.out.write_all(color).unwrap();
-        writeln!(&mut self.out, "\nEnd {:?}: {} ms", path, msecs).unwrap();
+        writeln!(&mut self.out, "\nEnd {:?} ({} ms):", path, msecs).unwrap();
         sum.println(&mut self.out);
         self.out.write_all(color::RESET).unwrap();
 
