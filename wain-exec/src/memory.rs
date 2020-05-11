@@ -126,7 +126,7 @@ impl Memory {
         at: usize,
         operation: &'static str,
     ) -> Result<()> {
-        if addr + size_of::<V>() > self.data.len() {
+        if addr.saturating_add(size_of::<V>()) > self.data.len() {
             Err(Trap::new(
                 TrapReason::LoadMemoryOutOfRange {
                     max: self.data.len(),
