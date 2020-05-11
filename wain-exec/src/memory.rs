@@ -74,7 +74,7 @@ impl Memory {
             }
         }
 
-        if self.data.len() <= end_addr {
+        if self.data.len() < end_addr {
             return Err(Trap::new(
                 TrapReason::DataSegmentOutOfBuffer {
                     segment_end: end_addr,
