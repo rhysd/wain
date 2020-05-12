@@ -17,13 +17,19 @@ Run this crate as command line tool:
 Run all tests:
 
 ```
-cargo run --bin spec-test
+cargo run
 ```
 
 Run specific tests:
 
 ```
-cargo run --bin spec-test -- ./pass/to/test.wast
+cargo run -- ./pass/to/test.wast
+```
+
+Stop running tests on first failure:
+
+```
+cargo run -- -f
 ```
 
 For running faster, release build would be useful:
