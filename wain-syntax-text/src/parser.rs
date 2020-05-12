@@ -33,10 +33,8 @@ pub enum ParseErrorKind<'source> {
     },
     NumberMustBePositive(NumBase, &'source str),
     CannotParseNum {
-        digits: &'source str,
-        reason: &'static str,
-        base: NumBase,
-        sign: Sign,
+        reason: String,
+        ty: &'static str,
     },
     MultipleEntrypoints(Start<'source>, Start<'source>),
     IdAlreadyDefined {
@@ -113,20 +111,7 @@ impl<'s> fmt::Display for ParseError<'s> {
             InvalidOperand { insn, msg } => {
                 write!(f, "invalid operand for '{}' instruction: {}", insn, msg)?
             }
-            CannotParseNum {
-                digits,
-                reason,
-                base,
-                sign,
-            } => {
-                let base = if *base == NumBase::Hex { "0x" } else { "" };
-                let sign = if *sign == Sign::Minus { "-" } else { "" };
-                write!(
-                    f,
-                    "cannot parse integer {}{}{}: {}",
-                    sign, base, digits, reason
-                )?
-            }
+            CannotParseNum { reason, ty } => write!(f, "cannot parse {} number: {}", ty, reason)?,
             MultipleEntrypoints(prev, cur) => {
                 write!(f, "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}", cur.idx, prev.idx, prev.start)?
             }
@@ -354,20 +339,16 @@ impl<'s> Parser<'s> {
         )
     }
 
-    fn cannot_parse_num<T>(
+    fn cannot_parse_num<T, S: ToString>(
         &self,
-        reason: &'static str,
-        digits: &'s str,
-        base: NumBase,
-        sign: Sign,
+        ty: &'static str,
+        reason: S,
         offset: usize,
     ) -> Result<'s, T> {
         self.error(
             ParseErrorKind::CannotParseNum {
-                digits,
-                reason,
-                base,
-                sign,
+                reason: reason.to_string(),
+                ty,
             },
             offset,
         )
@@ -470,7 +451,7 @@ impl<'s> Parser<'s> {
             (Token::Int(sign, base, s), offset) if sign == Sign::Minus => {
                 self.error(ParseErrorKind::NumberMustBePositive(base, s), offset)
             }
-            (Token::Int(_, base, s), offset) => parse_u32_str(self, s, base, Sign::Plus, offset),
+            (Token::Int(_, base, s), offset) => parse_u32_str(self, s, base, offset),
             (tok, offset) => self.unexpected_token(tok.clone(), expected, offset),
         }
     }
@@ -539,7 +520,6 @@ macro_rules! parse_uint_function {
             parser: &Parser<'s>,
             input: &'s str,
             base: NumBase,
-            sign: Sign,
             offset: usize,
         ) -> Result<'s, $uint> {
             let radix = base.radix();
@@ -557,19 +537,15 @@ macro_rules! parse_uint_function {
                         ret = added;
                     } else {
                         return parser.cannot_parse_num(
-                            concat!("too big integer for ", stringify!($uint)),
-                            input,
-                            base,
-                            sign,
+                            stringify!($uint),
+                            "too big integer",
                             offset,
                         );
                     }
                 } else {
                     return parser.cannot_parse_num(
-                        "invalid digit for integer",
-                        input,
-                        base,
-                        sign,
+                        stringify!($uint),
+                        format!("invalid digit '{}'", c),
                         offset,
                     );
                 }
@@ -589,7 +565,6 @@ macro_rules! parse_float_number_function {
             parser: &Parser<'s>,
             input: &'s str,
             base: NumBase,
-            sign: Sign,
             offset: usize,
         ) -> Result<'s, $float> {
             let radix_u = base.radix();
@@ -608,10 +583,8 @@ macro_rules! parse_float_number_function {
                     ret = ret * radix + (d as $float);
                 } else {
                     return parser.cannot_parse_num(
-                        "invalid digit for float number",
-                        input,
-                        base,
-                        sign,
+                        stringify!($float>),
+                        format!("invalid digit '{}'", c),
                         offset,
                     );
                 }
@@ -629,10 +602,8 @@ macro_rules! parse_float_number_function {
                     step *= radix;
                 } else {
                     return parser.cannot_parse_num(
-                        "invalid digit for float number",
-                        input,
-                        base,
-                        sign,
+                        stringify!($float),
+                        format!("invalid digit '{}'", c),
                         offset,
                     );
                 }
@@ -1245,7 +1216,7 @@ impl<'s> Parse<'s> for Index<'s> {
                 parser.error(ParseErrorKind::NumberMustBePositive(base, s), offset)
             }
             (Token::Int(_, base, s), offset) => {
-                parse_u32_str(parser, s, base, Sign::Plus, offset).map(Index::Num)
+                parse_u32_str(parser, s, base, offset).map(Index::Num)
             }
             (Token::Ident(id), _) => Ok(Index::Ident(id)),
             (tok, offset) => parser.unexpected_token(tok.clone(), expected, offset),
@@ -1464,7 +1435,7 @@ impl<'s> Parse<'s> for Mem {
         let offset = match parser.peek("'offset' keyword for memory instruction")? {
             (Token::Keyword(kw), offset) if kw.starts_with("offset=") => {
                 let (base, digits) = base_and_digits(&kw[7..]);
-                let u = parse_u32_str(parser, digits, base, Sign::Plus, offset)?;
+                let u = parse_u32_str(parser, digits, base, offset)?;
                 parser.eat_token(); // Eat 'offset' keyword
                 Some(u)
             }
@@ -1474,7 +1445,7 @@ impl<'s> Parse<'s> for Mem {
         let align = match parser.peek("'align' keyword for memory instruction")? {
             (Token::Keyword(kw), offset) if kw.starts_with("align=") => {
                 let (base, digits) = base_and_digits(&kw[6..]);
-                let u = parse_u8_str(parser, digits, base, Sign::Plus, offset)?;
+                let u = parse_u8_str(parser, digits, base, offset)?;
                 parser.eat_token(); // Eat 'align' keyword
                 Some(u)
             }
@@ -1724,7 +1695,7 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                 // Note: i32.const operand takes range of i32::MIN <= i <= u32::MAX
                 // When the value is over i32::MAX, it is treated as u32 value and bitcasted to i32
                 let ((sign, base, digits), offset) = match_token!(self.parser, "integer for i32.const operand", Token::Int(s, b, d) => (s, b, d));
-                let u = parse_u32_str(self.parser, digits, base, sign, offset)?;
+                let u = parse_u32_str(self.parser, digits, base, offset)?;
                 if sign == Sign::Plus {
                     InsnKind::I32Const(u as i32)
                 } else if u == i32::MAX as u32 + 1 {
@@ -1733,20 +1704,16 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                 } else if u <= i32::MAX as u32 {
                     InsnKind::I32Const(-(u as i32))
                 } else {
-                    return self.parser.cannot_parse_num(
-                        "too small integer for i32",
-                        digits,
-                        base,
-                        sign,
-                        offset,
-                    );
+                    return self
+                        .parser
+                        .cannot_parse_num("i32", "too small integer", offset);
                 }
             }
             "i64.const" => {
                 // Note: i64.const operand takes range of i64::MIN <= i <= u64::MAX
                 // When the value is over i64::MAX, it is treated as u64 value and bitcasted to i64
                 let ((sign, base, digits), offset) = match_token!(self.parser, "integer for i64.const operand", Token::Int(s, b, d) => (s, b, d));
-                let u = parse_u64_str(self.parser, digits, base, sign, offset)?;
+                let u = parse_u64_str(self.parser, digits, base, offset)?;
                 if sign == Sign::Plus {
                     InsnKind::I64Const(u as i64)
                 } else if u == i64::MAX as u64 + 1 {
@@ -1755,13 +1722,9 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                 } else if u <= i64::MAX as u64 {
                     InsnKind::I64Const(-(u as i64))
                 } else {
-                    return self.parser.cannot_parse_num(
-                        "too small integer for i64",
-                        digits,
-                        base,
-                        sign,
-                        offset,
-                    );
+                    return self
+                        .parser
+                        .cannot_parse_num("i64", "too small integer", offset);
                 }
             }
             "f32.const" => {
@@ -1781,19 +1744,12 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                             //   - within 23bits (fraction of f32 is 23bits)
                             //   - >= 2^(23-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
                             // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
-                            let payload_u = parse_u32_str(
-                                self.parser,
-                                payload,
-                                NumBase::Hex,
-                                Sign::Plus,
-                                offset,
-                            )?;
+                            let payload_u =
+                                parse_u32_str(self.parser, payload, NumBase::Hex, offset)?;
                             if payload_u == 0 || 0x80_0000 <= payload_u {
                                 return self.parser.cannot_parse_num(
-                                    "payload of NaN for f32 must be in range of 1 <= payload < 2^23",
-                                    payload,
-                                    NumBase::Hex,
-                                    Sign::Plus,
+                                    "f32",
+                                    "payload of NaN must be in range of 1 <= payload < 2^23",
                                     offset,
                                 );
                             }
@@ -1807,20 +1763,19 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                             let exp = 0b1111_1111u32 << (31 - 8);
                             f32::from_bits(sign | exp | payload_u)
                         }
+                        // Float::Val {
+                        //     base: NumBase::Dec,
+                        //     frac,
+                        //     exp,
+                        // } => unimplemented!(),
                         Float::Val { base, frac, exp } => {
                             // Note: Better algorithm should be considered
                             // https://github.com/rust-lang/rust/blob/3982d3514efbb65b3efac6bb006b3fa496d16663/src/libcore/num/dec2flt/algorithm.rs
                             let mut frac =
-                                sign.apply(parse_f32_str(self.parser, frac, base, sign, offset)?);
+                                sign.apply(parse_f32_str(self.parser, frac, base, offset)?);
                             // In IEEE754, exp part is actually 8bits
                             if let Some((exp_sign, exp)) = exp {
-                                let exp = parse_u32_str(
-                                    self.parser,
-                                    exp,
-                                    NumBase::Dec,
-                                    exp_sign,
-                                    offset,
-                                )?;
+                                let exp = parse_u32_str(self.parser, exp, NumBase::Dec, offset)?;
                                 let step = match base {
                                     NumBase::Hex => 2.0,
                                     NumBase::Dec => 10.0,
@@ -1845,7 +1800,8 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                         }
                     },
                     (Token::Int(sign, base, digits), offset) => {
-                        parse_f32_str(self.parser, digits, base, sign, offset)?
+                        let f = parse_f32_str(self.parser, digits, base, offset)?;
+                        sign.apply(f)
                     }
                     (tok, offset) => {
                         return self.parser.unexpected_token(
@@ -1874,19 +1830,12 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                             //   - within 52bits (since fraction of f64 is 52bits)
                             //   - >= 2^(52-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
                             // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
-                            let payload_u = parse_u64_str(
-                                self.parser,
-                                payload,
-                                NumBase::Hex,
-                                Sign::Plus,
-                                offset,
-                            )?;
+                            let payload_u =
+                                parse_u64_str(self.parser, payload, NumBase::Hex, offset)?;
                             if payload_u == 0 || 0x10_0000_0000_0000 <= payload_u {
                                 return self.parser.cannot_parse_num(
-                                    "payload of NaN for f64 must be in range of 1 <= payload < 2^52",
-                                    payload,
-                                    NumBase::Hex,
-                                    Sign::Plus,
+                                    "f64",
+                                    "payload of NaN must be in range of 1 <= payload < 2^52",
                                     offset,
                                 );
                             }
@@ -1902,10 +1851,10 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                         }
                         Float::Val { base, frac, exp } => {
                             let mut frac =
-                                sign.apply(parse_f64_str(self.parser, frac, base, sign, offset)?);
+                                sign.apply(parse_f64_str(self.parser, frac, base, offset)?);
                             // In IEEE754, exp part is actually 11bits
                             if let Some((exp_sign, exp)) = exp {
-                                let exp = parse_u32_str(self.parser, exp, base, exp_sign, offset)?;
+                                let exp = parse_u32_str(self.parser, exp, base, offset)?;
                                 let step = match base {
                                     NumBase::Hex => 2.0,
                                     NumBase::Dec => 10.0,
@@ -1930,7 +1879,8 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                         }
                     },
                     (Token::Int(sign, base, digits), offset) => {
-                        parse_f64_str(self.parser, digits, base, sign, offset)?
+                        let f = parse_f64_str(self.parser, digits, base, offset)?;
+                        sign.apply(f)
                     }
                     (tok, offset) => {
                         return self.parser.unexpected_token(
@@ -4238,23 +4188,23 @@ mod tests {
         assert_error!(
             r#"i32.const 4294967296"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too big integer for u32", .. }
+            CannotParseNum{ reason, .. } if reason == "too big integer"
         );
         // uint32_max + 1
         assert_error!(
             r#"i32.const 0x100000000"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too big integer for u32", .. }
+            CannotParseNum{ reason, .. } if reason == "too big integer"
         );
         assert_error!(
             r#"i32.const -0x80000001"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too small integer for i32", .. }
+            CannotParseNum{ reason, .. } if reason == "too small integer"
         );
         assert_error!(
             r#"i32.const -0x99999999"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too small integer for i32", .. }
+            CannotParseNum{ reason, .. } if reason == "too small integer"
         );
 
         assert_insn!(r#"i64.const 0"#, [I64Const(0)]);
@@ -4301,22 +4251,26 @@ mod tests {
         assert_error!(
             r#"i64.const 0x10000000000000000"#, // UINT64_MAX + 1
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too big integer for u64", .. }
+            CannotParseNum{ reason, .. }
+            if reason == "too big integer"
         );
         assert_error!(
             r#"i64.const 18446744073709551616"#, // UINT64_MAX + 1
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too big integer for u64", .. }
+            CannotParseNum{ reason, .. }
+            if reason == "too big integer"
         );
         assert_error!(
             r#"i64.const -0x8000000000000001"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too small integer for i64", .. }
+            CannotParseNum{ reason, .. }
+            if reason == "too small integer"
         );
         assert_error!(
             r#"i64.const -0x9999999999999999"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "too small integer for i64", .. }
+            CannotParseNum{ reason, .. }
+            if reason == "too small integer"
         );
 
         assert_insn!(r#"f32.const 42"#, [F32Const(f)] if *f == 42.0);
@@ -4352,12 +4306,14 @@ mod tests {
         assert_error!(
             r#"f32.const nan:0x0"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "payload of NaN for f32 must be in range of 1 <= payload < 2^23", .. }
+            CannotParseNum{ reason, .. }
+            if reason == "payload of NaN must be in range of 1 <= payload < 2^23"
         );
         assert_error!(
             r#"f32.const nan:0x100_0000"#, // Larger than 0x80_0000
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "payload of NaN for f32 must be in range of 1 <= payload < 2^23", .. }
+            CannotParseNum{ reason, .. }
+            if reason == "payload of NaN must be in range of 1 <= payload < 2^23"
         );
 
         assert_insn!(r#"f64.const 42"#, [F64Const(f)] if *f == 42.0);
@@ -4390,12 +4346,14 @@ mod tests {
         assert_error!(
             r#"f64.const nan:0x0"#,
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "payload of NaN for f64 must be in range of 1 <= payload < 2^52", .. }
+            CannotParseNum{ reason, .. }
+            if reason == "payload of NaN must be in range of 1 <= payload < 2^52"
         );
         assert_error!(
             r#"f64.const nan:0x20_0000_0000_0000"#, // Larger than 0x10_0000_0000_0000
             Vec<Instruction<'_>>,
-            CannotParseNum{ reason: "payload of NaN for f64 must be in range of 1 <= payload < 2^52", .. }
+            CannotParseNum{ reason, .. }
+            if reason == "payload of NaN must be in range of 1 <= payload < 2^52"
         );
     }
 
