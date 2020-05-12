@@ -8,6 +8,8 @@ use std::f32;
 use std::f64;
 use std::fmt;
 use std::mem;
+use std::ops;
+use std::str::FromStr;
 
 #[cfg_attr(test, derive(Debug))]
 pub enum ParseErrorKind<'source> {
@@ -511,6 +513,34 @@ impl<'s> Parser<'s> {
         }
         Ok(buf)
     }
+
+    fn parse_dec_float<F>(
+        &self,
+        sign: Sign,
+        frac: &'s str,
+        exp: Option<(Sign, &'s str)>,
+        offset: usize,
+    ) -> Result<'s, F>
+    where
+        F: FromStr + ops::Neg<Output = F>,
+        F::Err: fmt::Display,
+    {
+        // TODO: Implement parsing floating number literals without allocation
+        let mut s: String = frac.chars().filter(|c| *c != '_').collect();
+        if let Some((sign, exp)) = exp {
+            s.push('e');
+            if sign == Sign::Minus {
+                s.push('-');
+            }
+            for c in exp.chars().filter(|c| *c != '_') {
+                s.push(c);
+            }
+        }
+        match s.parse::<F>() {
+            Ok(f) => Ok(sign.apply(f)),
+            Err(e) => self.cannot_parse_num("float", format!("{}", e), offset),
+        }
+    }
 }
 
 // TODO: Use trait rather than macros to avoid duplication of implementations
@@ -559,16 +589,9 @@ parse_uint_function!(parse_u8_str, u8);
 parse_uint_function!(parse_u32_str, u32);
 parse_uint_function!(parse_u64_str, u64);
 
-macro_rules! parse_float_number_function {
+macro_rules! parse_hex_float_frac_fn {
     ($name:ident, $float:ty) => {
-        fn $name<'s>(
-            parser: &Parser<'s>,
-            input: &'s str,
-            base: NumBase,
-            offset: usize,
-        ) -> Result<'s, $float> {
-            let radix_u = base.radix();
-            let radix = radix_u as $float;
+        fn $name<'s>(parser: &Parser<'s>, input: &'s str, offset: usize) -> Result<'s, $float> {
             let mut chars = input.chars();
 
             let mut ret: $float = 0.0;
@@ -579,8 +602,8 @@ macro_rules! parse_float_number_function {
                 } else if c == '.' {
                     break;
                 }
-                if let Some(d) = c.to_digit(radix_u) {
-                    ret = ret * radix + (d as $float);
+                if let Some(d) = c.to_digit(16) {
+                    ret = ret * 16.0 + (d as $float);
                 } else {
                     return parser.cannot_parse_num(
                         stringify!($float>),
@@ -591,15 +614,15 @@ macro_rules! parse_float_number_function {
             }
 
             // After '.' if exists
-            let mut step = radix;
+            let mut step = 16.0;
             for c in chars {
                 if c == '_' {
                     // delimiter
                     continue;
                 }
-                if let Some(d) = c.to_digit(radix_u) {
+                if let Some(d) = c.to_digit(16) {
                     ret += (d as $float) / step;
-                    step *= radix;
+                    step *= 16.0;
                 } else {
                     return parser.cannot_parse_num(
                         stringify!($float),
@@ -614,8 +637,8 @@ macro_rules! parse_float_number_function {
     };
 }
 
-parse_float_number_function!(parse_f32_str, f32);
-parse_float_number_function!(parse_f64_str, f64);
+parse_hex_float_frac_fn!(parse_f32_hex_frac, f32);
+parse_hex_float_frac_fn!(parse_f64_hex_frac, f64);
 
 macro_rules! match_token {
     ($parser:expr, $expected:expr, $pattern:pat => $ret:expr) => {
@@ -1763,44 +1786,36 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                             let exp = 0b1111_1111u32 << (31 - 8);
                             f32::from_bits(sign | exp | payload_u)
                         }
-                        // Float::Val {
-                        //     base: NumBase::Dec,
-                        //     frac,
-                        //     exp,
-                        // } => unimplemented!(),
-                        Float::Val { base, frac, exp } => {
+                        Float::Val {
+                            base: NumBase::Dec,
+                            frac,
+                            exp,
+                        } => self.parser.parse_dec_float(sign, frac, exp, offset)?,
+                        Float::Val {
+                            base: NumBase::Hex,
+                            frac,
+                            exp,
+                        } => {
                             // Note: Better algorithm should be considered
                             // https://github.com/rust-lang/rust/blob/3982d3514efbb65b3efac6bb006b3fa496d16663/src/libcore/num/dec2flt/algorithm.rs
-                            let mut frac =
-                                sign.apply(parse_f32_str(self.parser, frac, base, offset)?);
+                            let mut frac = parse_f32_hex_frac(self.parser, frac, offset)?;
                             // In IEEE754, exp part is actually 8bits
                             if let Some((exp_sign, exp)) = exp {
                                 let exp = parse_u32_str(self.parser, exp, NumBase::Dec, offset)?;
-                                let step = match base {
-                                    NumBase::Hex => 2.0,
-                                    NumBase::Dec => 10.0,
-                                };
+                                let step = if exp_sign == Sign::Plus { 2.0 } else { 0.5 };
                                 // powi is not available because an error gets larger
-                                match exp_sign {
-                                    Sign::Plus => {
-                                        for _ in 0..exp {
-                                            frac *= step;
-                                        }
-                                    }
-                                    Sign::Minus => {
-                                        for _ in 0..exp {
-                                            frac /= step;
-                                        }
-                                    }
+                                for _ in 0..exp {
+                                    frac *= step;
                                 }
-                                frac
-                            } else {
-                                frac
                             }
+                            sign.apply(frac)
                         }
                     },
-                    (Token::Int(sign, base, digits), offset) => {
-                        let f = parse_f32_str(self.parser, digits, base, offset)?;
+                    (Token::Int(sign, NumBase::Dec, digits), offset) => {
+                        self.parser.parse_dec_float(sign, digits, None, offset)?
+                    }
+                    (Token::Int(sign, NumBase::Hex, digits), offset) => {
+                        let f = parse_f32_hex_frac(self.parser, digits, offset)?;
                         sign.apply(f)
                     }
                     (tok, offset) => {
@@ -1849,37 +1864,34 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                             let exp = 0b111_1111_1111u64 << (63 - 11);
                             f64::from_bits(sign | exp | payload_u)
                         }
-                        Float::Val { base, frac, exp } => {
-                            let mut frac =
-                                sign.apply(parse_f64_str(self.parser, frac, base, offset)?);
+                        Float::Val {
+                            base: NumBase::Dec,
+                            frac,
+                            exp,
+                        } => self.parser.parse_dec_float(sign, frac, exp, offset)?,
+                        Float::Val {
+                            base: NumBase::Hex,
+                            frac,
+                            exp,
+                        } => {
+                            let mut frac = parse_f64_hex_frac(self.parser, frac, offset)?;
                             // In IEEE754, exp part is actually 11bits
                             if let Some((exp_sign, exp)) = exp {
-                                let exp = parse_u32_str(self.parser, exp, base, offset)?;
-                                let step = match base {
-                                    NumBase::Hex => 2.0,
-                                    NumBase::Dec => 10.0,
-                                };
+                                let exp = parse_u32_str(self.parser, exp, NumBase::Dec, offset)?;
+                                let step = if exp_sign == Sign::Plus { 2.0 } else { 0.5 };
                                 // powi is not available because an error gets larger
-                                match exp_sign {
-                                    Sign::Plus => {
-                                        for _ in 0..exp {
-                                            frac *= step;
-                                        }
-                                    }
-                                    Sign::Minus => {
-                                        for _ in 0..exp {
-                                            frac /= step;
-                                        }
-                                    }
+                                for _ in 0..exp {
+                                    frac *= step;
                                 }
-                                frac
-                            } else {
-                                frac
                             }
+                            sign.apply(frac)
                         }
                     },
-                    (Token::Int(sign, base, digits), offset) => {
-                        let f = parse_f64_str(self.parser, digits, base, offset)?;
+                    (Token::Int(sign, NumBase::Dec, digits), offset) => {
+                        self.parser.parse_dec_float(sign, digits, None, offset)?
+                    }
+                    (Token::Int(sign, NumBase::Hex, digits), offset) => {
+                        let f = parse_f64_hex_frac(self.parser, digits, offset)?;
                         sign.apply(f)
                     }
                     (tok, offset) => {
@@ -4286,6 +4298,7 @@ mod tests {
         assert_insn!(r#"f32.const 1.2_3"#, [F32Const(f)] if *f == 1.23);
         assert_insn!(r#"f32.const 1.2_3E3"#, [F32Const(f)] if *f == 1.23e3);
         assert_insn!(r#"f32.const 120.4E-3"#, [F32Const(f)] if *f == 120.4e-3);
+        assert_insn!(r#"f32.const 99E+1_3"#, [F32Const(f)] if *f == 99e13);
         assert_insn!(r#"f32.const 0xe."#, [F32Const(f)] if *f == 0xe as f32);
         assert_insn!(r#"f32.const 0xe_f."#, [F32Const(f)] if *f == 0xef as f32);
         assert_insn!(r#"f32.const 0x1_f.2_e"#, [F32Const(f)] if *f == 0x1f as f32 + 2.0 / 16.0 + 14.0 / (16.0 * 16.0));
@@ -4302,6 +4315,7 @@ mod tests {
         assert_insn!(r#"f32.const -inf"#, [F32Const(f)] if *f == f32::NEG_INFINITY);
         assert_insn!(r#"f32.const -nan"#, [F32Const(f)] if f.is_nan());
         assert_insn!(r#"f32.const -nan:0x401234"#, [F32Const(f)] if f.is_nan());
+        assert_insn!(r#"f32.const 1.32"#, [F32Const(f)] if *f == 1.32);
 
         assert_error!(
             r#"f32.const nan:0x0"#,
@@ -4329,6 +4343,7 @@ mod tests {
         assert_insn!(r#"f64.const 1.2_3"#, [F64Const(f)] if *f == 1.23);
         assert_insn!(r#"f64.const 1.2_3E3"#, [F64Const(f)] if *f == 1.23e3);
         assert_insn!(r#"f64.const 100.4E-2"#, [F64Const(f)] if *f == 100.4e-2);
+        assert_insn!(r#"f64.const 99E+1_3"#, [F64Const(f)] if *f == 99e+13);
         assert_insn!(r#"f64.const 0xe."#, [F64Const(f)] if *f == 0xe as f64);
         assert_insn!(r#"f64.const 0xe_f."#, [F64Const(f)] if *f == 0xef as f64);
         assert_insn!(r#"f64.const 0x1_f.2_e"#, [F64Const(f)] if *f == 0x1f as f64 + 2.0 / 16.0 + 14.0 / (16.0 * 16.0));
