@@ -1801,12 +1801,17 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                             let mut frac = parse_f32_hex_frac(self.parser, frac, offset)?;
                             // In IEEE754, exp part is actually 8bits
                             if let Some((exp_sign, exp)) = exp {
-                                let exp = parse_u32_str(self.parser, exp, NumBase::Dec, offset)?;
-                                let step = if exp_sign == Sign::Plus { 2.0 } else { 0.5 };
-                                // powi is not available because an error gets larger
-                                for _ in 0..exp {
-                                    frac *= step;
+                                let exp =
+                                    parse_u32_str(self.parser, exp, NumBase::Dec, offset)? as i32;
+                                if exp < 0 {
+                                    return self.parser.cannot_parse_num(
+                                        "f32",
+                                        format!("too large exponent value '{}'", exp),
+                                        offset,
+                                    );
                                 }
+                                let step: f32 = if exp_sign == Sign::Plus { 2.0 } else { 0.5 };
+                                frac *= step.powi(exp);
                             }
                             sign.apply(frac)
                         }
@@ -1877,12 +1882,17 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                             let mut frac = parse_f64_hex_frac(self.parser, frac, offset)?;
                             // In IEEE754, exp part is actually 11bits
                             if let Some((exp_sign, exp)) = exp {
-                                let exp = parse_u32_str(self.parser, exp, NumBase::Dec, offset)?;
-                                let step = if exp_sign == Sign::Plus { 2.0 } else { 0.5 };
-                                // powi is not available because an error gets larger
-                                for _ in 0..exp {
-                                    frac *= step;
+                                let exp =
+                                    parse_u32_str(self.parser, exp, NumBase::Dec, offset)? as i32;
+                                if exp < 0 {
+                                    return self.parser.cannot_parse_num(
+                                        "f64",
+                                        format!("too large exponent value '{}'", exp),
+                                        offset,
+                                    );
                                 }
+                                let step: f64 = if exp_sign == Sign::Plus { 2.0 } else { 0.5 };
+                                frac *= step.powi(exp);
                             }
                             sign.apply(frac)
                         }
