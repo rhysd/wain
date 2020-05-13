@@ -264,7 +264,7 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
         let kind = ErrorKind::StackNotEmptyAfterFunc {
             stack: format!("{:?}", ctx.op_stack),
         };
-        return outer.error(kind, "stack after function return", start);
+        return outer.error(kind, "returning from function", start);
     }
 
     Ok(())
