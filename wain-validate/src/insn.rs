@@ -8,6 +8,7 @@
 
 use crate::error::{ErrorKind, Ordinal, Result};
 use crate::Context as OuterContext;
+use std::fmt;
 use std::mem;
 use wain_ast::source::Source;
 use wain_ast::*;
@@ -29,6 +30,15 @@ impl Type {
     }
     fn f64() -> Type {
         Type::Known(ValType::F64)
+    }
+}
+
+impl fmt::Debug for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Type::Unknown => f.write_str("unknown"),
+            Type::Known(t) => write!(f, "{}", t),
+        }
     }
 }
 
@@ -238,12 +248,25 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
         ret_ty,
         unreachable: false,
     };
+
     body.validate(&mut ctx)?;
+
+    // Note: This assumes a function can have only one return value
     if let Some(ty) = ret_ty {
         ctx.current_op = "function return type";
         ctx.current_offset = start;
-        ctx.ensure_op_stack_top(Type::Known(ty))?;
+        ctx.pop_op_stack(Type::Known(ty))?;
     }
+
+    // Function call must modify stack from [t1*] to [t2*]
+    // It means that no value must not remain in current frame after popping return values
+    if !ctx.op_stack.is_empty() {
+        let kind = ErrorKind::StackNotEmptyAfterFunc {
+            stack: format!("{:?}", ctx.op_stack),
+        };
+        return outer.error(kind, "stack after function return", start);
+    }
+
     Ok(())
 }
 

@@ -52,6 +52,9 @@ pub enum ErrorKind {
         prev_offset: usize,
     },
     MemoryIsNotDefined,
+    StackNotEmptyAfterFunc {
+        stack: String,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -133,6 +136,7 @@ impl<S: Source> fmt::Display for Error<S> {
             MultipleMemories(size) => write!(f, "number of memories must not be larger than 1 but got {}", size)?,
             AlreadyExported{ name, prev_offset } => write!(f, "'{}' was already exported at offset {}", name, prev_offset)?,
             MemoryIsNotDefined => write!(f, "at least one memory section must be defined")?,
+            StackNotEmptyAfterFunc{ stack } => write!(f, "some values {} still remain after function returned values", stack)?,
         }
 
         write!(f, " while validating {}", self.when)?;
