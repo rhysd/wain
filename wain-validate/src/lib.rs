@@ -355,3 +355,74 @@ impl<'s, S: Source> Validate<'s, S> for Func<'s> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fmt;
+    use InsnKind::*;
+
+    #[derive(Clone)]
+    struct DummySource;
+
+    impl Source for DummySource {
+        type Raw = &'static str;
+        fn describe(&self, _: &mut fmt::Formatter<'_>, _: usize) -> fmt::Result {
+            Ok(())
+        }
+        fn raw(&self) -> Self::Raw {
+            ""
+        }
+    }
+
+    fn memory(limit: Limits) -> Memory<'static> {
+        Memory {
+            start: 0,
+            ty: MemType { limit },
+            import: None,
+        }
+    }
+
+    fn func_type(params: Vec<ValType>, ret: Option<ValType>) -> FuncType {
+        let results = if let Some(ret) = ret {
+            vec![ret]
+        } else {
+            vec![]
+        };
+        FuncType {
+            start: 0,
+            params,
+            results,
+        }
+    }
+
+    fn func(idx: u32, locals: Vec<ValType>, expr: Vec<InsnKind>) -> Func<'static> {
+        let expr = expr
+            .into_iter()
+            .map(|kind| Instruction { start: 0, kind })
+            .collect();
+        Func {
+            start: 0,
+            idx,
+            kind: FuncKind::Body { locals, expr },
+        }
+    }
+
+    fn root<'s>(module: Module<'s>) -> Root<'s, DummySource> {
+        Root {
+            module,
+            source: DummySource,
+        }
+    }
+
+    // From https://github.com/WebAssembly/spec/blob/cc2d59bd56e5342e3c1834a7699915f8b67fc29c/test/core/call.wast#L409-L415
+    #[test]
+    fn values_remain_on_stack_after_function() {
+        let mut m = Module::default();
+        m.memories.push(memory(Limits::From(0)));
+        m.types.push(func_type(vec![], None));
+        m.funcs.push(func(0, vec![], vec![I32Const(1), Call(0)]));
+        let err = validate(&root(m)).unwrap_err();
+        assert!(matches!(err.kind(), ErrorKind::StackNotEmptyAfterFunc{..}));
+    }
+}

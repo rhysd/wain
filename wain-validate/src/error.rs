@@ -70,6 +70,9 @@ impl<S: Source> Error<S> {
         self.when = Cow::Owned(new_msg);
         self
     }
+    pub fn kind(&self) -> &ErrorKind {
+        &self.kind
+    }
 }
 
 pub(crate) struct Ordinal(pub(crate) usize);
