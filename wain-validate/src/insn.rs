@@ -365,6 +365,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 labels,
                 default_label,
             } => {
+                ctx.pop_op_stack(Type::i32())?;
                 let expected = ctx.validate_label_idx(*default_label)?;
                 for (i, idx) in labels.iter().enumerate() {
                     let ty = ctx.validate_label_idx(*idx)?;
