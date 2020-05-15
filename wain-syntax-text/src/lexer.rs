@@ -350,30 +350,39 @@ impl<'s> Lexer<'s> {
             return None;
         }
 
+        #[derive(PartialEq, Eq)]
+        enum CharType {
+            Dot,
+            Underscore,
+            Digit,
+        };
         let mut saw_dot = false;
-        let mut prev_underscore = false;
+        let mut prev_chartype = CharType::Digit;
         let mut exp_start = false;
         while let Some((_, c)) = chars.next() {
             match c {
-                '.' if saw_dot || prev_underscore => return None,
-                '.' => saw_dot = true,
-                '_' if prev_underscore => return None,
+                '.' if saw_dot || prev_chartype != CharType::Digit => return None,
+                '.' => {
+                    saw_dot = true;
+                    prev_chartype = CharType::Dot;
+                }
+                '_' if prev_chartype != CharType::Digit => return None,
                 '_' => {
-                    prev_underscore = true;
+                    prev_chartype = CharType::Underscore;
                 }
                 c if is_exp(c) => {
                     exp_start = true;
                     break;
                 }
                 c if is_digit(&c) => {
-                    prev_underscore = false;
+                    prev_chartype = CharType::Digit;
                 }
                 _ => return None,
             }
         }
 
         // Number cannot end with '_'
-        if prev_underscore {
+        if prev_chartype == CharType::Underscore {
             return None;
         }
 
@@ -668,7 +677,7 @@ mod tests {
         assert_lex_error!("1_", LexErrorKind::ReservedName("1_"));
         assert_lex_error!("1__2", LexErrorKind::ReservedName("1__2"));
         assert_lex_error!("1.2_", LexErrorKind::ReservedName("1.2_"));
-        // assert_lex_error!("1._2", LexErrorKind::ReservedName("1._2")); TODO: This should be error
+        assert_lex_error!("1._2", LexErrorKind::ReservedName("1._2"));
         assert_lex_error!("1.2__3", LexErrorKind::ReservedName("1.2__3"));
         assert_lex_error!("1.E2_", LexErrorKind::ReservedName("1.E2_"));
         assert_lex_error!("1.E_2", LexErrorKind::ReservedName("1.E_2"));
