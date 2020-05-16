@@ -350,40 +350,39 @@ impl<'s> Lexer<'s> {
             return None;
         }
 
-        #[derive(PartialEq, Eq)]
-        enum CharType {
-            Dot,
-            Underscore,
-            Digit,
-        };
-        let mut saw_dot = false;
-        let mut prev_chartype = CharType::Digit;
         let mut exp_start = false;
-        while let Some((_, c)) = chars.next() {
-            match c {
-                '.' if saw_dot || prev_chartype != CharType::Digit => return None,
-                '.' => {
-                    saw_dot = true;
-                    prev_chartype = CharType::Dot;
-                }
-                '_' if prev_chartype != CharType::Digit => return None,
-                '_' => {
-                    prev_chartype = CharType::Underscore;
-                }
-                c if is_exp(c) => {
-                    exp_start = true;
-                    break;
-                }
-                c if is_digit(&c) => {
-                    prev_chartype = CharType::Digit;
-                }
-                _ => return None,
+        let mut saw_dot = false;
+        {
+            #[derive(PartialEq, Eq)]
+            enum PrevChar {
+                Dot,
+                Underscore,
+                Digit,
             }
-        }
 
-        // Number cannot end with '_'
-        if prev_chartype == CharType::Underscore {
-            return None;
+            let mut prev_char = PrevChar::Digit;
+            while let Some((_, c)) = chars.next() {
+                prev_char = match c {
+                    '.' if saw_dot || prev_char != PrevChar::Digit => return None,
+                    '.' => {
+                        saw_dot = true;
+                        PrevChar::Dot
+                    }
+                    '_' if prev_char != PrevChar::Digit => return None,
+                    '_' => PrevChar::Underscore,
+                    c if is_exp(c) => {
+                        exp_start = true;
+                        break;
+                    }
+                    c if is_digit(&c) => PrevChar::Digit,
+                    _ => return None,
+                };
+            }
+
+            // Number cannot end with '_'
+            if prev_char == PrevChar::Underscore {
+                return None;
+            }
         }
 
         match chars.next() {
