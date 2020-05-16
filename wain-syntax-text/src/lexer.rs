@@ -350,31 +350,39 @@ impl<'s> Lexer<'s> {
             return None;
         }
 
-        let mut saw_dot = false;
-        let mut prev_underscore = false;
         let mut exp_start = false;
-        while let Some((_, c)) = chars.next() {
-            match c {
-                '.' if saw_dot || prev_underscore => return None,
-                '.' => saw_dot = true,
-                '_' if prev_underscore => return None,
-                '_' => {
-                    prev_underscore = true;
-                }
-                c if is_exp(c) => {
-                    exp_start = true;
-                    break;
-                }
-                c if is_digit(&c) => {
-                    prev_underscore = false;
-                }
-                _ => return None,
+        let mut saw_dot = false;
+        {
+            #[derive(PartialEq, Eq)]
+            enum PrevChar {
+                Dot,
+                Underscore,
+                Digit,
             }
-        }
 
-        // Number cannot end with '_'
-        if prev_underscore {
-            return None;
+            let mut prev_char = PrevChar::Digit;
+            while let Some((_, c)) = chars.next() {
+                prev_char = match c {
+                    '.' if saw_dot || prev_char != PrevChar::Digit => return None,
+                    '.' => {
+                        saw_dot = true;
+                        PrevChar::Dot
+                    }
+                    '_' if prev_char != PrevChar::Digit => return None,
+                    '_' => PrevChar::Underscore,
+                    c if is_exp(c) => {
+                        exp_start = true;
+                        break;
+                    }
+                    c if is_digit(&c) => PrevChar::Digit,
+                    _ => return None,
+                };
+            }
+
+            // Number cannot end with '_'
+            if prev_char == PrevChar::Underscore {
+                return None;
+            }
         }
 
         match chars.next() {
@@ -668,7 +676,7 @@ mod tests {
         assert_lex_error!("1_", LexErrorKind::ReservedName("1_"));
         assert_lex_error!("1__2", LexErrorKind::ReservedName("1__2"));
         assert_lex_error!("1.2_", LexErrorKind::ReservedName("1.2_"));
-        // assert_lex_error!("1._2", LexErrorKind::ReservedName("1._2")); TODO: This should be error
+        assert_lex_error!("1._2", LexErrorKind::ReservedName("1._2"));
         assert_lex_error!("1.2__3", LexErrorKind::ReservedName("1.2__3"));
         assert_lex_error!("1.E2_", LexErrorKind::ReservedName("1.E2_"));
         assert_lex_error!("1.E_2", LexErrorKind::ReservedName("1.E_2"));
