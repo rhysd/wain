@@ -55,6 +55,10 @@ pub enum ErrorKind {
     StackNotEmptyAfterFunc {
         stack: String,
     },
+    InvalidStackDepth {
+        expected: usize,
+        actual: usize,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -152,6 +156,7 @@ impl<S: Source> fmt::Display for Error<S> {
             AlreadyExported{ name, prev_offset } => write!(f, "'{}' was already exported at offset {}", name, prev_offset)?,
             MemoryIsNotDefined => write!(f, "at least one memory section must be defined")?,
             StackNotEmptyAfterFunc{ stack } => write!(f, "some values {} still remain in the frame after popping return values", stack)?,
+            InvalidStackDepth { expected, actual } => write!(f, "expected operand stack depth is {} but {}", expected, actual)?,
         }
 
         write!(f, ". error while validating {}. ", self.when)?;

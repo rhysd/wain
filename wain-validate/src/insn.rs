@@ -127,10 +127,18 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         mem::replace(&mut self.current_frame, new)
     }
 
-    fn pop_control_frame(&mut self, prev: CtrlFrame) {
+    fn pop_control_frame(&mut self, prev: CtrlFrame, ty: Option<ValType>) -> Result<(), S> {
         // control frame top is validated by pop_op_stack
-        assert!(self.current_frame.idx <= self.op_stack.len());
+        if let Some(ty) = ty {
+            self.pop_op_stack(Type::Known(ty))?;
+        }
+        let expected = self.current_frame.idx;
+        let actual = self.op_stack.len();
+        if expected != actual {
+            return self.error(ErrorKind::InvalidStackDepth { expected, actual });
+        }
         self.current_frame = prev;
+        Ok(())
     }
 
     fn pop_label_stack(&mut self) -> Result<(), S> {
@@ -292,9 +300,9 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 ctx.label_stack.push(*ty);
                 body.validate(ctx)?;
                 ctx.pop_label_stack()?;
-                ctx.pop_control_frame(saved);
-                if let Some(ty) = ty {
-                    ctx.ensure_op_stack_top(Type::Known(*ty))?;
+                ctx.pop_control_frame(saved, *ty)?;
+                if let Some(ty) = *ty {
+                    ctx.op_stack.push(Type::Known(ty));
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-loop
@@ -303,9 +311,9 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 ctx.label_stack.push(None);
                 body.validate(ctx)?;
                 ctx.pop_label_stack()?;
-                ctx.pop_control_frame(saved);
-                if let Some(ty) = ty {
-                    ctx.ensure_op_stack_top(Type::Known(*ty))?;
+                ctx.pop_control_frame(saved, *ty)?;
+                if let Some(ty) = *ty {
+                    ctx.op_stack.push(Type::Known(ty));
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-if
@@ -320,19 +328,16 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
 
                 let saved = ctx.push_control_frame(start);
                 then_body.validate(ctx)?;
-                if let Some(ty) = ty {
-                    ctx.pop_op_stack(Type::Known(*ty))?;
-                }
-                ctx.pop_control_frame(saved);
+                ctx.pop_control_frame(saved, *ty)?;
 
                 let saved = ctx.push_control_frame(start);
                 else_body.validate(ctx)?;
-                if let Some(ty) = ty {
-                    ctx.ensure_op_stack_top(Type::Known(*ty))?;
-                }
-                ctx.pop_control_frame(saved);
+                ctx.pop_control_frame(saved, *ty)?;
 
                 ctx.pop_label_stack()?;
+                if let Some(ty) = *ty {
+                    ctx.op_stack.push(Type::Known(ty));
+                }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-unreachable
             Unreachable => ctx.unreachable = true,
