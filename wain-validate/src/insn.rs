@@ -150,12 +150,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         if let Some(ty) = expected {
             self.pop_op_stack(Type::Known(ty))?;
         }
-        if self.op_stack.len() < self.current_frame.idx {
-            return self.error(ErrorKind::InvalidStackDepth {
-                expected: self.current_frame.idx,
-                actual: self.op_stack.len(),
-            });
-        }
+        assert!(self.op_stack.len() >= self.current_frame.idx);
         self.op_stack.truncate(self.current_frame.idx);
         self.current_frame.unreachable = true;
         Ok(())
