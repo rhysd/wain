@@ -532,9 +532,15 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-select
             Select => {
                 let cond: i32 = machine.stack.pop();
-                let val2: Value = machine.stack.pop();
-                let val1: Value = machine.stack.pop();
-                machine.stack.push(if cond != 0 { val1 } else { val2 });
+                if cond != 0 {
+                    // pop val2 -> pop val1 -> push val1 (skip pop/push val1)
+                    let _val2: Value = machine.stack.pop();
+                } else {
+                    // pop val2 -> pop val1 -> push val2
+                    let val2: Value = machine.stack.pop();
+                    let _val1: Value = machine.stack.pop();
+                    machine.stack.push(val2);
+                }
             }
             // Variable instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-get
