@@ -337,7 +337,9 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             Nop => {}
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br
             Br(labelidx) => {
-                ctx.validate_label_idx(*labelidx)?;
+                if let Some(ty) = ctx.validate_label_idx(*labelidx)? {
+                    ctx.pop_op_stack(Type::Known(ty))?;
+                }
                 ctx.unreachable = true;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-if
