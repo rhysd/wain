@@ -346,7 +346,9 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             BrIf(labelidx) => {
                 // Condition
                 ctx.pop_op_stack(Type::I32)?;
-                ctx.validate_label_idx(*labelidx)?;
+                if let Some(ty) = ctx.validate_label_idx(*labelidx)? {
+                    ctx.ensure_op_stack_top(Type::Known(ty))?;
+                }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-table
             BrTable {
