@@ -388,7 +388,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-return
             Return => {
                 if let Some(ty) = ctx.ret_ty {
-                    ctx.ensure_op_stack_top(Type::Known(ty))?;
+                    ctx.pop_op_stack(Type::Known(ty))?;
                 }
                 ctx.unreachable = true;
             }
