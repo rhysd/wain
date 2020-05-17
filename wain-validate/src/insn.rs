@@ -297,7 +297,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-loop
             Loop { ty, body } => {
                 let saved = ctx.push_control_frame(start);
-                ctx.label_stack.push(*ty);
+                ctx.label_stack.push(None);
                 body.validate(ctx)?;
                 ctx.pop_label_stack()?;
                 ctx.pop_control_frame(saved);
