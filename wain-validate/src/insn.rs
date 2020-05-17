@@ -426,10 +426,9 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             Select => {
                 ctx.pop_op_stack(Type::I32)?;
                 let ty = ctx.pop_op_stack(Type::Unknown)?;
-                ctx.pop_op_stack(ty)?;
                 // 'select' instruction is value-polymorphic. The value pushed here is
                 // one of the first or second value. The value is checked dynamically
-                ctx.op_stack.push(ty);
+                ctx.ensure_op_stack_top(ty)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-local-get
             LocalGet(localidx) => {
