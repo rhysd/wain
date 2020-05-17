@@ -141,6 +141,21 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         Ok(())
     }
 
+    fn truncate_op_stack(&mut self, expected: Option<ValType>) -> Result<(), S> {
+        if let Some(ty) = expected {
+            self.pop_op_stack(Type::Known(ty))?;
+        }
+        if self.op_stack.len() < self.current_frame.idx {
+            return self.error(ErrorKind::InvalidStackDepth {
+                expected: self.current_frame.idx,
+                actual: self.op_stack.len(),
+            });
+        }
+        self.op_stack.truncate(self.current_frame.idx);
+        self.unreachable = true;
+        Ok(())
+    }
+
     fn pop_label_stack(&mut self) -> Result<(), S> {
         if self.label_stack.pop().is_some() {
             Ok(())
@@ -340,15 +355,13 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-unreachable
-            Unreachable => ctx.unreachable = true,
+            Unreachable => ctx.truncate_op_stack(None)?,
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-nop
             Nop => {}
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br
             Br(labelidx) => {
-                if let Some(ty) = ctx.validate_label_idx(*labelidx)? {
-                    ctx.pop_op_stack(Type::Known(ty))?;
-                }
-                ctx.unreachable = true;
+                let ty = ctx.validate_label_idx(*labelidx)?;
+                ctx.truncate_op_stack(ty)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-if
             BrIf(labelidx) => {
@@ -380,17 +393,11 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                             });
                     }
                 }
-                if let Some(ty) = expected {
-                    ctx.pop_op_stack(Type::Known(ty))?;
-                }
-                ctx.unreachable = true;
+                ctx.truncate_op_stack(expected)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-return
             Return => {
-                if let Some(ty) = ctx.ret_ty {
-                    ctx.pop_op_stack(Type::Known(ty))?;
-                }
-                ctx.unreachable = true;
+                ctx.truncate_op_stack(ctx.ret_ty)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-call
             Call(funcidx) => {
