@@ -14,7 +14,15 @@ use wain_syntax_binary as binary;
 use wain_syntax_text as wat;
 use wain_validate::validate;
 
+#[cfg(not(target_os = "linux"))]
 const SKIPPED: &[&str] = &["linking.wast"];
+
+// Note: skip-stack-guard-page.wast is not runnable on Linux because there is a restriction in
+// length of command line arguments on Linux.
+// TODO: Instead of passing values via command line arguments, we should pass them via a text file
+// to avoid this restriction.
+#[cfg(target_os = "linux")]
+const SKIPPED: &[&str] = &["linking.wast", "skip-stack-guard-page.wast"];
 
 #[cfg(not(windows))]
 mod color {
