@@ -37,6 +37,8 @@ impl fmt::Debug for Type {
 struct CtrlFrame {
     idx: usize,
     offset: usize,
+    // Unreachability of current instruction sequence
+    unreachable: bool,
 }
 
 // https://webassembly.github.io/spec/core/valid/conventions.html#context
@@ -56,8 +58,6 @@ struct FuncBodyContext<'outer, 'module: 'outer, 'source: 'module, S: Source> {
     locals: &'outer [ValType],
     // Return type of the current function if exists
     ret_ty: Option<ValType>,
-    // Unreachability of current instruction sequence
-    unreachable: bool,
 }
 
 impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
@@ -70,7 +70,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             return Ok(());
         }
 
-        if self.unreachable {
+        if self.current_frame.unreachable {
             // Reach top of current control frame, but it's ok when unreachable. For example,
             //
             //   unreachable i32.add
@@ -93,11 +93,12 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         })
     }
 
-    fn ensure_op_stack_top(&self, expected: Type) -> Result<Type, S> {
+    fn ensure_op_stack_top(&mut self, expected: Type) -> Result<Type, S> {
         self.ensure_ctrl_frame_not_empty()?;
         if self.op_stack.len() == self.current_frame.idx || self.op_stack.is_empty() {
-            assert!(self.unreachable);
-            return Ok(Type::Unknown);
+            assert!(self.current_frame.unreachable);
+            self.op_stack.push(expected);
+            return Ok(expected);
         }
 
         let actual = self.op_stack[self.op_stack.len() - 1];
@@ -123,7 +124,11 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
 
     fn push_control_frame(&mut self, offset: usize) -> CtrlFrame {
         let idx = self.op_stack.len();
-        let new = CtrlFrame { idx, offset };
+        let new = CtrlFrame {
+            idx,
+            offset,
+            unreachable: false,
+        };
         mem::replace(&mut self.current_frame, new)
     }
 
@@ -152,7 +157,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             });
         }
         self.op_stack.truncate(self.current_frame.idx);
-        self.unreachable = true;
+        self.current_frame.unreachable = true;
         Ok(())
     }
 
@@ -166,7 +171,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         }
     }
 
-    fn validate_label_idx(&self, idx: u32) -> Result<Option<ValType>, S> {
+    fn validate_label_idx(&mut self, idx: u32) -> Result<Option<ValType>, S> {
         let len = self.label_stack.len();
         if (idx as usize) >= len {
             return self.error(ErrorKind::IndexOutOfBounds {
@@ -257,11 +262,11 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
         current_frame: CtrlFrame {
             idx: 0,
             offset: start,
+            unreachable: false,
         },
         params: &func_ty.params,
         locals,
         ret_ty,
-        unreachable: false,
     };
 
     body.validate(&mut ctx)?;
@@ -296,7 +301,6 @@ impl<'s, 'm, 'outer, S: Source, V: ValidateInsnSeq<'outer, 'm, 's, S>>
         self.iter()
             .map(|insn| insn.validate(ctx))
             .collect::<Result<_, _>>()?;
-        ctx.unreachable = false; // clear flag
         Ok(())
     }
 }
