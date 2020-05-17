@@ -131,10 +131,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
     }
 
     fn pop_label_stack(&mut self) -> Result<(), S> {
-        if let Some(ty) = self.label_stack.pop() {
-            if let Some(ty) = ty {
-                self.ensure_op_stack_top(Type::Known(ty))?;
-            }
+        if self.label_stack.pop().is_some() {
             Ok(())
         } else {
             self.error(ErrorKind::LabelStackEmpty {
