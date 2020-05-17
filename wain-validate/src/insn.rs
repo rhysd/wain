@@ -318,7 +318,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 let saved = ctx.push_control_frame(start);
                 then_body.validate(ctx)?;
                 if let Some(ty) = ty {
-                    ctx.ensure_op_stack_top(Type::Known(*ty))?;
+                    ctx.pop_op_stack(Type::Known(*ty))?;
                 }
                 ctx.pop_control_frame(saved);
 
@@ -330,9 +330,6 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 ctx.pop_control_frame(saved);
 
                 ctx.pop_label_stack()?;
-                if let Some(ty) = ty {
-                    ctx.ensure_op_stack_top(Type::Known(*ty))?;
-                }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-unreachable
             Unreachable => ctx.unreachable = true,
