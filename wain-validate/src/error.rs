@@ -12,8 +12,8 @@ pub enum ErrorKind {
     },
     MultipleReturnTypes(Vec<ValType>),
     TypeMismatch {
-        expected: ValType,
-        actual: ValType,
+        expected: Option<ValType>,
+        actual: Option<ValType>,
     },
     CtrlFrameEmpty {
         op: &'static str,
@@ -105,9 +105,21 @@ impl<S: Source> fmt::Display for Error<S> {
                 )?
             }
             TypeMismatch {
-                expected,
-                actual,
+                expected: Some(expected),
+                actual: Some(actual),
             } => write!(f, "expected type '{}' but got type '{}'", expected, actual)?,
+            TypeMismatch {
+                expected: Some(expected),
+                actual: None,
+            } => write!(f, "expected type '{}' but got type None", expected)?,
+            TypeMismatch {
+                expected: None,
+                actual: Some(actual),
+            } => write!(f, "expected type None but got type '{}'", actual)?,
+            TypeMismatch {
+                expected: None,
+                actual: None,
+            } => unreachable!(),
             CtrlFrameEmpty {
                 op,
                 frame_start,

@@ -105,7 +105,10 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         // Note: None here means unknown type due to unreachable
         if let (Type::Known(expected), Type::Known(actual)) = (expected, actual) {
             if actual != expected {
-                return self.error(ErrorKind::TypeMismatch { expected, actual });
+                return self.error(ErrorKind::TypeMismatch {
+                    expected: Some(expected),
+                    actual: Some(actual),
+                });
             }
         }
 
@@ -358,24 +361,22 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 ctx.pop_op_stack(Type::I32)?;
                 let expected = ctx.validate_label_idx(*default_label)?;
                 for (i, idx) in labels.iter().enumerate() {
-                    let ty = ctx.validate_label_idx(*idx)?;
-                    if let (Some(l), Some(r)) = (&expected, &ty) {
-                        if l != r {
-                            return ctx
-                                .error(ErrorKind::TypeMismatch {
-                                    expected: *l,
-                                    actual: *r,
-                                })
-                                .map_err(|e| {
-                                    e.update_msg(format!(
-                                        "{} label {} at {}",
-                                        Ordinal(i),
-                                        idx,
-                                        ctx.current_op
-                                    ))
-                                });
-                        }
+                    let actual = ctx.validate_label_idx(*idx)?;
+                    if expected != actual {
+                        return ctx
+                            .error(ErrorKind::TypeMismatch { expected, actual })
+                            .map_err(|e| {
+                                e.update_msg(format!(
+                                    "{} label {} at {}",
+                                    Ordinal(i),
+                                    idx,
+                                    ctx.current_op
+                                ))
+                            });
                     }
+                }
+                if let Some(ty) = expected {
+                    ctx.pop_op_stack(Type::Known(ty))?;
                 }
                 ctx.unreachable = true;
             }
@@ -665,8 +666,8 @@ pub(crate) fn validate_constant<'m, 's, S: Source>(
         if ty != expr_ty {
             ctx.error(
                 ErrorKind::TypeMismatch {
-                    expected: expr_ty,
-                    actual: ty,
+                    expected: Some(expr_ty),
+                    actual: Some(ty),
                 },
                 "",
                 start,
