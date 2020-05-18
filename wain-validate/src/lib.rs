@@ -423,6 +423,12 @@ mod tests {
         m.types.push(func_type(vec![], None));
         m.funcs.push(func(0, vec![], vec![I32Const(1), Call(0)]));
         let err = validate(&root(m)).unwrap_err();
-        assert!(matches!(err.kind(), ErrorKind::StackNotEmptyAfterFunc{..}));
+        assert!(matches!(
+            err.kind(),
+            ErrorKind::InvalidStackDepth {
+                expected: 0,
+                actual: 1
+            }
+        ));
     }
 }

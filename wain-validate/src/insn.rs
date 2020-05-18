@@ -34,6 +34,7 @@ impl fmt::Debug for Type {
     }
 }
 
+#[derive(Default)]
 struct CtrlFrame {
     idx: usize,
     offset: usize,
@@ -239,7 +240,8 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
     outer: &'outer OuterContext<'m, 's, S>,
     start: usize,
 ) -> Result<(), S> {
-    // FuncType validated func_ty has at most one result type
+    // Note: FuncType already validated func_ty has at most one result type
+    // This assumes a function can have only one return value
     let ret_ty = func_ty.results.get(0).copied();
     let mut ctx = FuncBodyContext {
         current_op: "",
@@ -259,23 +261,10 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
 
     body.validate(&mut ctx)?;
 
-    // Note: This assumes a function can have only one return value
-    if let Some(ty) = ret_ty {
-        ctx.current_op = "function return type";
-        ctx.current_offset = start;
-        ctx.pop_op_stack(Type::Known(ty))?;
-    }
-
-    // Function call must modify stack from [t1*] to [t2*]
-    // It means that no value must not remain in current frame after popping return values
-    if !ctx.op_stack.is_empty() {
-        let kind = ErrorKind::StackNotEmptyAfterFunc {
-            stack: format!("{:?}", ctx.op_stack),
-        };
-        return outer.error(kind, "returning from function", start);
-    }
-
-    Ok(())
+    // No value must not remain in current frame after popping return values
+    ctx.current_op = "function return";
+    ctx.current_offset = start;
+    ctx.pop_control_frame(Default::default(), ret_ty)
 }
 
 trait ValidateInsnSeq<'outer, 'm, 's, S: Source> {
