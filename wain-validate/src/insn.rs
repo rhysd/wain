@@ -37,6 +37,8 @@ impl fmt::Debug for Type {
 struct CtrlFrame {
     idx: usize,
     offset: usize,
+    // Unreachability of current instruction sequence
+    unreachable: bool,
 }
 
 // https://webassembly.github.io/spec/core/valid/conventions.html#context
@@ -56,8 +58,6 @@ struct FuncBodyContext<'outer, 'module: 'outer, 'source: 'module, S: Source> {
     locals: &'outer [ValType],
     // Return type of the current function if exists
     ret_ty: Option<ValType>,
-    // Unreachability of current instruction sequence
-    unreachable: bool,
 }
 
 impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
@@ -70,7 +70,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             return Ok(());
         }
 
-        if self.unreachable {
+        if self.current_frame.unreachable {
             // Reach top of current control frame, but it's ok when unreachable. For example,
             //
             //   unreachable i32.add
@@ -93,11 +93,12 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         })
     }
 
-    fn ensure_op_stack_top(&self, expected: Type) -> Result<Type, S> {
+    fn ensure_op_stack_top(&mut self, expected: Type) -> Result<Type, S> {
         self.ensure_ctrl_frame_not_empty()?;
-        if self.op_stack.len() == self.current_frame.idx || self.op_stack.is_empty() {
-            assert!(self.unreachable);
-            return Ok(Type::Unknown);
+        if self.op_stack.len() == self.current_frame.idx {
+            assert!(self.current_frame.unreachable);
+            self.op_stack.push(expected);
+            return Ok(expected);
         }
 
         let actual = self.op_stack[self.op_stack.len() - 1];
@@ -105,7 +106,10 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         // Note: None here means unknown type due to unreachable
         if let (Type::Known(expected), Type::Known(actual)) = (expected, actual) {
             if actual != expected {
-                return self.error(ErrorKind::TypeMismatch { expected, actual });
+                return self.error(ErrorKind::TypeMismatch {
+                    expected: Some(expected),
+                    actual: Some(actual),
+                });
             }
         }
 
@@ -120,21 +124,40 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
 
     fn push_control_frame(&mut self, offset: usize) -> CtrlFrame {
         let idx = self.op_stack.len();
-        let new = CtrlFrame { idx, offset };
+        let new = CtrlFrame {
+            idx,
+            offset,
+            unreachable: false,
+        };
         mem::replace(&mut self.current_frame, new)
     }
 
-    fn pop_control_frame(&mut self, prev: CtrlFrame) {
+    fn pop_control_frame(&mut self, prev: CtrlFrame, ty: Option<ValType>) -> Result<(), S> {
         // control frame top is validated by pop_op_stack
-        assert!(self.current_frame.idx <= self.op_stack.len());
+        if let Some(ty) = ty {
+            self.pop_op_stack(Type::Known(ty))?;
+        }
+        let expected = self.current_frame.idx;
+        let actual = self.op_stack.len();
+        if expected != actual {
+            return self.error(ErrorKind::InvalidStackDepth { expected, actual });
+        }
         self.current_frame = prev;
+        Ok(())
+    }
+
+    fn truncate_op_stack(&mut self, expected: Option<ValType>) -> Result<(), S> {
+        if let Some(ty) = expected {
+            self.pop_op_stack(Type::Known(ty))?;
+        }
+        assert!(self.op_stack.len() >= self.current_frame.idx);
+        self.op_stack.truncate(self.current_frame.idx);
+        self.current_frame.unreachable = true;
+        Ok(())
     }
 
     fn pop_label_stack(&mut self) -> Result<(), S> {
-        if let Some(ty) = self.label_stack.pop() {
-            if let Some(ty) = ty {
-                self.ensure_op_stack_top(Type::Known(ty))?;
-            }
+        if self.label_stack.pop().is_some() {
             Ok(())
         } else {
             self.error(ErrorKind::LabelStackEmpty {
@@ -153,9 +176,6 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             });
         }
         let ty = self.label_stack[len - 1 - (idx as usize)];
-        if let Some(ty) = ty {
-            self.ensure_op_stack_top(Type::Known(ty))?;
-        }
         Ok(ty)
     }
 
@@ -234,11 +254,11 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
         current_frame: CtrlFrame {
             idx: 0,
             offset: start,
+            unreachable: false,
         },
         params: &func_ty.params,
         locals,
         ret_ty,
-        unreachable: false,
     };
 
     body.validate(&mut ctx)?;
@@ -273,7 +293,6 @@ impl<'s, 'm, 'outer, S: Source, V: ValidateInsnSeq<'outer, 'm, 's, S>>
         self.iter()
             .map(|insn| insn.validate(ctx))
             .collect::<Result<_, _>>()?;
-        ctx.unreachable = false; // clear flag
         Ok(())
     }
 }
@@ -292,20 +311,20 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 ctx.label_stack.push(*ty);
                 body.validate(ctx)?;
                 ctx.pop_label_stack()?;
-                ctx.pop_control_frame(saved);
-                if let Some(ty) = ty {
-                    ctx.ensure_op_stack_top(Type::Known(*ty))?;
+                ctx.pop_control_frame(saved, *ty)?;
+                if let Some(ty) = *ty {
+                    ctx.op_stack.push(Type::Known(ty));
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-loop
             Loop { ty, body } => {
                 let saved = ctx.push_control_frame(start);
-                ctx.label_stack.push(*ty);
+                ctx.label_stack.push(None);
                 body.validate(ctx)?;
                 ctx.pop_label_stack()?;
-                ctx.pop_control_frame(saved);
-                if let Some(ty) = ty {
-                    ctx.ensure_op_stack_top(Type::Known(*ty))?;
+                ctx.pop_control_frame(saved, *ty)?;
+                if let Some(ty) = *ty {
+                    ctx.op_stack.push(Type::Known(ty));
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-if
@@ -320,37 +339,33 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
 
                 let saved = ctx.push_control_frame(start);
                 then_body.validate(ctx)?;
-                if let Some(ty) = ty {
-                    ctx.ensure_op_stack_top(Type::Known(*ty))?;
-                }
-                ctx.pop_control_frame(saved);
+                ctx.pop_control_frame(saved, *ty)?;
 
                 let saved = ctx.push_control_frame(start);
                 else_body.validate(ctx)?;
-                if let Some(ty) = ty {
-                    ctx.ensure_op_stack_top(Type::Known(*ty))?;
-                }
-                ctx.pop_control_frame(saved);
+                ctx.pop_control_frame(saved, *ty)?;
 
                 ctx.pop_label_stack()?;
-                if let Some(ty) = ty {
-                    ctx.ensure_op_stack_top(Type::Known(*ty))?;
+                if let Some(ty) = *ty {
+                    ctx.op_stack.push(Type::Known(ty));
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-unreachable
-            Unreachable => ctx.unreachable = true,
+            Unreachable => ctx.truncate_op_stack(None)?,
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-nop
             Nop => {}
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br
             Br(labelidx) => {
-                ctx.validate_label_idx(*labelidx)?;
-                ctx.unreachable = true;
+                let ty = ctx.validate_label_idx(*labelidx)?;
+                ctx.truncate_op_stack(ty)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-if
             BrIf(labelidx) => {
                 // Condition
                 ctx.pop_op_stack(Type::I32)?;
-                ctx.validate_label_idx(*labelidx)?;
+                if let Some(ty) = ctx.validate_label_idx(*labelidx)? {
+                    ctx.ensure_op_stack_top(Type::Known(ty))?;
+                }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-table
             BrTable {
@@ -360,33 +375,25 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 ctx.pop_op_stack(Type::I32)?;
                 let expected = ctx.validate_label_idx(*default_label)?;
                 for (i, idx) in labels.iter().enumerate() {
-                    let ty = ctx.validate_label_idx(*idx)?;
-                    if let (Some(l), Some(r)) = (&expected, &ty) {
-                        if l != r {
-                            return ctx
-                                .error(ErrorKind::TypeMismatch {
-                                    expected: *l,
-                                    actual: *r,
-                                })
-                                .map_err(|e| {
-                                    e.update_msg(format!(
-                                        "{} label {} at {}",
-                                        Ordinal(i),
-                                        idx,
-                                        ctx.current_op
-                                    ))
-                                });
-                        }
+                    let actual = ctx.validate_label_idx(*idx)?;
+                    if expected != actual {
+                        return ctx
+                            .error(ErrorKind::TypeMismatch { expected, actual })
+                            .map_err(|e| {
+                                e.update_msg(format!(
+                                    "{} label {} at {}",
+                                    Ordinal(i),
+                                    idx,
+                                    ctx.current_op
+                                ))
+                            });
                     }
                 }
-                ctx.unreachable = true;
+                ctx.truncate_op_stack(expected)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-return
             Return => {
-                if let Some(ty) = ctx.ret_ty {
-                    ctx.ensure_op_stack_top(Type::Known(ty))?;
-                }
-                ctx.unreachable = true;
+                ctx.truncate_op_stack(ctx.ret_ty)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-call
             Call(funcidx) => {
@@ -667,8 +674,8 @@ pub(crate) fn validate_constant<'m, 's, S: Source>(
         if ty != expr_ty {
             ctx.error(
                 ErrorKind::TypeMismatch {
-                    expected: expr_ty,
-                    actual: ty,
+                    expected: Some(expr_ty),
+                    actual: Some(ty),
                 },
                 "",
                 start,

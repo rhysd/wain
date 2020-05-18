@@ -12,8 +12,8 @@ pub enum ErrorKind {
     },
     MultipleReturnTypes(Vec<ValType>),
     TypeMismatch {
-        expected: ValType,
-        actual: ValType,
+        expected: Option<ValType>,
+        actual: Option<ValType>,
     },
     CtrlFrameEmpty {
         op: &'static str,
@@ -54,6 +54,10 @@ pub enum ErrorKind {
     MemoryIsNotDefined,
     StackNotEmptyAfterFunc {
         stack: String,
+    },
+    InvalidStackDepth {
+        expected: usize,
+        actual: usize,
     },
 }
 
@@ -105,9 +109,21 @@ impl<S: Source> fmt::Display for Error<S> {
                 )?
             }
             TypeMismatch {
-                expected,
-                actual,
+                expected: Some(expected),
+                actual: Some(actual),
             } => write!(f, "expected type '{}' but got type '{}'", expected, actual)?,
+            TypeMismatch {
+                expected: Some(expected),
+                actual: None,
+            } => write!(f, "expected type '{}' but got type None", expected)?,
+            TypeMismatch {
+                expected: None,
+                actual: Some(actual),
+            } => write!(f, "expected type None but got type '{}'", actual)?,
+            TypeMismatch {
+                expected: None,
+                actual: None,
+            } => unreachable!(),
             CtrlFrameEmpty {
                 op,
                 frame_start,
@@ -140,6 +156,7 @@ impl<S: Source> fmt::Display for Error<S> {
             AlreadyExported{ name, prev_offset } => write!(f, "'{}' was already exported at offset {}", name, prev_offset)?,
             MemoryIsNotDefined => write!(f, "at least one memory section must be defined")?,
             StackNotEmptyAfterFunc{ stack } => write!(f, "some values {} still remain in the frame after popping return values", stack)?,
+            InvalidStackDepth { expected, actual } => write!(f, "expected operand stack depth is {} but {}", expected, actual)?,
         }
 
         write!(f, ". error while validating {}. ", self.when)?;
