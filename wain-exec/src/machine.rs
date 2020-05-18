@@ -838,11 +838,49 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             F32Div => machine.binop::<f32, _>(|l, r| l / r),
             F64Div => machine.binop::<f64, _>(|l, r| l / r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmin
-            F32Min => machine.binop::<f32, _>(|l, r| l.min(r)),
-            F64Min => machine.binop::<f64, _>(|l, r| l.min(r)),
+            F32Min => machine.binop::<f32, _>(|l, r| {
+                // f32::min() cannot use directly because of NaN handling divergence.
+                // For example, 42f32.min(f32::NAN) is 42
+                // but (f32.min (f32.const 42) (f32.const nan)) is nan.
+                if l.is_nan() {
+                    l
+                } else if r.is_nan() {
+                    r
+                } else {
+                    l.min(r)
+                }
+            }),
+            F64Min => machine.binop::<f64, _>(|l, r| {
+                // f64::min() cannot use directly for the same reason as f32.min
+                if l.is_nan() {
+                    l
+                } else if r.is_nan() {
+                    r
+                } else {
+                    l.min(r)
+                }
+            }),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmax
-            F32Max => machine.binop::<f32, _>(|l, r| l.max(r)),
-            F64Max => machine.binop::<f64, _>(|l, r| l.max(r)),
+            F32Max => machine.binop::<f32, _>(|l, r| {
+                // f32::max() cannot use directly for the same reason as f32.min
+                if l.is_nan() {
+                    l
+                } else if r.is_nan() {
+                    r
+                } else {
+                    l.max(r)
+                }
+            }),
+            F64Max => machine.binop::<f64, _>(|l, r| {
+                // f64::max() cannot use directly for the same reason as f32.min
+                if l.is_nan() {
+                    l
+                } else if r.is_nan() {
+                    r
+                } else {
+                    l.max(r)
+                }
+            }),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fcopysign
             F32Copysign => machine.binop::<f32, _>(|l, r| l.copysign(r)),
             F64Copysign => machine.binop::<f64, _>(|l, r| l.copysign(r)),
