@@ -427,7 +427,8 @@ mod tests {
             err.kind(),
             ErrorKind::InvalidStackDepth {
                 expected: 0,
-                actual: 1
+                actual: 1,
+                ..
             }
         ));
     }

@@ -52,6 +52,7 @@ pub enum ErrorKind {
     InvalidStackDepth {
         expected: usize,
         actual: usize,
+        remaining: String,
     },
 }
 
@@ -143,7 +144,13 @@ impl<S: Source> fmt::Display for Error<S> {
             MultipleMemories(size) => write!(f, "number of memories must not be larger than 1 but got {}", size)?,
             AlreadyExported{ name, prev_offset } => write!(f, "'{}' was already exported at offset {}", name, prev_offset)?,
             MemoryIsNotDefined => write!(f, "at least one memory section must be defined")?,
-            InvalidStackDepth { expected, actual } => write!(f, "expected operand stack depth is {} but {}", expected, actual)?,
+            InvalidStackDepth { expected, actual, remaining } => write!(
+                f,
+                "expected operand stack depth is {} but actually {} with {} remaining on the stack",
+                expected,
+                actual,
+                remaining,
+            )?,
         }
 
         write!(f, ". error while validating {}. ", self.when)?;
