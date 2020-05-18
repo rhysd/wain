@@ -156,14 +156,9 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         Ok(())
     }
 
-    fn pop_label_stack(&mut self) -> Result<(), S> {
-        if self.label_stack.pop().is_some() {
-            Ok(())
-        } else {
-            self.error(ErrorKind::LabelStackEmpty {
-                op: self.current_op,
-            })
-        }
+    fn pop_label_stack(&mut self) {
+        assert!(!self.label_stack.is_empty());
+        self.label_stack.pop();
     }
 
     fn validate_label_idx(&self, idx: u32) -> Result<Option<ValType>, S> {
@@ -310,7 +305,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 let saved = ctx.push_control_frame(start);
                 ctx.label_stack.push(*ty);
                 body.validate(ctx)?;
-                ctx.pop_label_stack()?;
+                ctx.pop_label_stack();
                 ctx.pop_control_frame(saved, *ty)?;
                 if let Some(ty) = *ty {
                     ctx.op_stack.push(Type::Known(ty));
@@ -321,7 +316,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 let saved = ctx.push_control_frame(start);
                 ctx.label_stack.push(None);
                 body.validate(ctx)?;
-                ctx.pop_label_stack()?;
+                ctx.pop_label_stack();
                 ctx.pop_control_frame(saved, *ty)?;
                 if let Some(ty) = *ty {
                     ctx.op_stack.push(Type::Known(ty));
@@ -345,7 +340,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 else_body.validate(ctx)?;
                 ctx.pop_control_frame(saved, *ty)?;
 
-                ctx.pop_label_stack()?;
+                ctx.pop_label_stack();
                 if let Some(ty) = *ty {
                     ctx.op_stack.push(Type::Known(ty));
                 }
