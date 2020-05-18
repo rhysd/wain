@@ -166,7 +166,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         }
     }
 
-    fn validate_label_idx(&mut self, idx: u32) -> Result<Option<ValType>, S> {
+    fn validate_label_idx(&self, idx: u32) -> Result<Option<ValType>, S> {
         let len = self.label_stack.len();
         if (idx as usize) >= len {
             return self.error(ErrorKind::IndexOutOfBounds {
@@ -176,9 +176,6 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             });
         }
         let ty = self.label_stack[len - 1 - (idx as usize)];
-        if let Some(ty) = ty {
-            self.ensure_op_stack_top(Type::Known(ty))?;
-        }
         Ok(ty)
     }
 
