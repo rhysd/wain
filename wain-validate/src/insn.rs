@@ -139,6 +139,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         }
         let expected = self.current_frame.idx;
         let actual = self.op_stack.len();
+        assert!(expected <= actual);
         if expected != actual {
             return self.error(ErrorKind::InvalidStackDepth { expected, actual });
         }

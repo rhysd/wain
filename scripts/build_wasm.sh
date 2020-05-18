@@ -9,5 +9,5 @@ BASE="${SRC%.*}"
 
 set -x
 
-clang -nostdlib --target=wasm32 -Wl,--allow-undefined "${SRC}" -o "${BASE}.wasm"
+clang -O2 -nostdlib --target=wasm32 -Wl,--allow-undefined "${SRC}" -o "${BASE}.wasm"
 wasm2wat "${BASE}.wasm" > "${BASE}.wat"

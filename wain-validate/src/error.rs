@@ -105,22 +105,17 @@ impl<S: Source> fmt::Display for Error<S> {
                     ss.join(", ")
                 )?
             }
-            TypeMismatch {
-                expected: Some(expected),
-                actual: Some(actual),
-            } => write!(f, "expected type '{}' but got type '{}'", expected, actual)?,
-            TypeMismatch {
-                expected: Some(expected),
-                actual: None,
-            } => write!(f, "expected type '{}' but got type None", expected)?,
-            TypeMismatch {
-                expected: None,
-                actual: Some(actual),
-            } => write!(f, "expected type None but got type '{}'", actual)?,
-            TypeMismatch {
-                expected: None,
-                actual: None,
-            } => unreachable!(),
+            TypeMismatch { expected, actual } => {
+                assert_ne!(expected, actual);
+                match expected {
+                    Some(t) => write!(f, "expected type '{}'", t)?,
+                    None => write!(f, "expected no type")?,
+                }
+                match actual {
+                    Some(t) => write!(f, "but got type '{}'", t)?,
+                    None => write!(f, "but got no type")?,
+                }
+            }
             CtrlFrameEmpty {
                 op,
                 frame_start,
