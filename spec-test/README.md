@@ -32,6 +32,23 @@ Stop running tests on first failure:
 cargo run -- -f
 ```
 
+Comparing results between two commits (e.g. `1234567` v.s. `890abcd`):
+
+Note: `colordiff` or `git diff --no-index` would be better than `diff -u`
+
+```
+# Get results for commit 1234567
+git reset --hard 1234567
+cargo run -- -w before.txt
+
+# Get results for commit 890abcd
+git reset --hard 890abcd
+cargo run -- -w after.txt
+
+# Compare results as diff. Summary for one file per line
+diff -u before.txt after.txt
+```
+
 For running faster, release build would be useful:
 
 ```

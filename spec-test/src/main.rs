@@ -31,13 +31,15 @@ impl Target {
 struct Options {
     help: bool,
     fast_fail: bool,
+    write: Option<PathBuf>,
     target: Target,
 }
 
-fn parse_options() -> Options {
+fn parse_options() -> Result<Options, &'static str> {
     let mut opts = Options {
         help: false,
         fast_fail: false,
+        write: None,
         target: {
             let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR")); // /path/to/wain/spec-test
             p.push("wasm-testsuite");
@@ -45,7 +47,8 @@ fn parse_options() -> Options {
         },
     };
 
-    for arg in env::args().skip(1) {
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
         match arg.as_str() {
             "-h" | "--help" => {
                 opts.help = true;
@@ -53,6 +56,13 @@ fn parse_options() -> Options {
             }
             "-f" | "--fast-fail" => {
                 opts.fast_fail = true;
+            }
+            "-w" | "--write-summary" => {
+                if let Some(path) = args.next() {
+                    opts.write = Some(PathBuf::from(path));
+                } else {
+                    return Err("-w or --write-summary must be followed by file path argument");
+                }
             }
             _ => {
                 let p = PathBuf::from(arg);
@@ -66,20 +76,27 @@ fn parse_options() -> Options {
         }
     }
 
-    opts
+    Ok(opts)
 }
 
 fn main() -> io::Result<()> {
-    let opts = parse_options();
+    let opts = match parse_options() {
+        Ok(opts) => opts,
+        Err(msg) => {
+            println!("{}. Please see --help", msg);
+            exit(1);
+        }
+    };
+
     if opts.help {
-        println!("Usage: spec-tester [-f|--fast-fail|-h|--help] [file or dir]");
+        println!("Usage: spec-tester [-f|--fast-fail|-w {{file}}|--write-summary {{file}}|-h|--help] [{{file}}|{{dir}}]");
         exit(0);
     }
 
     println!("Running tests for {:?}...", opts.target.path());
 
     let stdout = io::stdout();
-    let mut runner = Runner::new(stdout.lock(), opts.fast_fail);
+    let mut runner = Runner::new(stdout.lock(), opts.fast_fail, opts.write);
     let success = match &opts.target {
         Target::Dir(dir) => runner.run_dir(dir)?,
         Target::File(path, file) => runner.run_file(path, file)?.success(),

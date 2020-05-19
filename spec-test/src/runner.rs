@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time;
 use wain_ast as ast;
 use wain_exec::{DefaultImporter, Machine, Value};
@@ -121,18 +121,20 @@ impl Summary {
 // Test runner for one .wast file
 pub struct Runner<W: Write> {
     out: W,
+    summary_file: Option<PathBuf>,
     crasher: CrashTester,
     fast_fail: bool,
 }
 
 impl<W: Write> Runner<W> {
-    pub fn new(mut out: W, fast_fail: bool) -> Self {
+    pub fn new(mut out: W, fast_fail: bool, summary_file: Option<PathBuf>) -> Self {
         write!(&mut out, "Building crash-tester...").unwrap();
         let crasher = CrashTester::new();
         writeln!(&mut out, "done").unwrap();
 
         Runner {
             out,
+            summary_file,
             crasher,
             fast_fail,
         }
@@ -146,9 +148,35 @@ impl<W: Write> Runner<W> {
         writeln!(&mut self.out, "{}", err).unwrap();
     }
 
+    fn save_summaries(
+        &mut self,
+        summaries: &mut [(String, Summary)],
+        total: &Summary,
+    ) -> io::Result<()> {
+        let mut file = if let Some(f) = &self.summary_file {
+            fs::File::create(f)?
+        } else {
+            return Ok(());
+        };
+
+        summaries.sort_by(|(f1, _), (f2, _)| f1.cmp(f2));
+
+        for (f, sum) in summaries.iter() {
+            write!(&mut file, "{} -> ", f)?;
+            sum.println(&mut file);
+        }
+
+        writeln!(&mut file)?;
+        write!(&mut file, "TOTAL -> ")?;
+        total.println(&mut file);
+
+        Ok(())
+    }
+
     pub fn run_dir(&mut self, dir: &Path) -> io::Result<bool> {
         let mut total = Summary::default();
         let mut num_files = 0;
+        let mut summaries = vec![];
         let start_time = time::SystemTime::now();
 
         let entries = fs::read_dir(dir)?;
@@ -168,6 +196,9 @@ impl<W: Write> Runner<W> {
                 break;
             }
             total.merge(&sum);
+            if self.summary_file.is_some() {
+                summaries.push((file.to_string(), sum));
+            }
             num_files += 1;
         }
 
@@ -181,6 +212,7 @@ impl<W: Write> Runner<W> {
         .unwrap();
         total.println(&mut self.out);
         self.out.write_all(color::RESET).unwrap();
+        self.save_summaries(&mut summaries, &total)?;
         Ok(total.failed == 0)
     }
 
