@@ -89,16 +89,19 @@ impl_le_rw!(u16);
 impl_le_rw!(u32);
 
 // Trait to handle f32 and f64 in the same way
-pub(crate) trait Float: Clone + Copy {
+pub(crate) trait Float: Clone + Copy + PartialEq + PartialOrd {
+    const ZERO: Self;
     fn is_nan(self) -> bool;
     fn min(self, other: Self) -> Self;
     fn max(self, other: Self) -> Self;
+    fn is_sign_negative(self) -> bool;
 }
 
 macro_rules! impl_float {
     ($($ty:ty)*) => {
         $(
             impl Float for $ty {
+                const ZERO: Self = 0.0;
                 fn is_nan(self) -> bool {
                     self.is_nan()
                 }
@@ -107,6 +110,9 @@ macro_rules! impl_float {
                 }
                 fn max(self, other: Self) -> Self {
                     self.max(other)
+                }
+                fn is_sign_negative(self) -> bool {
+                    self.is_sign_negative()
                 }
             }
         )*

@@ -29,25 +29,45 @@ enum ExecState {
 
 type ExecResult = Result<ExecState>;
 
+// https://webassembly.github.io/spec/core/exec/numerics.html?highlight=ieee#xref-exec-numerics-op-fmin-mathrm-fmin-n-z-1-z-2
 fn fmin<F: Float>(l: F, r: F) -> F {
     // f32::min() cannot use directly because of NaN handling divergence.
     // For example, 42f32.min(f32::NAN) is 42
     // but (f32.min (f32.const 42) (f32.const nan)) is nan.
+    //
+    // TODO: NaN propagation: https://webassembly.github.io/spec/core/exec/numerics.html#aux-nans
     if l.is_nan() {
         l
     } else if r.is_nan() {
         r
+    } else if l == F::ZERO && r == F::ZERO {
+        // fmin(+0.0, -0.0) = -0.0 and fmin(-0.0, +0.0) = -0.0
+        if l.is_sign_negative() {
+            l
+        } else {
+            r
+        }
     } else {
         l.min(r)
     }
 }
 
+// https://webassembly.github.io/spec/core/exec/numerics.html?highlight=ieee#xref-exec-numerics-op-fmax-mathrm-fmax-n-z-1-z-2
 fn fmax<F: Float>(l: F, r: F) -> F {
     // f32::max() cannot use directly for the same reason as f32::min() and f32.min
+    //
+    // TODO: NaN propagation: https://webassembly.github.io/spec/core/exec/numerics.html#aux-nans
     if l.is_nan() {
         l
     } else if r.is_nan() {
         r
+    } else if l == F::ZERO && r == F::ZERO {
+        // fmax(+0.0, -0.0) = +0.0 and fmax(-0.0, +0.0) = +0.0
+        if l.is_sign_negative() {
+            r
+        } else {
+            l
+        }
     } else {
         l.max(r)
     }
