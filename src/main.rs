@@ -151,7 +151,7 @@ fn run_binary(bin: Vec<u8>) -> wain_exec::Run {
 }
 #[cfg(not(feature = "binary"))]
 fn run_binary(_: Vec<u8>) -> wain_exec::Run {
-    unreachable!()
+    unimplemented!("running binary format is not supported since built without 'binary' feature")
 }
 
 #[cfg(feature = "text")]
@@ -160,7 +160,7 @@ fn run_text(text: String) -> wain_exec::Run {
 }
 #[cfg(not(feature = "text"))]
 fn run_text(_: String) -> wain_exec::Run {
-    unreachable!()
+    unimplemented!("running text format is not supported since built without 'text' feature")
 }
 
 fn main() {
