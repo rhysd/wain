@@ -5,7 +5,7 @@ use crate::memory::Memory;
 use crate::stack::{CallFrame, Stack, StackAccess};
 use crate::table::Table;
 use crate::trap::{Result, Trap, TrapReason};
-use crate::value::{LittleEndian, Value};
+use crate::value::{Float, LittleEndian, Value};
 use wain_ast as ast;
 use wain_ast::AsValType;
 
@@ -28,6 +28,30 @@ enum ExecState {
 }
 
 type ExecResult = Result<ExecState>;
+
+fn fmin<F: Float>(l: F, r: F) -> F {
+    // f32::min() cannot use directly because of NaN handling divergence.
+    // For example, 42f32.min(f32::NAN) is 42
+    // but (f32.min (f32.const 42) (f32.const nan)) is nan.
+    if l.is_nan() {
+        l
+    } else if r.is_nan() {
+        r
+    } else {
+        l.min(r)
+    }
+}
+
+fn fmax<F: Float>(l: F, r: F) -> F {
+    // f32::max() cannot use directly for the same reason as f32::min() and f32.min
+    if l.is_nan() {
+        l
+    } else if r.is_nan() {
+        r
+    } else {
+        l.max(r)
+    }
+}
 
 // State of abtract machine to run wasm code. This struct contains both store and stack
 pub struct Machine<'module, 'source, I: Importer> {
@@ -838,49 +862,11 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             F32Div => machine.binop::<f32, _>(|l, r| l / r),
             F64Div => machine.binop::<f64, _>(|l, r| l / r),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmin
-            F32Min => machine.binop::<f32, _>(|l, r| {
-                // f32::min() cannot use directly because of NaN handling divergence.
-                // For example, 42f32.min(f32::NAN) is 42
-                // but (f32.min (f32.const 42) (f32.const nan)) is nan.
-                if l.is_nan() {
-                    l
-                } else if r.is_nan() {
-                    r
-                } else {
-                    l.min(r)
-                }
-            }),
-            F64Min => machine.binop::<f64, _>(|l, r| {
-                // f64::min() cannot use directly for the same reason as f32.min
-                if l.is_nan() {
-                    l
-                } else if r.is_nan() {
-                    r
-                } else {
-                    l.min(r)
-                }
-            }),
+            F32Min => machine.binop::<f32, _>(fmin),
+            F64Min => machine.binop::<f64, _>(fmin),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmax
-            F32Max => machine.binop::<f32, _>(|l, r| {
-                // f32::max() cannot use directly for the same reason as f32.min
-                if l.is_nan() {
-                    l
-                } else if r.is_nan() {
-                    r
-                } else {
-                    l.max(r)
-                }
-            }),
-            F64Max => machine.binop::<f64, _>(|l, r| {
-                // f64::max() cannot use directly for the same reason as f32.min
-                if l.is_nan() {
-                    l
-                } else if r.is_nan() {
-                    r
-                } else {
-                    l.max(r)
-                }
-            }),
+            F32Max => machine.binop::<f32, _>(fmax),
+            F64Max => machine.binop::<f64, _>(fmax),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fcopysign
             F32Copysign => machine.binop::<f32, _>(|l, r| l.copysign(r)),
             F64Copysign => machine.binop::<f64, _>(|l, r| l.copysign(r)),

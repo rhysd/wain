@@ -87,3 +87,30 @@ impl LittleEndian for u8 {
 }
 impl_le_rw!(u16);
 impl_le_rw!(u32);
+
+// Trait to handle f32 and f64 in the same way
+pub(crate) trait Float: Clone + Copy {
+    fn is_nan(self) -> bool;
+    fn min(self, other: Self) -> Self;
+    fn max(self, other: Self) -> Self;
+}
+
+macro_rules! impl_float {
+    ($($ty:ty)*) => {
+        $(
+            impl Float for $ty {
+                fn is_nan(self) -> bool {
+                    self.is_nan()
+                }
+                fn min(self, other: Self) -> Self {
+                    self.min(other)
+                }
+                fn max(self, other: Self) -> Self {
+                    self.max(other)
+                }
+            }
+        )*
+    };
+}
+
+impl_float!(f32 f64);
