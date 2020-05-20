@@ -36,7 +36,7 @@ impl fmt::Debug for Type {
 
 #[derive(Default)]
 struct CtrlFrame {
-    idx: usize,
+    height: usize,
     offset: usize,
     // Unreachability of current instruction sequence
     unreachable: bool,
@@ -67,7 +67,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
     }
 
     fn ensure_ctrl_frame_not_empty(&self) -> Result<(), S> {
-        if self.op_stack.len() > self.current_frame.idx {
+        if self.op_stack.len() > self.current_frame.height {
             return Ok(());
         }
 
@@ -90,13 +90,13 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         self.error(ErrorKind::CtrlFrameEmpty {
             op: self.current_op,
             frame_start: self.current_frame.offset,
-            idx_in_op_stack: self.current_frame.idx,
+            idx_in_op_stack: self.current_frame.height,
         })
     }
 
     fn ensure_op_stack_top(&mut self, expected: Type) -> Result<Type, S> {
         self.ensure_ctrl_frame_not_empty()?;
-        if self.op_stack.len() == self.current_frame.idx {
+        if self.op_stack.len() == self.current_frame.height {
             assert!(self.current_frame.unreachable);
             self.op_stack.push(expected);
             return Ok(expected);
@@ -124,9 +124,8 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
     }
 
     fn push_control_frame(&mut self, offset: usize) -> CtrlFrame {
-        let idx = self.op_stack.len();
         let new = CtrlFrame {
-            idx,
+            height: self.op_stack.len(),
             offset,
             unreachable: false,
         };
@@ -138,7 +137,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         if let Some(ty) = ty {
             self.pop_op_stack(Type::Known(ty))?;
         }
-        let expected = self.current_frame.idx;
+        let expected = self.current_frame.height;
         let actual = self.op_stack.len();
         assert!(expected <= actual);
         if expected != actual {
@@ -152,12 +151,12 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         Ok(())
     }
 
-    fn truncate_op_stack(&mut self, expected: Option<ValType>) -> Result<(), S> {
-        if let Some(ty) = expected {
+    fn mark_unreachable(&mut self, stack_top: Option<ValType>) -> Result<(), S> {
+        if let Some(ty) = stack_top {
             self.pop_op_stack(Type::Known(ty))?;
         }
-        assert!(self.op_stack.len() >= self.current_frame.idx);
-        self.op_stack.truncate(self.current_frame.idx);
+        assert!(self.op_stack.len() >= self.current_frame.height);
+        self.op_stack.truncate(self.current_frame.height);
         self.current_frame.unreachable = true;
         Ok(())
     }
@@ -254,7 +253,7 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
         op_stack: vec![],
         label_stack: vec![],
         current_frame: CtrlFrame {
-            idx: 0,
+            height: 0,
             offset: start,
             unreachable: false,
         },
@@ -340,13 +339,13 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-unreachable
-            Unreachable => ctx.truncate_op_stack(None)?,
+            Unreachable => ctx.mark_unreachable(None)?,
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-nop
             Nop => {}
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br
             Br(labelidx) => {
                 let ty = ctx.validate_label_idx(*labelidx)?;
-                ctx.truncate_op_stack(ty)?;
+                ctx.mark_unreachable(ty)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-if
             BrIf(labelidx) => {
@@ -378,11 +377,11 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                             });
                     }
                 }
-                ctx.truncate_op_stack(expected)?;
+                ctx.mark_unreachable(expected)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-return
             Return => {
-                ctx.truncate_op_stack(ctx.ret_ty)?;
+                ctx.mark_unreachable(ctx.ret_ty)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-call
             Call(funcidx) => {

@@ -6,7 +6,7 @@ project. Not intended to be published so it may depend on some external crates t
 
 This crate contains:
 
-- `.wast` text format parser built on top of [wain-syntax-text](../wain-syntax-text).
+- `.wast` text format parser built on top of [wain-syntax-text](../wain-syntax-text)
 - test runner to run wain interpreter with the test suites
 - [WebAssembly/testsuite][testsuite] repository as a Git submodule
 
@@ -34,7 +34,7 @@ cargo run -- -f
 
 Comparing results between two commits (e.g. `1234567` v.s. `890abcd`):
 
-Note: `colordiff` or `git diff --no-index` would be better than `diff -u`
+Note: `colordiff -u` or `git diff --no-index` would be better than `diff -u`.
 
 ```
 # Get results for commit 1234567
