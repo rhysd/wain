@@ -32,21 +32,13 @@ type ExecResult = Result<ExecState>;
 // https://webassembly.github.io/spec/core/exec/numerics.html?highlight=ieee#xref-exec-numerics-op-fmin-mathrm-fmin-n-z-1-z-2
 fn fmin<F: Float>(l: F, r: F) -> F {
     // f32::min() cannot use directly because of NaN handling divergence.
-    // For example, 42f32.min(f32::NAN) is 42
-    // but (f32.min (f32.const 42) (f32.const nan)) is nan.
-    //
-    // TODO: NaN propagation: https://webassembly.github.io/spec/core/exec/numerics.html#aux-nans
+    // For example, 42f32.min(f32::NAN) is 42 but (f32.min (f32.const 42) (f32.const nan)) is nan.
     if l.is_nan() {
-        l
+        l.to_arithmetic_nan()
     } else if r.is_nan() {
-        r
-    } else if l == F::ZERO && r == F::ZERO {
-        // fmin(+0.0, -0.0) = -0.0 and fmin(-0.0, +0.0) = -0.0
-        if l.is_sign_negative() {
-            l
-        } else {
-            r
-        }
+        r.to_arithmetic_nan()
+    } else if l == r {
+        F::from_bits(l.to_bits() | r.to_bits())
     } else {
         l.min(r)
     }
@@ -55,19 +47,12 @@ fn fmin<F: Float>(l: F, r: F) -> F {
 // https://webassembly.github.io/spec/core/exec/numerics.html?highlight=ieee#xref-exec-numerics-op-fmax-mathrm-fmax-n-z-1-z-2
 fn fmax<F: Float>(l: F, r: F) -> F {
     // f32::max() cannot use directly for the same reason as f32::min() and f32.min
-    //
-    // TODO: NaN propagation: https://webassembly.github.io/spec/core/exec/numerics.html#aux-nans
     if l.is_nan() {
-        l
+        l.to_arithmetic_nan()
     } else if r.is_nan() {
-        r
-    } else if l == F::ZERO && r == F::ZERO {
-        // fmax(+0.0, -0.0) = +0.0 and fmax(-0.0, +0.0) = +0.0
-        if l.is_sign_negative() {
-            r
-        } else {
-            l
-        }
+        r.to_arithmetic_nan()
+    } else if l == r {
+        F::from_bits(l.to_bits() & r.to_bits())
     } else {
         l.max(r)
     }
@@ -1204,5 +1189,217 @@ mod tests {
         assert!(matches!(e.reason, TrapReason::RemZeroDivisor));
         let e = exec_insns(I64, vec![I64Const(1), I64Const(0), I64RemU]).unwrap_err();
         assert!(matches!(e.reason, TrapReason::RemZeroDivisor));
+    }
+
+    #[test]
+    fn fmin_edge_cases() {
+        use ast::InsnKind::*;
+        use ast::ValType::*;
+
+        let i = exec_insns(F32, vec![F32Const(0.0), F32Const(-0.0), F32Min])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F32(f) if f.to_bits() == 0x8000_0000));
+        let i = exec_insns(F32, vec![F32Const(-0.0), F32Const(0.0), F32Min])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F32(f) if f.to_bits() == 0x8000_0000));
+        let i = exec_insns(F32, vec![F32Const(1.0), F32Const(1.0), F32Min])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F32(f) if f == 1.0));
+        let i = exec_insns(F32, vec![F32Const(-42.0), F32Const(-42.0), F32Min])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F32(f) if f == -42.0));
+        let i = exec_insns(
+            F32,
+            vec![
+                F32Const(f32::NEG_INFINITY),
+                F32Const(f32::from_bits(0x7f80_0001)),
+                F32Min,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F32(f) if f.is_nan() && f.to_bits() == 0x7fc0_0001));
+        let i = exec_insns(
+            F32,
+            vec![
+                F32Const(f32::from_bits(0x7fff_ffff)),
+                F32Const(f32::NEG_INFINITY),
+                F32Min,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F32(f) if f.is_nan() && f.to_bits() == 0x7fff_ffff));
+        let i = exec_insns(
+            F32,
+            vec![
+                F32Const(f32::from_bits(0x7f80_0001)),
+                F32Const(f32::from_bits(0x7fff_ffff)),
+                F32Min,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F32(f) if f.is_nan() && f.to_bits() == 0x7fc0_0001));
+
+        let i = exec_insns(F64, vec![F64Const(0.0), F64Const(-0.0), F64Min])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F64(f) if f.to_bits() == 0x8000_0000_0000_0000));
+        let i = exec_insns(F64, vec![F64Const(-0.0), F64Const(0.0), F64Min])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F64(f) if f.to_bits() == 0x8000_0000_0000_0000));
+        let i = exec_insns(F64, vec![F64Const(1.0), F64Const(1.0), F64Min])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F64(f) if f == 1.0));
+        let i = exec_insns(F64, vec![F64Const(-42.0), F64Const(-42.0), F64Min])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F64(f) if f == -42.0));
+        let i = exec_insns(
+            F64,
+            vec![
+                F64Const(f64::NEG_INFINITY),
+                F64Const(f64::from_bits(0x7ff0_0000_0000_0001)),
+                F64Min,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F64(f) if f.is_nan() && f.to_bits() == 0x7ff8_0000_0000_0001));
+        let i = exec_insns(
+            F64,
+            vec![
+                F64Const(f64::from_bits(0x7fff_ffff_ffff_ffff)),
+                F64Const(f64::NEG_INFINITY),
+                F64Min,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F64(f) if f.is_nan() && f.to_bits() == 0x7fff_ffff_ffff_ffff));
+        let i = exec_insns(
+            F64,
+            vec![
+                F64Const(f64::from_bits(0x7ff0_0000_0000_0001)),
+                F64Const(f64::from_bits(0x7fff_ffff_ffff_ffff)),
+                F64Min,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F64(f) if f.is_nan() && f.to_bits() == 0x7ff8_0000_0000_0001));
+    }
+
+    #[test]
+    fn fmax_edge_cases() {
+        use ast::InsnKind::*;
+        use ast::ValType::*;
+
+        let i = exec_insns(F32, vec![F32Const(0.0), F32Const(-0.0), F32Max])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F32(f) if f.to_bits() == 0x0000_0000));
+        let i = exec_insns(F32, vec![F32Const(-0.0), F32Const(0.0), F32Max])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F32(f) if f.to_bits() == 0x0000_0000));
+        let i = exec_insns(F32, vec![F32Const(1.0), F32Const(1.0), F32Max])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F32(f) if f == 1.0));
+        let i = exec_insns(F32, vec![F32Const(-42.0), F32Const(-42.0), F32Max])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F32(f) if f == -42.0));
+        let i = exec_insns(
+            F32,
+            vec![
+                F32Const(f32::INFINITY),
+                F32Const(f32::from_bits(0x7f80_0001)),
+                F32Max,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F32(f) if f.is_nan() && f.to_bits() == 0x7fc0_0001));
+        let i = exec_insns(
+            F32,
+            vec![
+                F32Const(f32::from_bits(0x7fff_ffff)),
+                F32Const(f32::INFINITY),
+                F32Max,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F32(f) if f.is_nan() && f.to_bits() == 0x7fff_ffff));
+        let i = exec_insns(
+            F32,
+            vec![
+                F32Const(f32::from_bits(0x7f80_0001)),
+                F32Const(f32::from_bits(0x7fff_ffff)),
+                F32Max,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F32(f) if f.is_nan() && f.to_bits() == 0x7fc0_0001));
+
+        let i = exec_insns(F64, vec![F64Const(0.0), F64Const(-0.0), F64Max])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F64(f) if f.to_bits() == 0x0000_0000_0000_0000));
+        let i = exec_insns(F64, vec![F64Const(-0.0), F64Const(0.0), F64Max])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F64(f) if f.to_bits() == 0x0000_0000_0000_0000));
+        let i = exec_insns(F64, vec![F64Const(1.0), F64Const(1.0), F64Max])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F64(f) if f == 1.0));
+        let i = exec_insns(F64, vec![F64Const(-42.0), F64Const(-42.0), F64Max])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(i, Value::F64(f) if f == -42.0));
+        let i = exec_insns(
+            F64,
+            vec![
+                F64Const(f64::INFINITY),
+                F64Const(f64::from_bits(0x7ff0_0000_0000_0001)),
+                F64Max,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F64(f) if f.is_nan() && f.to_bits() == 0x7ff8_0000_0000_0001));
+        let i = exec_insns(
+            F64,
+            vec![
+                F64Const(f64::from_bits(0x7fff_ffff_ffff_ffff)),
+                F64Const(f64::INFINITY),
+                F64Max,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F64(f) if f.is_nan() && f.to_bits() == 0x7fff_ffff_ffff_ffff));
+        let i = exec_insns(
+            F64,
+            vec![
+                F64Const(f64::from_bits(0x7ff0_0000_0000_0001)),
+                F64Const(f64::from_bits(0x7fff_ffff_ffff_ffff)),
+                F64Max,
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(i, Value::F64(f) if f.is_nan() && f.to_bits() == 0x7ff8_0000_0000_0001));
     }
 }
