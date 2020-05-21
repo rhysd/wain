@@ -97,7 +97,9 @@ pub(crate) trait Float: Clone + Copy + PartialEq + PartialOrd {
     fn max(self, other: Self) -> Self;
     fn to_bits(self) -> Self::UInt;
     fn from_bits(_: Self::UInt) -> Self;
-    fn to_arithmetic_nan(self) -> Self;
+    fn to_arithmetic_nan(self) -> Self {
+        Self::from_bits(self.to_bits() | Self::ARITHMETIC_NAN)
+    }
 }
 
 macro_rules! impl_float {
@@ -119,9 +121,6 @@ macro_rules! impl_float {
             }
             fn from_bits(b: Self::UInt) -> Self {
                 Self::from_bits(b)
-            }
-            fn to_arithmetic_nan(self) -> Self {
-                Self::from_bits(self.to_bits() | Self::ARITHMETIC_NAN)
             }
         }
     };
