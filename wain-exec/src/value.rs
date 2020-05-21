@@ -90,21 +90,21 @@ impl_le_rw!(u32);
 
 // Trait to handle f32 and f64 in the same way
 pub(crate) trait Float: Clone + Copy + PartialEq + PartialOrd {
-    type UINT: Copy + std::ops::BitOr<Output = Self::UINT> + std::ops::BitAnd<Output = Self::UINT>;
-    const ARITHMETIC_NAN: Self::UINT;
+    type UInt: Copy + std::ops::BitOr<Output = Self::UInt> + std::ops::BitAnd<Output = Self::UInt>;
+    const ARITHMETIC_NAN: Self::UInt;
     fn is_nan(self) -> bool;
     fn min(self, other: Self) -> Self;
     fn max(self, other: Self) -> Self;
-    fn to_bits(self) -> Self::UINT;
-    fn from_bits(_: Self::UINT) -> Self;
+    fn to_bits(self) -> Self::UInt;
+    fn from_bits(_: Self::UInt) -> Self;
     fn to_arithmetic_nan(self) -> Self;
 }
 
 macro_rules! impl_float {
     ($float:ty, $uint:ty) => {
         impl Float for $float {
-            type UINT = $uint;
-            const ARITHMETIC_NAN: Self::UINT = 1 << <$float>::MANTISSA_DIGITS - 2;
+            type UInt = $uint;
+            const ARITHMETIC_NAN: Self::UInt = 1 << <$float>::MANTISSA_DIGITS - 2;
             fn is_nan(self) -> bool {
                 self.is_nan()
             }
@@ -114,10 +114,10 @@ macro_rules! impl_float {
             fn max(self, other: Self) -> Self {
                 self.max(other)
             }
-            fn to_bits(self) -> Self::UINT {
+            fn to_bits(self) -> Self::UInt {
                 self.to_bits()
             }
-            fn from_bits(b: Self::UINT) -> Self {
+            fn from_bits(b: Self::UInt) -> Self {
                 Self::from_bits(b)
             }
             fn to_arithmetic_nan(self) -> Self {
