@@ -590,11 +590,12 @@ parse_uint_function!(parse_u32_str, u32);
 parse_uint_function!(parse_u64_str, u64);
 
 macro_rules! parse_hex_float_fn {
-    ($name:ident, $float:ty, $uint:ty, $bits:expr) => {
+    ($name:ident, $float:ty, $uint:ty) => {
         fn $name<'s>(parser: &Parser<'s>, sign: Sign, m_str: &'s str, oexp: Option<(Sign, &'s str)>, offset: usize) -> Result<'s, $float> {
             const ONE: $uint = 1;
+            const BITS: i32 = (mem::size_of::<$float>() * 8) as i32;
             const SIGNIFICAND_BITS: i32 = <$float>::MANTISSA_DIGITS as i32;
-            const INFINITY: $uint = (ONE << $bits - SIGNIFICAND_BITS) - 1 << SIGNIFICAND_BITS - 1;
+            const INFINITY: $uint = (ONE << BITS - SIGNIFICAND_BITS) - 1 << SIGNIFICAND_BITS - 1;
             const TEMP_SIG_BITS: i32 = SIGNIFICAND_BITS + 5;
             const TEMP_EXP_BIAS: i32 = <$float>::MAX_EXP - 2 + TEMP_SIG_BITS;
             const TEMP_MAX_EXP: i32 = <$float>::MAX_EXP - TEMP_SIG_BITS;
@@ -649,7 +650,7 @@ macro_rules! parse_hex_float_fn {
             if m != 0 {
                 if m < ONE << TEMP_SIG_BITS - 1 {
                     // normalize significand & adjust exponent
-                    let shift = m.leading_zeros() as i32 - ($bits - TEMP_SIG_BITS);
+                    let shift = m.leading_zeros() as i32 - (BITS - TEMP_SIG_BITS);
                     m <<= shift;
                     exp = exp.saturating_sub(shift);
                 }
@@ -697,8 +698,8 @@ macro_rules! parse_hex_float_fn {
     };
 }
 
-parse_hex_float_fn!(parse_hex_float_f32, f32, u32, 32);
-parse_hex_float_fn!(parse_hex_float_f64, f64, u64, 64);
+parse_hex_float_fn!(parse_hex_float_f32, f32, u32);
+parse_hex_float_fn!(parse_hex_float_f64, f64, u64);
 
 macro_rules! match_token {
     ($parser:expr, $expected:expr, $pattern:pat => $ret:expr) => {
