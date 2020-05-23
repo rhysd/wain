@@ -608,7 +608,7 @@ macro_rules! parse_hex_float_fn {
                     Ok(expu) if exp_sign == Sign::Minus && expu.wrapping_neg() as i32 <= 0 => expu.wrapping_neg() as i32,
                     _ => return parser.cannot_parse_num(
                             stringify!($float),
-                            format!("exponent out of range '{}{}'", exp_sign.to_string(), exp_str),
+                            format!("exponent value out of range '{}{}'", exp_sign.to_string(), exp_str),
                             offset,
                         ),
                 }
@@ -617,7 +617,7 @@ macro_rules! parse_hex_float_fn {
             };
 
             // parse significand & adjust exponent
-            let mut m: $uint = 0;
+            let mut temp_sig: $uint = 0;
             let mut saw_dot = false;
             for c in m_str.chars() {
                 match c {
@@ -626,9 +626,9 @@ macro_rules! parse_hex_float_fn {
                     }
                     '_' => {}
                     // there are not enough significant digits
-                    _ if m < ONE << SIGNIFICAND_BITS + 1 => {
+                    _ if temp_sig < ONE << SIGNIFICAND_BITS + 1 => {
                         // shift significand & append significant digit
-                        m = m << 4 | c.to_digit(16).unwrap() as $uint;
+                        temp_sig = temp_sig << 4 | c.to_digit(16).unwrap() as $uint;
                         if saw_dot {
                             // adjust exponent if fractional part
                             exp = exp.saturating_sub(4);
@@ -636,8 +636,8 @@ macro_rules! parse_hex_float_fn {
                     }
                     // there are enough significant digits
                     _ => {
-                        // set lsb of significand to 1 if non zoro digit (for "round to nearest even")
-                        m |= (c != '0') as $uint;
+                        // set lsb of significand to 1 if non zero digit (for "round to nearest even")
+                        temp_sig |= (c != '0') as $uint;
                         if !saw_dot {
                             // adjust exponent if integer part
                             exp = exp.saturating_add(4);
@@ -647,45 +647,45 @@ macro_rules! parse_hex_float_fn {
             }
 
             // encode float bits
-            if m != 0 {
-                if m < ONE << TEMP_SIG_BITS - 1 {
+            if temp_sig != 0 {
+                if temp_sig < ONE << TEMP_SIG_BITS - 1 {
                     // normalize significand & adjust exponent
-                    let shift = m.leading_zeros() as i32 - (BITS - TEMP_SIG_BITS);
-                    m <<= shift;
+                    let shift = temp_sig.leading_zeros() as i32 - (BITS - TEMP_SIG_BITS);
+                    temp_sig <<= shift;
                     exp = exp.saturating_sub(shift);
                 }
 
                 if TEMP_MIN_EXP <= exp && exp <= TEMP_MAX_EXP {
                     // normal or infinity
                     // mask "implicit" bit
-                    m &= (ONE << TEMP_SIG_BITS - 1) - 1;
+                    temp_sig &= (ONE << TEMP_SIG_BITS - 1) - 1;
                     // round to nearest even
-                    if (m & 0x2f) != 0 {
-                        m += 0x10;
+                    if (temp_sig & 0x2f) != 0 {
+                        temp_sig += 0x10;
                     }
                     // encode significand & biased exponent (it may be infinity)
-                    m = (m >> 5) + ((exp + TEMP_EXP_BIAS) as $uint << SIGNIFICAND_BITS - 1);
+                    temp_sig = (temp_sig >> 5) + ((exp + TEMP_EXP_BIAS) as $uint << SIGNIFICAND_BITS - 1);
                 } else if TEMP_MIN_EXP - SIGNIFICAND_BITS <= exp && exp < TEMP_MIN_EXP {
                     // subnormal or zero
                     // adjust significand
                     let shift = TEMP_MIN_EXP - exp;
-                    m = m >> shift | ((m & (ONE << shift) - 1) != 0) as $uint;
+                    temp_sig = temp_sig >> shift | ((temp_sig & (ONE << shift) - 1) != 0) as $uint;
                     // round to nearest even
-                    if (m & 0x2f) != 0 {
-                        m += 0x10;
+                    if (temp_sig & 0x2f) != 0 {
+                        temp_sig += 0x10;
                     }
                     // encode significand (biased exponent = 0) (it may be zero)
-                    m >>= 5;
+                    temp_sig >>= 5;
                 } else if TEMP_MAX_EXP < exp {
                     // infinity
-                    m = INFINITY;
+                    temp_sig = INFINITY;
                 } else {
                     // zero
-                    m = 0;
+                    temp_sig = 0;
                 }
             }
 
-            let f = <$float>::from_bits(m);
+            let f = <$float>::from_bits(temp_sig);
             if f.is_infinite() {
                 return parser.cannot_parse_num(
                     stringify!($float),
