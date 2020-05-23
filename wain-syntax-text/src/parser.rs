@@ -589,56 +589,122 @@ parse_uint_function!(parse_u8_str, u8);
 parse_uint_function!(parse_u32_str, u32);
 parse_uint_function!(parse_u64_str, u64);
 
-macro_rules! parse_hex_float_frac_fn {
-    ($name:ident, $float:ty) => {
-        fn $name<'s>(parser: &Parser<'s>, input: &'s str, offset: usize) -> Result<'s, $float> {
-            let mut chars = input.chars();
+macro_rules! parse_hex_float_fn {
+    ($name:ident, $float:ty, $uint:ty) => {
+        fn $name<'s>(parser: &Parser<'s>, sign: Sign, m_str: &'s str, oexp: Option<(Sign, &'s str)>, offset: usize) -> Result<'s, $float> {
+            const ONE: $uint = 1;
+            const BITS: i32 = (mem::size_of::<$float>() * 8) as i32;
+            const SIGNIFICAND_BITS: i32 = <$float>::MANTISSA_DIGITS as i32;
+            const INFINITY: $uint = (ONE << BITS - SIGNIFICAND_BITS) - 1 << SIGNIFICAND_BITS - 1;
+            const TEMP_SIG_BITS: i32 = SIGNIFICAND_BITS + 5;
+            const TEMP_EXP_BIAS: i32 = <$float>::MAX_EXP - 2 + TEMP_SIG_BITS;
+            const TEMP_MAX_EXP: i32 = <$float>::MAX_EXP - TEMP_SIG_BITS;
+            const TEMP_MIN_EXP: i32 = <$float>::MIN_EXP - TEMP_SIG_BITS;
 
-            let mut ret: $float = 0.0;
-            while let Some(c) = chars.next() {
-                if c == '_' {
-                    // delimiter
-                    continue;
-                } else if c == '.' {
-                    break;
+            // parse exponent
+            let mut temp_exp = if let Some((exp_sign, exp_str)) = oexp {
+                match parse_u32_str(parser, exp_str, NumBase::Dec, offset) {
+                    Ok(expu) if exp_sign == Sign::Plus && expu as i32 >= 0 => expu as i32,
+                    Ok(expu) if exp_sign == Sign::Minus && expu.wrapping_neg() as i32 <= 0 => expu.wrapping_neg() as i32,
+                    _ => {
+                        // Ok(_)  -> u32::MAX <= expu < i32::MIN or i32::MAX < expu <= u32::MAX
+                        // Err(_) -> exp_str is larger than u32::MAX
+                        //           (Lexer guarantees that "invalid digit" cannot occur)
+                        return parser.cannot_parse_num(
+                            stringify!($float),
+                            format!("exponent value out of range '{}{}'", exp_sign.to_string(), exp_str),
+                            offset,
+                        );
+                    }
                 }
-                if let Some(d) = c.to_digit(16) {
-                    ret = ret * 16.0 + (d as $float);
-                } else {
-                    return parser.cannot_parse_num(
-                        stringify!($float>),
-                        format!("invalid digit '{}'", c),
-                        offset,
-                    );
+            } else {
+                0
+            };
+
+            // parse significand & adjust exponent
+            let mut temp_sig: $uint = 0;
+            let mut saw_dot = false;
+            for c in m_str.chars() {
+                match c {
+                    '.' => {
+                        saw_dot = true;
+                    }
+                    '_' => {}
+                    // there are not enough significant digits
+                    _ if temp_sig < ONE << SIGNIFICAND_BITS + 1 => {
+                        // shift significand & append significant digit
+                        temp_sig = temp_sig << 4 | c.to_digit(16).unwrap() as $uint;
+                        if saw_dot {
+                            // adjust exponent if fractional part
+                            temp_exp = temp_exp.saturating_sub(4);
+                        }
+                    }
+                    // there are enough significant digits
+                    _ => {
+                        // set lsb of significand to 1 if non zero digit (for "round to nearest even")
+                        temp_sig |= (c != '0') as $uint;
+                        if !saw_dot {
+                            // adjust exponent if integer part
+                            temp_exp = temp_exp.saturating_add(4);
+                        }
+                    }
                 }
             }
 
-            // After '.' if exists
-            let mut step = 16.0;
-            for c in chars {
-                if c == '_' {
-                    // delimiter
-                    continue;
+            // encode float bits
+            if temp_sig != 0 {
+                if temp_sig < ONE << TEMP_SIG_BITS - 1 {
+                    // normalize significand & adjust exponent
+                    let shift = temp_sig.leading_zeros() as i32 - (BITS - TEMP_SIG_BITS);
+                    temp_sig <<= shift;
+                    temp_exp = temp_exp.saturating_sub(shift);
                 }
-                if let Some(d) = c.to_digit(16) {
-                    ret += (d as $float) / step;
-                    step *= 16.0;
+
+                if TEMP_MIN_EXP <= temp_exp && temp_exp <= TEMP_MAX_EXP {
+                    // normal or infinity
+                    // mask "implicit" bit
+                    temp_sig &= (ONE << TEMP_SIG_BITS - 1) - 1;
+                    // round to nearest even
+                    if (temp_sig & 0x2f) != 0 {
+                        temp_sig += 0x10;
+                    }
+                    // encode significand & biased exponent (it may be infinity)
+                    temp_sig = (temp_sig >> 5) + ((temp_exp + TEMP_EXP_BIAS) as $uint << SIGNIFICAND_BITS - 1);
+                } else if TEMP_MIN_EXP - SIGNIFICAND_BITS <= temp_exp && temp_exp < TEMP_MIN_EXP {
+                    // subnormal or zero
+                    // adjust significand
+                    let shift = TEMP_MIN_EXP - temp_exp;
+                    temp_sig = temp_sig >> shift | ((temp_sig & (ONE << shift) - 1) != 0) as $uint;
+                    // round to nearest even
+                    if (temp_sig & 0x2f) != 0 {
+                        temp_sig += 0x10;
+                    }
+                    // encode significand (biased exponent = 0) (it may be zero)
+                    temp_sig >>= 5;
+                } else if TEMP_MAX_EXP < temp_exp {
+                    // infinity
+                    temp_sig = INFINITY;
                 } else {
-                    return parser.cannot_parse_num(
-                        stringify!($float),
-                        format!("invalid digit '{}'", c),
-                        offset,
-                    );
+                    // zero
+                    temp_sig = 0;
                 }
             }
 
-            Ok(ret)
+            let f = <$float>::from_bits(temp_sig);
+            if f.is_infinite() {
+                return parser.cannot_parse_num(
+                    stringify!($float),
+                    "float constant out of range",
+                    offset,
+                );
+            }
+            Ok(sign.apply(f))
         }
     };
 }
 
-parse_hex_float_frac_fn!(parse_f32_hex_frac, f32);
-parse_hex_float_frac_fn!(parse_f64_hex_frac, f64);
+parse_hex_float_fn!(parse_hex_float_f32, f32, u32);
+parse_hex_float_fn!(parse_hex_float_f64, f64, u64);
 
 macro_rules! match_token {
     ($parser:expr, $expected:expr, $pattern:pat => $ret:expr) => {
@@ -1798,30 +1864,14 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                         } => {
                             // Note: Better algorithm should be considered
                             // https://github.com/rust-lang/rust/blob/3982d3514efbb65b3efac6bb006b3fa496d16663/src/libcore/num/dec2flt/algorithm.rs
-                            let mut frac = parse_f32_hex_frac(self.parser, frac, offset)?;
-                            // In IEEE754, exp part is actually 8bits
-                            if let Some((exp_sign, exp)) = exp {
-                                let exp =
-                                    parse_u32_str(self.parser, exp, NumBase::Dec, offset)? as i32;
-                                if exp < 0 {
-                                    return self.parser.cannot_parse_num(
-                                        "f32",
-                                        format!("too large exponent value '{}'", exp),
-                                        offset,
-                                    );
-                                }
-                                let step: f32 = if exp_sign == Sign::Plus { 2.0 } else { 0.5 };
-                                frac *= step.powi(exp);
-                            }
-                            sign.apply(frac)
+                            parse_hex_float_f32(self.parser, sign, frac, exp, offset)?
                         }
                     },
                     (Token::Int(sign, NumBase::Dec, digits), offset) => {
                         self.parser.parse_dec_float(sign, digits, None, offset)?
                     }
                     (Token::Int(sign, NumBase::Hex, digits), offset) => {
-                        let f = parse_f32_hex_frac(self.parser, digits, offset)?;
-                        sign.apply(f)
+                        parse_hex_float_f32(self.parser, sign, digits, None, offset)?
                     }
                     (tok, offset) => {
                         return self.parser.unexpected_token(
@@ -1878,31 +1928,13 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                             base: NumBase::Hex,
                             frac,
                             exp,
-                        } => {
-                            let mut frac = parse_f64_hex_frac(self.parser, frac, offset)?;
-                            // In IEEE754, exp part is actually 11bits
-                            if let Some((exp_sign, exp)) = exp {
-                                let exp =
-                                    parse_u32_str(self.parser, exp, NumBase::Dec, offset)? as i32;
-                                if exp < 0 {
-                                    return self.parser.cannot_parse_num(
-                                        "f64",
-                                        format!("too large exponent value '{}'", exp),
-                                        offset,
-                                    );
-                                }
-                                let step: f64 = if exp_sign == Sign::Plus { 2.0 } else { 0.5 };
-                                frac *= step.powi(exp);
-                            }
-                            sign.apply(frac)
-                        }
+                        } => parse_hex_float_f64(self.parser, sign, frac, exp, offset)?,
                     },
                     (Token::Int(sign, NumBase::Dec, digits), offset) => {
                         self.parser.parse_dec_float(sign, digits, None, offset)?
                     }
                     (Token::Int(sign, NumBase::Hex, digits), offset) => {
-                        let f = parse_f64_hex_frac(self.parser, digits, offset)?;
-                        sign.apply(f)
+                        parse_hex_float_f64(self.parser, sign, digits, None, offset)?
                     }
                     (tok, offset) => {
                         return self.parser.unexpected_token(
