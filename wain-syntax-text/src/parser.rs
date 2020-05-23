@@ -602,15 +602,20 @@ macro_rules! parse_hex_float_fn {
             const TEMP_MIN_EXP: i32 = <$float>::MIN_EXP - TEMP_SIG_BITS;
 
             // parse exponent
-            let mut exp = if let Some((exp_sign, exp_str)) = oexp {
+            let mut temp_exp = if let Some((exp_sign, exp_str)) = oexp {
                 match parse_u32_str(parser, exp_str, NumBase::Dec, offset) {
                     Ok(expu) if exp_sign == Sign::Plus && expu as i32 >= 0 => expu as i32,
                     Ok(expu) if exp_sign == Sign::Minus && expu.wrapping_neg() as i32 <= 0 => expu.wrapping_neg() as i32,
-                    _ => return parser.cannot_parse_num(
+                    _ => {
+                        // Ok(_)  -> u32::MAX <= expu < i32::MIN or i32::MAX < expu <= u32::MAX
+                        // Err(_) -> exp_str is larger than u32::MAX
+                        //           (Lexer guarantees that "invalid digit" cannot occur)
+                        return parser.cannot_parse_num(
                             stringify!($float),
                             format!("exponent value out of range '{}{}'", exp_sign.to_string(), exp_str),
                             offset,
-                        ),
+                        );
+                    }
                 }
             } else {
                 0
@@ -631,7 +636,7 @@ macro_rules! parse_hex_float_fn {
                         temp_sig = temp_sig << 4 | c.to_digit(16).unwrap() as $uint;
                         if saw_dot {
                             // adjust exponent if fractional part
-                            exp = exp.saturating_sub(4);
+                            temp_exp = temp_exp.saturating_sub(4);
                         }
                     }
                     // there are enough significant digits
@@ -640,7 +645,7 @@ macro_rules! parse_hex_float_fn {
                         temp_sig |= (c != '0') as $uint;
                         if !saw_dot {
                             // adjust exponent if integer part
-                            exp = exp.saturating_add(4);
+                            temp_exp = temp_exp.saturating_add(4);
                         }
                     }
                 }
@@ -652,10 +657,10 @@ macro_rules! parse_hex_float_fn {
                     // normalize significand & adjust exponent
                     let shift = temp_sig.leading_zeros() as i32 - (BITS - TEMP_SIG_BITS);
                     temp_sig <<= shift;
-                    exp = exp.saturating_sub(shift);
+                    temp_exp = temp_exp.saturating_sub(shift);
                 }
 
-                if TEMP_MIN_EXP <= exp && exp <= TEMP_MAX_EXP {
+                if TEMP_MIN_EXP <= temp_exp && temp_exp <= TEMP_MAX_EXP {
                     // normal or infinity
                     // mask "implicit" bit
                     temp_sig &= (ONE << TEMP_SIG_BITS - 1) - 1;
@@ -664,11 +669,11 @@ macro_rules! parse_hex_float_fn {
                         temp_sig += 0x10;
                     }
                     // encode significand & biased exponent (it may be infinity)
-                    temp_sig = (temp_sig >> 5) + ((exp + TEMP_EXP_BIAS) as $uint << SIGNIFICAND_BITS - 1);
-                } else if TEMP_MIN_EXP - SIGNIFICAND_BITS <= exp && exp < TEMP_MIN_EXP {
+                    temp_sig = (temp_sig >> 5) + ((temp_exp + TEMP_EXP_BIAS) as $uint << SIGNIFICAND_BITS - 1);
+                } else if TEMP_MIN_EXP - SIGNIFICAND_BITS <= temp_exp && temp_exp < TEMP_MIN_EXP {
                     // subnormal or zero
                     // adjust significand
-                    let shift = TEMP_MIN_EXP - exp;
+                    let shift = TEMP_MIN_EXP - temp_exp;
                     temp_sig = temp_sig >> shift | ((temp_sig & (ONE << shift) - 1) != 0) as $uint;
                     // round to nearest even
                     if (temp_sig & 0x2f) != 0 {
@@ -676,7 +681,7 @@ macro_rules! parse_hex_float_fn {
                     }
                     // encode significand (biased exponent = 0) (it may be zero)
                     temp_sig >>= 5;
-                } else if TEMP_MAX_EXP < exp {
+                } else if TEMP_MAX_EXP < temp_exp {
                     // infinity
                     temp_sig = INFINITY;
                 } else {
