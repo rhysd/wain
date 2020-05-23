@@ -12,49 +12,50 @@ This crate contains:
 
 ## Usage
 
-Run this crate as command line tool:
+Run this crate as command line tool by `cargo run`.
 
-Run all tests:
+### Run all tests
 
 ```
 cargo run
 ```
 
-Run specific tests:
+For running faster, release build would be useful.
+
+```
+cargo run --release
+```
+
+### Run specific tests
 
 ```
 cargo run -- ./pass/to/test.wast
 ```
 
-Stop running tests on first failure:
+### Stop running tests on the first failure
 
 ```
 cargo run -- -f
 ```
 
-Comparing results between two commits (e.g. `1234567` v.s. `890abcd`):
+### Compare results between two revisions
 
-Note: `colordiff -u` or `git diff --no-index` would be better than `diff -u`.
+For example, let's say to compare `your-branch` branch with `master` branch.
 
 ```
-# Get results for commit 1234567
-git reset --hard 1234567
-cargo run -- -w before.txt
-
-# Get results for commit 890abcd
-git reset --hard 890abcd
+# Get results for your branch
+git checkout your-branch
 cargo run -- -w after.txt
 
-# Compare results as diff. Summary for one file per line
+# Get results for master branch
+git checkout master
+cargo run -- -w before.txt
+
+# Compare results as diff. Summary for one .wast file per line
 diff -u before.txt after.txt
 ```
 
-For running faster, release build would be useful:
-
-```
-cargo build --release
-./target/release/spec-test
-```
+Note: `colordiff -u` or `git diff --no-index` would be better than `diff -u`.
 
 [proj]: https://github.com/rhysd/wain
 [testsuite]: https://github.com/WebAssembly/testsuite
