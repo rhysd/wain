@@ -591,28 +591,42 @@ parse_uint_function!(parse_u64_str, u64);
 
 macro_rules! parse_hex_float_fn {
     ($name:ident, $float:ty, $uint:ty) => {
-        fn $name<'s>(parser: &Parser<'s>, sign: Sign, m_str: &'s str, oexp: Option<(Sign, &'s str)>, offset: usize) -> Result<'s, $float> {
+        fn $name<'s>(parser: &Parser<'s>, sign: Sign, m_str: &'s str, exp: Option<(Sign, &'s str)>, offset: usize) -> Result<'s, $float> {
+            // Parse logic is explained here in Japanese https://github.com/rhysd/wain/pull/9/files#r429552186
             const ONE: $uint = 1;
             const BITS: i32 = (mem::size_of::<$float>() * 8) as i32;
             const SIGNIFICAND_BITS: i32 = <$float>::MANTISSA_DIGITS as i32;
             const INFINITY: $uint = (ONE << BITS - SIGNIFICAND_BITS) - 1 << SIGNIFICAND_BITS - 1;
-            const TEMP_SIG_BITS: i32 = SIGNIFICAND_BITS + 5;
-            const TEMP_EXP_BIAS: i32 = <$float>::MAX_EXP - 2 + TEMP_SIG_BITS;
-            const TEMP_MAX_EXP: i32 = <$float>::MAX_EXP - TEMP_SIG_BITS;
-            const TEMP_MIN_EXP: i32 = <$float>::MIN_EXP - TEMP_SIG_BITS;
+            // For rounding to nearest, at least two more bits than actual fraction is necessary.
+            // Since digits are hexadecimal, it requires 4 bits to read one digit. And 1 bit is
+            // necessary to remember all bits are 1 or not to determine round up or round down.
+            //
+            // Explained at 2. of https://github.com/rhysd/wain/pull/9/files#r429552186
+            const TEMP_SIG_BITS: i32 = SIGNIFICAND_BITS + 4 + 1;
+            // This bias considers to adjust significand to IEEE 754 format. We compute the significand
+            // as unsigned integer. But integer part is 1 bit in IEEE 754 format. (e.g. 0b1011101 -> 0b1.011101).
+            // Since the unsigned integer significand has TEMP_SIG_BITS bits, the value should be multiplid
+            // with 1 / 2^(TEMP_SIG_BITS - 1). It means adding TEMP_SIG_BITS - 1 to exp value.
+            //
+            // https://github.com/rhysd/wain/pull/9/files#r429528984
+            const TEMP_EXP_BIAS: i32 = (<$float>::MAX_EXP - 1) + (TEMP_SIG_BITS - 1);
+            // The same reason as above comment for TEMP_SIG_BITS - 1.
+            // https://github.com/rhysd/wain/pull/9/files#r429529571
+            const TEMP_MAX_EXP: i32 = (<$float>::MAX_EXP - 1) - (TEMP_SIG_BITS - 1);
+            const TEMP_MIN_EXP: i32 = (<$float>::MIN_EXP - 1) - (TEMP_SIG_BITS - 1);
 
-            // parse exponent
-            let mut temp_exp = if let Some((exp_sign, exp_str)) = oexp {
+            // Parse exponent part
+            let mut temp_exp = if let Some((exp_sign, exp_str)) = exp {
                 match parse_u32_str(parser, exp_str, NumBase::Dec, offset) {
-                    Ok(expu) if exp_sign == Sign::Plus && expu as i32 >= 0 => expu as i32,
-                    Ok(expu) if exp_sign == Sign::Minus && expu.wrapping_neg() as i32 <= 0 => expu.wrapping_neg() as i32,
+                    Ok(exp) if exp_sign == Sign::Plus && exp as i32 >= 0 => exp as i32,
+                    Ok(exp) if exp_sign == Sign::Minus && exp.wrapping_neg() as i32 <= 0 => exp.wrapping_neg() as i32,
                     _ => {
                         // Ok(_)  -> u32::MAX <= expu < i32::MIN or i32::MAX < expu <= u32::MAX
                         // Err(_) -> exp_str is larger than u32::MAX
                         //           (Lexer guarantees that "invalid digit" cannot occur)
                         return parser.cannot_parse_num(
                             stringify!($float),
-                            format!("exponent value out of range '{}{}'", exp_sign.to_string(), exp_str),
+                            format!("exponent value out of range '{}{}'", exp_sign, exp_str),
                             offset,
                         );
                     }
@@ -621,73 +635,106 @@ macro_rules! parse_hex_float_fn {
                 0
             };
 
-            // parse significand & adjust exponent
+            // Parse significand as unsigned integer. and adjust exponent
+            // For example, 0x123.456 is parsed into 0x123456p-12 (temp_sig = 0x123456 and temp_exp -= 12)
             let mut temp_sig: $uint = 0;
             let mut saw_dot = false;
             for c in m_str.chars() {
                 match c {
-                    '.' => {
-                        saw_dot = true;
-                    }
-                    '_' => {}
-                    // there are not enough significant digits
+                    '.' => saw_dot = true,
+                    '_' => continue,
+                    // There are not enough significant digits. It means that SIGNIFICAND_BITS bits
+                    // are not filled yet in temp_sig
                     _ if temp_sig < ONE << SIGNIFICAND_BITS + 1 => {
-                        // shift significand & append significant digit
-                        temp_sig = temp_sig << 4 | c.to_digit(16).unwrap() as $uint;
+                        // Shift significand & append significant digit
+                        // .unwrap() assumes `c` has hexadecimal character thanks to lexer
+                        temp_sig = (temp_sig << 4) | c.to_digit(16).unwrap() as $uint;
                         if saw_dot {
-                            // adjust exponent if fractional part
+                            // Adjust exponent if fractional part (16=2^4)
                             temp_exp = temp_exp.saturating_sub(4);
                         }
                     }
-                    // there are enough significant digits
+                    // There are enough significant digits. It means that all SIGNIFICAND_BITS bits
+                    // were filled. All digits after SIGNIFICAND_BITS are dropped. But only LSB of temp_sig
+                    // needs be updated for rounding to nearest
                     _ => {
-                        // set lsb of significand to 1 if non zero digit (for "round to nearest even")
+                        // Set lsb of significand to 1 if non-zero digit (for "round to nearest even")
                         temp_sig |= (c != '0') as $uint;
                         if !saw_dot {
-                            // adjust exponent if integer part
+                            // Adjust exponent if integer part
                             temp_exp = temp_exp.saturating_add(4);
                         }
                     }
                 }
             }
 
-            // encode float bits
+            // Encode float bits
             if temp_sig != 0 {
                 if temp_sig < ONE << TEMP_SIG_BITS - 1 {
-                    // normalize significand & adjust exponent
+                    // Normalize significand and adjust exponent. Adjust temp_sig to use all
+                    // TEMP_SIG_BITS bits.
+                    // Explained at 3. in https://github.com/rhysd/wain/pull/9#discussion_r429552186
                     let shift = temp_sig.leading_zeros() as i32 - (BITS - TEMP_SIG_BITS);
                     temp_sig <<= shift;
                     temp_exp = temp_exp.saturating_sub(shift);
                 }
 
-                if TEMP_MIN_EXP <= temp_exp && temp_exp <= TEMP_MAX_EXP {
-                    // normal or infinity
-                    // mask "implicit" bit
+                temp_sig = if TEMP_MIN_EXP <= temp_exp && temp_exp <= TEMP_MAX_EXP {
+                    // In range of normal numbers or infinity
+                    // Explained at 4.i. in https://github.com/rhysd/wain/pull/9#discussion_r429552186
+
+                    // Mask "implicit" bit. Extract TEMP_SIG_BITS bits from temp_sig
                     temp_sig &= (ONE << TEMP_SIG_BITS - 1) - 1;
-                    // round to nearest even
+
+                    // Round to nearest even
+                    // 0x2f is 0b101111 and 0x10 is 0b001_0000.
+                    // Lower 7 bits before/after this process is as follows:
+                    //
+                    //   000_0000 -> 000_0000 (round down): as-is
+                    //   000_0001 -> 001_0001 (round down): as-is
+                    //   000_1111 -> 001_1111 (round down): as-is
+                    //   001_0000 -> 000_0000 (round down): as-is
+                    //   001_0001 -> 010_0001 (round up)  : + 0b001_0000
+                    //   001_1111 -> 010_1111 (round up)  : + 0b001_0000
+                    //   010_0000 -> 010_0000 (round down): as-is
+                    //   010_0001 -> 011_0001 (round down): as-is
+                    //   010_1111 -> 011_1111 (round down): as-is
+                    //   011_0000 -> 100_0000 (round up)  : + 0b001_0000
+                    //   011_0001 -> 100_0001 (round up)  : + 0b001_0000
+                    //   011_1111 -> 100_1111 (round up)  : + 0b001_0000
+                    //
+                    // Note: We don't need to consider a carry of temp_sig because carried '1' is
+                    // added to exponent part later
                     if (temp_sig & 0x2f) != 0 {
                         temp_sig += 0x10;
                     }
-                    // encode significand & biased exponent (it may be infinity)
-                    temp_sig = (temp_sig >> 5) + ((temp_exp + TEMP_EXP_BIAS) as $uint << SIGNIFICAND_BITS - 1);
+
+                    // Encode significand & biased exponent (it may be infinity)
+                    (temp_sig >> 5) + ((temp_exp + TEMP_EXP_BIAS) as $uint << SIGNIFICAND_BITS - 1)
                 } else if TEMP_MIN_EXP - SIGNIFICAND_BITS <= temp_exp && temp_exp < TEMP_MIN_EXP {
-                    // subnormal or zero
-                    // adjust significand
+                    // Subnormal or zero
+                    // Explained at 4.ii. in https://github.com/rhysd/wain/pull/9#discussion_r429552186
+
+                    // Adjust significand to set exponent part to MIN_EXP - 1. Here, set 1 to LSB
+                    // for rounding to nearest when the shifted bits contain 1
                     let shift = TEMP_MIN_EXP - temp_exp;
-                    temp_sig = temp_sig >> shift | ((temp_sig & (ONE << shift) - 1) != 0) as $uint;
-                    // round to nearest even
+                    let lsb = ((temp_sig & (ONE << shift) - 1) != 0) as $uint;
+                    temp_sig = (temp_sig >> shift) | lsb;
+
+                    // Round to nearest even
                     if (temp_sig & 0x2f) != 0 {
                         temp_sig += 0x10;
                     }
-                    // encode significand (biased exponent = 0) (it may be zero)
-                    temp_sig >>= 5;
+
+                    // encode significand (biased exponent = 0). Note that significand may be zero
+                    temp_sig >> 5
                 } else if TEMP_MAX_EXP < temp_exp {
                     // infinity
-                    temp_sig = INFINITY;
+                    INFINITY
                 } else {
                     // zero
-                    temp_sig = 0;
-                }
+                    0
+                };
             }
 
             let f = <$float>::from_bits(temp_sig);
@@ -698,6 +745,8 @@ macro_rules! parse_hex_float_fn {
                     offset,
                 );
             }
+
+            // Set sign bit
             Ok(sign.apply(f))
         }
     };
