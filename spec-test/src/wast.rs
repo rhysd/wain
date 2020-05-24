@@ -40,6 +40,14 @@ impl Const {
             F64(l) if l.is_nan() => {
                 matches!(v, Value::F64(r) if r.is_nan() && l.to_bits() == r.to_bits())
             }
+            F32(l) if l == 0.0 => {
+                // -0.0 == +0.0 in Rust but assertion should handle them as different value
+                matches!(v, Value::F32(r) if l.to_bits() == r.to_bits())
+            }
+            F64(l) if l == 0.0 => {
+                // -0.0 == +0.0 in Rust but assertion should handle them as different value
+                matches!(v, Value::F64(r) if l.to_bits() == r.to_bits())
+            }
             I32(_) | I64(_) | F32(_) | F64(_) => &self.to_value().unwrap() == v,
             // TODO: Check payload for arithmetic NaN
             CanonicalNan | ArithmeticNan => match v {
