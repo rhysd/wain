@@ -12,6 +12,8 @@ pub enum LexErrorKind<'source> {
     UnterminatedString,
     ReservedName(&'source str),
     UnexpectedCharacter(char),
+    ControlCharInString,
+    InvalidStringFormat,
 }
 
 // TODO: Support std::error::Error
@@ -48,6 +50,11 @@ impl<'s> fmt::Display for LexError<'s> {
                 write!(f, "name '{}' is unavailable since it's reserved name", name)?
             }
             UnexpectedCharacter(c) => write!(f, "unexpected character '{}'", c)?,
+            ControlCharInString => write!(f, "control char in string")?,
+            InvalidStringFormat => write!(
+                f,
+                r#"escape must be one of \t, \n, \r, \", \', \\, \u{{hexnum}}, \MN where M and N are hex number"#
+            )?,
         }
         describe_position(f, self.source, self.offset)
     }
@@ -125,7 +132,7 @@ pub enum Token<'source> {
     Keyword(&'source str), // Too many keywords so it'source not pragmatic to define `Keyword` enum in terms of maintenance
     Int(Sign, NumBase, &'source str),
     Float(Sign, Float<'source>),
-    String(&'source str), // Should parse the literal into Vec<u8>?
+    String(Vec<u8>, &'source str),
     Ident(&'source str),
 }
 
@@ -169,7 +176,7 @@ impl<'s> fmt::Display for Token<'s> {
                     exp: None,
                 },
             ) => write!(f, "float number '{}{}{}", sign, base.prefix(), frac,),
-            Token::String(s) => write!(f, "string literal \"{}\"", s),
+            Token::String(_, s) => write!(f, "string literal {}", s),
             Token::Ident(ident) => write!(f, "identifier '{}'", ident),
         }
     }
@@ -236,14 +243,70 @@ impl<'s> Lexer<'s> {
             None => return Ok(None),
         };
 
-        // Note: Content of literal will be parsed in parser so we need to traverse the content
-        // twice. It would be better to parse the content into Vec<u8> here.
-        while let Some((offset, c)) = self.chars.next() {
-            if c == '\\' {
-                self.chars.next();
-            } else if c == '"' {
-                let token = Token::String(&self.source[start + 1..offset]); // + 1 consumes '"'
-                return Ok(Some((token, start)));
+        let mut buf = vec![];
+        while let Some((i, c)) = self.chars.next() {
+            match c {
+                '"' => {
+                    let token = Token::String(buf, &self.source[start..i + 1]);
+                    return Ok(Some((token, start)));
+                }
+                '\\' => {
+                    match self.chars.next() {
+                        Some((_, 't')) => buf.push(b'\t'),
+                        Some((_, 'n')) => buf.push(b'\n'),
+                        Some((_, 'r')) => buf.push(b'\r'),
+                        Some((_, '"')) => buf.push(b'"'),
+                        Some((_, '\'')) => buf.push(b'\''),
+                        Some((_, '\\')) => buf.push(b'\\'),
+                        Some((_, 'u')) => {
+                            match self.chars.next() {
+                                Some((i, '{')) => {
+                                    let ustart = i + 1; // next to '{'
+                                    let uend = loop {
+                                        match self.chars.next() {
+                                            Some((i, '}')) => break i,
+                                            Some(_) => continue,
+                                            None => {
+                                                return self
+                                                    .fail(LexErrorKind::UnterminatedString, start)
+                                            }
+                                        }
+                                    };
+                                    if let Some(c) =
+                                        u32::from_str_radix(&self.source[ustart..uend], 16)
+                                            .ok()
+                                            .and_then(char::from_u32)
+                                    {
+                                        let mut b = [0; 4];
+                                        buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
+                                    } else {
+                                        return self.fail(LexErrorKind::InvalidStringFormat, start);
+                                    }
+                                }
+                                Some(_) => {
+                                    return self.fail(LexErrorKind::InvalidStringFormat, start)
+                                }
+                                None => return self.fail(LexErrorKind::UnterminatedString, start),
+                            }
+                        }
+                        Some((_, c)) => {
+                            let hi = c.to_digit(16);
+                            let lo = self.chars.next().and_then(|(_, c)| c.to_digit(16));
+                            match (hi, lo) {
+                                (Some(hi), Some(lo)) => buf.push((hi * 16 + lo) as u8),
+                                _ => return self.fail(LexErrorKind::InvalidStringFormat, start),
+                            }
+                        }
+                        None => return self.fail(LexErrorKind::UnterminatedString, start),
+                    }
+                }
+                _ if c.is_ascii_control() => {
+                    return self.fail(LexErrorKind::ControlCharInString, start)
+                }
+                _ => {
+                    let mut b = [0; 4];
+                    buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
+                }
             }
         }
 
@@ -581,6 +644,20 @@ mod tests {
             }
         };
     }
+    macro_rules! assert_lex_string {
+        ($input:expr, $bytes:expr) => {
+            let tokens = lex_all($input).unwrap();
+            assert_eq!(tokens.len(), 1);
+            match &tokens[0].0 {
+                Token::String(ref v, src) if *v == $bytes.to_vec() && *src == $input => {}
+                e => panic!(
+                    "assertion failed: {:?} did not match to token {}",
+                    e,
+                    stringify!(Token::String($bytes, $input))
+                ),
+            }
+        };
+    }
 
     macro_rules! assert_lex_error {
         ($input:expr, $errkind:pat) => {
@@ -633,15 +710,27 @@ mod tests {
 
     #[test]
     fn strings() {
-        assert_lex_one!(r#""""#, Token::String(""));
-        assert_lex_one!(r#""hello""#, Token::String("hello"));
-        assert_lex_one!(
-            r#""\t\n\r\"\'\\\u{1234}\00\a9""#,
-            Token::String(r#"\t\n\r\"\'\\\u{1234}\00\a9"#)
-        );
-        assert_lex_one!(r#""あいうえお""#, Token::String("あいうえお"));
+        assert_lex_string!(r#""""#, b"");
+        assert_lex_string!(r#""hello""#, b"hello");
+        let mut v = "\t\n\r\"\'\\\u{1234}\x00".as_bytes().to_vec();
+        v.push(b'\xa9');
+        assert_lex_string!(r#""\t\n\r\"\'\\\u{1234}\00\a9""#, v);
+        assert_lex_string!(r#""あいうえお""#, "あいうえお".as_bytes());
         assert_lex_error!(r#"""#, LexErrorKind::UnterminatedString);
         assert_lex_error!(r#""foo\""#, LexErrorKind::UnterminatedString);
+        assert_lex_error!(r#""\u{41""#, LexErrorKind::UnterminatedString);
+        assert_lex_error!(r#""\u"#, LexErrorKind::UnterminatedString);
+        assert_lex_error!(r#""\u{""#, LexErrorKind::UnterminatedString);
+
+        assert_lex_error!(r#""\x""#, LexErrorKind::InvalidStringFormat);
+        assert_lex_error!(r#""\0""#, LexErrorKind::InvalidStringFormat);
+        assert_lex_error!(r#""\0x""#, LexErrorKind::InvalidStringFormat);
+        assert_lex_error!(r#""\u""#, LexErrorKind::InvalidStringFormat);
+        assert_lex_error!(r#""\u{}""#, LexErrorKind::InvalidStringFormat);
+        assert_lex_error!(r#""\u{hello!}""#, LexErrorKind::InvalidStringFormat);
+        assert_lex_error!(r#""\u{d800}""#, LexErrorKind::InvalidStringFormat);
+        assert_lex_error!(r#""\u{dfff}""#, LexErrorKind::InvalidStringFormat);
+        assert_lex_error!(r#""\u{110000}""#, LexErrorKind::InvalidStringFormat);
     }
 
     #[test]
@@ -1007,8 +1096,8 @@ mod tests {
                 Token::RParen,
                 Token::LParen,
                 Token::Keyword("import"),
-                Token::String("env"),
-                Token::String("print"),
+                Token::String(b"env".to_vec(), r#""env""#),
+                Token::String(b"print".to_vec(), r#""print""#),
                 Token::LParen,
                 Token::Keyword("func"),
                 Token::Ident("$print"),
@@ -1029,7 +1118,7 @@ mod tests {
                 Token::Keyword("i32.const"),
                 Token::Int(Sign::Plus, NumBase::Dec, "1024"),
                 Token::RParen,
-                Token::String("Hello, world\\n\\00"),
+                Token::String(b"Hello, world\n\x00".to_vec(), r#""Hello, world\n\00""#),
                 Token::RParen,
                 Token::LParen,
                 Token::Keyword("table"),
@@ -1052,7 +1141,7 @@ mod tests {
                 Token::RParen,
                 Token::LParen,
                 Token::Keyword("export"),
-                Token::String("memory"),
+                Token::String(b"memory".to_vec(), r#""memory""#),
                 Token::LParen,
                 Token::Keyword("memory"),
                 Token::Ident("$0"),
@@ -1060,7 +1149,7 @@ mod tests {
                 Token::RParen,
                 Token::LParen,
                 Token::Keyword("export"),
-                Token::String("_start"),
+                Token::String(b"_start".to_vec(), r#""_start""#),
                 Token::LParen,
                 Token::Keyword("func"),
                 Token::Ident("$_start"),
