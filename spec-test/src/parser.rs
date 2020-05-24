@@ -438,8 +438,24 @@ impl<'s> Parse<'s> for Const {
             "f32.const" => match parser.consume()? {
                 Some(Token::Keyword("nan:canonical")) => Const::CanonicalNan,
                 Some(Token::Keyword("nan:arithmetic")) => Const::ArithmeticNan,
-                Some(Token::Int(s, b, d)) => Const::F32(parse_i64(parser, s, b, d)? as f32),
-                Some(Token::Float(s, Float::Nan(_))) => Const::F32(s.apply(f32::NAN)),
+                Some(Token::Int(s, b, d)) => Const::F32(parse_f32(parser, s, b, d, None)?),
+                Some(Token::Float(s, Float::Nan(None))) => Const::F32(s.apply(f32::NAN)),
+                Some(Token::Float(s, Float::Nan(Some(payload)))) => {
+                    // Encode  f32 NaN value via u32 assuming IEEE-754 format for NaN boxing.
+                    // Palyload must be
+                    //   - within 23bits (fraction of f32 is 23bits)
+                    //   - >= 2^(23-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
+                    // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
+                    let payload_u = parse_i32(parser, Sign::Plus, NumBase::Hex, payload)? as u32;
+                    if payload_u == 0 || 0x80_0000 <= payload_u {
+                        return parser.fail(ParseKind::InvalidHexFloat { ty: "f32" });
+                    }
+                    // NaN boxing. 1 <= payload_u < 2^23 and floating point number is in IEEE754 format.
+                    // This will encode the payload into fraction of NaN.
+                    //   0x{sign}11111111{payload}
+                    let exp = 0b1111_1111u32 << 23;
+                    Const::F32(s.apply(f32::from_bits(exp | payload_u)))
+                }
                 Some(Token::Float(Sign::Plus, Float::Inf)) => Const::F32(f32::INFINITY),
                 Some(Token::Float(Sign::Minus, Float::Inf)) => Const::F32(f32::NEG_INFINITY),
                 Some(Token::Float(sign, Float::Val { base, frac, exp })) => {
@@ -450,8 +466,24 @@ impl<'s> Parse<'s> for Const {
             "f64.const" => match parser.consume()? {
                 Some(Token::Keyword("nan:canonical")) => Const::CanonicalNan,
                 Some(Token::Keyword("nan:arithmetic")) => Const::ArithmeticNan,
-                Some(Token::Int(s, b, d)) => Const::F64(parse_i64(parser, s, b, d)? as f64),
-                Some(Token::Float(s, Float::Nan(_))) => Const::F64(s.apply(f64::NAN)),
+                Some(Token::Int(s, b, d)) => Const::F64(parse_f64(parser, s, b, d, None)?),
+                Some(Token::Float(s, Float::Nan(None))) => Const::F64(s.apply(f64::NAN)),
+                Some(Token::Float(s, Float::Nan(Some(payload)))) => {
+                    // Encode  f64 NaN value via u64 assuming IEEE-754 format for NaN boxing.
+                    // Palyload must be
+                    //   - within 52bits (fraction of f64 is 52bits)
+                    //   - >= 2^(52-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
+                    // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
+                    let payload_u = parse_i64(parser, Sign::Plus, NumBase::Hex, payload)? as u64;
+                    if payload_u == 0 || 0x10_0000_0000_0000 <= payload_u {
+                        return parser.fail(ParseKind::InvalidHexFloat { ty: "f64" });
+                    }
+                    // NaN boxing. 1 <= payload_u < 2^52 and floating point number is in IEEE754 format.
+                    // This will encode the payload into fraction of NaN.
+                    //   0x{sign}11111111111{payload}
+                    let exp = 0b111_1111_1111u64 << 52;
+                    Const::F64(s.apply(f64::from_bits(exp | payload_u)))
+                }
                 Some(Token::Float(Sign::Plus, Float::Inf)) => Const::F64(f64::INFINITY),
                 Some(Token::Float(Sign::Minus, Float::Inf)) => Const::F64(f64::NEG_INFINITY),
                 Some(Token::Float(sign, Float::Val { base, frac, exp })) => {
