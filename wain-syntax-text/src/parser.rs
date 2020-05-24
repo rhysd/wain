@@ -695,14 +695,14 @@ macro_rules! parse_hex_float_fn {
                     // Lower 7 bits before/after this process is as follows:
                     //
                     //   000_0000 -> 000_0000 (round down): as-is
-                    //   000_0001 -> 001_0001 (round down): as-is
-                    //   000_1111 -> 001_1111 (round down): as-is
-                    //   001_0000 -> 000_0000 (round down): as-is
+                    //   000_0001 -> 001_0001 (round down): + 0b001_0000
+                    //   000_1111 -> 001_1111 (round down): + 0b001_0000
+                    //   001_0000 -> 001_0000 (round down): as-is
                     //   001_0001 -> 010_0001 (round up)  : + 0b001_0000
                     //   001_1111 -> 010_1111 (round up)  : + 0b001_0000
-                    //   010_0000 -> 010_0000 (round down): as-is
-                    //   010_0001 -> 011_0001 (round down): as-is
-                    //   010_1111 -> 011_1111 (round down): as-is
+                    //   010_0000 -> 011_0000 (round down): + 0b001_0000
+                    //   010_0001 -> 011_0001 (round down): + 0b001_0000
+                    //   010_1111 -> 011_1111 (round down): + 0b001_0000
                     //   011_0000 -> 100_0000 (round up)  : + 0b001_0000
                     //   011_0001 -> 100_0001 (round up)  : + 0b001_0000
                     //   011_1111 -> 100_1111 (round up)  : + 0b001_0000
