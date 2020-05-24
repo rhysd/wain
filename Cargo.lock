@@ -4,55 +4,55 @@
 name = "spec-test"
 version = "0.1.0"
 dependencies = [
- "wain-ast 0.1.2",
- "wain-exec 0.2.1",
- "wain-syntax-binary 0.1.1",
- "wain-syntax-text 0.1.1",
- "wain-validate 0.1.2",
+ "wain-ast 0.1.3",
+ "wain-exec 0.2.2",
+ "wain-syntax-binary 0.1.2",
+ "wain-syntax-text 0.1.2",
+ "wain-validate 0.1.3",
 ]
 
 [[package]]
 name = "wain"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
- "wain-ast 0.1.2",
- "wain-exec 0.2.1",
- "wain-syntax-binary 0.1.1",
- "wain-syntax-text 0.1.1",
- "wain-validate 0.1.2",
+ "wain-ast 0.1.3",
+ "wain-exec 0.2.2",
+ "wain-syntax-binary 0.1.2",
+ "wain-syntax-text 0.1.2",
+ "wain-validate 0.1.3",
 ]
 
 [[package]]
 name = "wain-ast"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "wain-exec"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
- "wain-ast 0.1.2",
- "wain-syntax-text 0.1.1",
- "wain-validate 0.1.2",
+ "wain-ast 0.1.3",
+ "wain-syntax-text 0.1.2",
+ "wain-validate 0.1.3",
 ]
 
 [[package]]
 name = "wain-syntax-binary"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
- "wain-ast 0.1.2",
+ "wain-ast 0.1.3",
 ]
 
 [[package]]
 name = "wain-syntax-text"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
- "wain-ast 0.1.2",
+ "wain-ast 0.1.3",
 ]
 
 [[package]]
 name = "wain-validate"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
- "wain-ast 0.1.2",
+ "wain-ast 0.1.3",
 ]
 
