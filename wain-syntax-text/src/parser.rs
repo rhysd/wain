@@ -52,6 +52,9 @@ pub enum ParseErrorKind<'source> {
     ImportMustPrecedeOtherDefs {
         what: &'static str,
     },
+    InvalidAlignment {
+        src: &'source str,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -120,6 +123,7 @@ impl<'s> fmt::Display for ParseError<'s> {
             IdAlreadyDefined{id, prev_idx, what, scope} => write!(f, "identifier '{}' for {} is already defined for index {} in the {}", id, what, prev_idx, scope)?,
             ExpectEndOfFile{after, token} => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
             ImportMustPrecedeOtherDefs{what} => write!(f, "import {} must be put before other {} definitions", what, what)?,
+            InvalidAlignment{src} => write!(f, "alignment must be power of two but got {}", src)?,
         };
 
         describe_position(f, self.source, self.offset)
@@ -1584,6 +1588,10 @@ impl<'s> Parse<'s> for Mem {
             (Token::Keyword(kw), offset) if kw.starts_with("align=") => {
                 let (base, digits) = base_and_digits(&kw[6..]);
                 let u = parse_u8_str(parser, digits, base, offset)?;
+                if u.count_ones() != 1 {
+                    return parser
+                        .error(ParseErrorKind::InvalidAlignment { src: &kw[6..] }, offset);
+                }
                 parser.eat_token(); // Eat 'align' keyword
                 Some(u)
             }
@@ -4261,6 +4269,16 @@ mod tests {
             r#"i32.load align=pqr"#,
             Vec<Instruction<'_>>,
             CannotParseNum{ .. }
+        );
+        assert_error!(
+            r#"i32.load align=0"#,
+            Vec<Instruction<'_>>,
+            InvalidAlignment{ .. }
+        );
+        assert_error!(
+            r#"i32.load align=7"#,
+            Vec<Instruction<'_>>,
+            InvalidAlignment{ .. }
         );
     }
 
