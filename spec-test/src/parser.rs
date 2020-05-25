@@ -135,9 +135,9 @@ impl<'s> Parser<'s> {
         Parse::parse(self)
     }
 
-    fn parse_escaped_text(&mut self, bytes: &[u8]) -> Result<'s, String> {
-        match std::str::from_utf8(bytes) {
-            Ok(s) => Ok(s.to_string()),
+    fn parse_escaped_text(&mut self, bytes: Vec<u8>) -> Result<'s, String> {
+        match String::from_utf8(bytes) {
+            Ok(s) => Ok(s),
             Err(e) => self.fail(ParseKind::Utf8Error(e)),
         }
     }
@@ -173,7 +173,7 @@ pub trait Parse<'source>: Sized {
 // Parse {string}
 impl<'s> Parse<'s> for String {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        expect!(parser, Token::String(ref s, _) => parser.parse_escaped_text(s))
+        expect!(parser, Token::String(s, _) => parser.parse_escaped_text(s))
     }
 }
 
@@ -193,7 +193,7 @@ impl<'s> Parse<'s> for EmbeddedModule {
                 let mut text = String::new();
                 loop {
                     match parser.consume()? {
-                        Some(Token::String(ref s, _)) => {
+                        Some(Token::String(s, _)) => {
                             text.push_str(&parser.parse_escaped_text(s)?);
                         }
                         Some(Token::RParen) => {

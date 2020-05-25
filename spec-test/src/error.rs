@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::num::{ParseFloatError, ParseIntError};
 use std::path::PathBuf;
+use std::string::FromUtf8Error;
 use wain_ast::source::Source;
 use wain_exec::{trap, Value};
 use wain_syntax_binary as binary;
@@ -27,7 +28,7 @@ pub enum ParseKind<'source> {
     EndOfFile {
         expected: &'static str,
     },
-    Utf8Error(std::str::Utf8Error),
+    Utf8Error(FromUtf8Error),
     InvalidStringLiteral {
         lit: &'source str,
         reason: &'static str,

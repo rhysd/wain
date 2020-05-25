@@ -1043,9 +1043,9 @@ impl<'s> Parse<'s> for Vec<FuncResult> {
 impl<'s> Parse<'s> for Name {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         // A name string must form a valid UTF-8 encoding as defined by Unicode (Section 2.5)
-        match match_token!(parser, "string literal for name", Token::String(ref s, _) => std::str::from_utf8(s))
+        match match_token!(parser, "string literal for name", Token::String(s, _) => String::from_utf8(s))
         {
-            (Ok(s), _) => Ok(Name(s.to_string())),
+            (Ok(s), _) => Ok(Name(s)),
             (Err(_), offset) => parser.error(ParseErrorKind::MalformedUTF8Encoding, offset),
         }
     }

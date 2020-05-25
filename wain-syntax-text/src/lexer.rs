@@ -644,20 +644,6 @@ mod tests {
             }
         };
     }
-    macro_rules! assert_lex_string {
-        ($input:expr, $bytes:expr) => {
-            let tokens = lex_all($input).unwrap();
-            assert_eq!(tokens.len(), 1);
-            match &tokens[0].0 {
-                Token::String(ref v, src) if *v == $bytes.to_vec() && *src == $input => {}
-                e => panic!(
-                    "assertion failed: {:?} did not match to token {}",
-                    e,
-                    stringify!(Token::String($bytes, $input))
-                ),
-            }
-        };
-    }
 
     macro_rules! assert_lex_error {
         ($input:expr, $errkind:pat) => {
@@ -710,6 +696,21 @@ mod tests {
 
     #[test]
     fn strings() {
+        macro_rules! assert_lex_string {
+            ($input:expr, $bytes:expr) => {
+                let tokens = lex_all($input).unwrap();
+                assert_eq!(tokens.len(), 1);
+                match &tokens[0].0 {
+                    Token::String(v, src) if *v == $bytes.to_vec() && *src == $input => {}
+                    e => panic!(
+                        "assertion failed: {:?} did not match to token {}",
+                        e,
+                        stringify!(Token::String($bytes, $input))
+                    ),
+                }
+            };
+        }
+
         assert_lex_string!(r#""""#, b"");
         assert_lex_string!(r#""hello""#, b"hello");
         let mut v = "\t\n\r\"\'\\\u{1234}\x00".as_bytes().to_vec();
@@ -731,6 +732,10 @@ mod tests {
         assert_lex_error!(r#""\u{d800}""#, LexErrorKind::InvalidStringFormat);
         assert_lex_error!(r#""\u{dfff}""#, LexErrorKind::InvalidStringFormat);
         assert_lex_error!(r#""\u{110000}""#, LexErrorKind::InvalidStringFormat);
+
+        assert_lex_error!("\"\x00\"", LexErrorKind::ControlCharInString);
+        assert_lex_error!("\"\x1f\"", LexErrorKind::ControlCharInString);
+        assert_lex_error!("\"\x7f\"", LexErrorKind::ControlCharInString);
     }
 
     #[test]
