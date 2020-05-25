@@ -1,7 +1,6 @@
 use crate::error::{Error, ParseKind, Result};
 use crate::wast::*;
 use std::borrow::Cow;
-use std::char;
 use std::f32;
 use std::f64;
 use std::mem;
@@ -136,82 +135,7 @@ impl<'s> Parser<'s> {
         Parse::parse(self)
     }
 
-    fn parse_escaped(&mut self, s: &'s str) -> Result<'s, Vec<u8>> {
-        let mut buf = vec![];
-        let mut chars = s.char_indices();
-        while let Some((_, c)) = chars.next() {
-            if c != '\\' {
-                let mut b = [0; 4];
-                buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
-            } else {
-                // Note: Lexer guarantees that at least one char follows after '\'
-                match chars.next().unwrap().1 {
-                    't' => buf.push(b'\t'),
-                    'n' => buf.push(b'\n'),
-                    'r' => buf.push(b'\r'),
-                    '"' => buf.push(b'"'),
-                    '\'' => buf.push(b'\''),
-                    '\\' => buf.push(b'\\'),
-                    'u' => {
-                        match chars.next() {
-                            Some((i, '{')) => {
-                                let start = i + 1; // next to '{'
-                                let end = loop {
-                                    match chars.next() {
-                                        Some((i, '}')) => break i,
-                                        Some(_) => continue,
-                                        None => {
-                                            return self.fail(ParseKind::InvalidStringLiteral {
-                                                lit: s,
-                                                reason: "invalid \\u{xxxx} format",
-                                            });
-                                        }
-                                    }
-                                };
-                                if let Some(c) = u32::from_str_radix(&s[start..end], 16)
-                                    .ok()
-                                    .and_then(char::from_u32)
-                                {
-                                    let mut b = [0; 4];
-                                    buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
-                                } else {
-                                    return self.fail(ParseKind::InvalidStringLiteral {
-                                        lit: s,
-                                        reason: "invalid code point in \\u{xxxx}",
-                                    });
-                                }
-                            }
-                            _ => {
-                                return self.fail(ParseKind::InvalidStringLiteral {
-                                    lit: s,
-                                    reason: "invalid \\u{xxxx} format",
-                                })
-                            }
-                        }
-                    }
-                    c => {
-                        let hi = c.to_digit(16);
-                        let lo = chars.next().and_then(|(_, c)| c.to_digit(16));
-                        match (hi, lo) {
-                            (Some(hi), Some(lo)) => {
-                                buf.push((hi * 16 + lo) as u8);
-                            }
-                            _ => {
-                                return self.fail(ParseKind::InvalidStringLiteral {
-                                    lit: s,
-                                    reason: "invalid \\XX format",
-                                })
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(buf)
-    }
-
-    fn parse_escaped_text(&mut self, s: &'s str) -> Result<'s, String> {
-        let bytes = self.parse_escaped(s)?;
+    fn parse_escaped_text(&mut self, bytes: Vec<u8>) -> Result<'s, String> {
         match String::from_utf8(bytes) {
             Ok(s) => Ok(s),
             Err(e) => self.fail(ParseKind::Utf8Error(e)),
@@ -249,8 +173,7 @@ pub trait Parse<'source>: Sized {
 // Parse {string}
 impl<'s> Parse<'s> for String {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        let s = expect!(parser, Token::String(s) => s);
-        parser.parse_escaped_text(s)
+        expect!(parser, Token::String(s, _) => parser.parse_escaped_text(s))
     }
 }
 
@@ -270,7 +193,7 @@ impl<'s> Parse<'s> for EmbeddedModule {
                 let mut text = String::new();
                 loop {
                     match parser.consume()? {
-                        Some(Token::String(s)) => {
+                        Some(Token::String(s, _)) => {
                             text.push_str(&parser.parse_escaped_text(s)?);
                         }
                         Some(Token::RParen) => {
@@ -287,8 +210,8 @@ impl<'s> Parse<'s> for EmbeddedModule {
                 let mut bin = vec![];
                 loop {
                     match parser.consume()? {
-                        Some(Token::String(s)) => {
-                            bin.append(&mut parser.parse_escaped(s)?);
+                        Some(Token::String(ref s, _)) => {
+                            bin.extend_from_slice(s);
                         }
                         Some(Token::RParen) => {
                             return Ok(EmbeddedModule {

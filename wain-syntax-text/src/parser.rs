@@ -23,7 +23,7 @@ pub enum ParseErrorKind<'source> {
     },
     UnexpectedKeyword(&'source str),
     InvalidValType(&'source str),
-    InvalidStringFormat(&'static str),
+    MalformedUTF8Encoding,
     MissingParen {
         paren: char,
         got: Option<Token<'source>>,
@@ -97,8 +97,8 @@ impl<'s> fmt::Display for ParseError<'s> {
                 "value type must be one of 'i32', 'i64', 'f32', 'f64' but got '{}'",
                 ty
             )?,
-            InvalidStringFormat(reason) => {
-                write!(f, "could not decode string literal: {}", reason)?
+            MalformedUTF8Encoding => {
+                write!(f, "Name must be valid UTF-8 encoding characters")?
             }
             NumberMustBePositive(base, s) => {
                 write!(f, "number must be positive but got -{}{}", base.prefix(), s)?
@@ -327,24 +327,6 @@ impl<'s> Parser<'s> {
         )
     }
 
-    fn invalid_utf8_char<T>(&self, offset: usize) -> Result<'s, T> {
-        self.error(
-            ParseErrorKind::InvalidStringFormat(
-                "UTF-8 character must be in format u{hexnum} like u{308f} in range of hexnum < 0xd800 or 0xe0000 <= hexnum < 0x110000",
-            ),
-            offset,
-        )
-    }
-
-    fn invalid_char_escape<T>(&self, offset: usize) -> Result<'s, T> {
-        self.error(
-            ParseErrorKind::InvalidStringFormat(
-                r#"escape must be one of \t, \n, \r, \", \', \\, \u{hexnum}, \MN where M and N are hex number"#,
-            ),
-            offset,
-        )
-    }
-
     fn cannot_parse_num<T, S: ToString>(
         &self,
         ty: &'static str,
@@ -460,62 +442,6 @@ impl<'s> Parser<'s> {
             (Token::Int(_, base, s), offset) => parse_u32_str(self, s, base, offset),
             (tok, offset) => self.unexpected_token(tok.clone(), expected, offset),
         }
-    }
-
-    fn parse_bytes_encoded_in_string(&self, src: &str, offset: usize) -> Result<'s, Vec<u8>> {
-        let mut buf: Vec<u8> = vec![];
-        let mut chars = src.char_indices();
-        while let Some((i, c)) = chars.next() {
-            if c != '\\' {
-                let mut b = [0; 4];
-                buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
-            } else {
-                // Note: Lexer guarantees that at least one char follows after '\'
-                match chars.next().unwrap().1 {
-                    't' => buf.push(b'\t'),
-                    'n' => buf.push(b'\n'),
-                    'r' => buf.push(b'\r'),
-                    '"' => buf.push(b'"'),
-                    '\'' => buf.push(b'\''),
-                    '\\' => buf.push(b'\\'),
-                    'u' => {
-                        match chars.next() {
-                            Some((i, '{')) => {
-                                let start = i + 1; // next to '{'
-                                let end = loop {
-                                    match chars.next() {
-                                        Some((i, '}')) => break i,
-                                        Some(_) => continue,
-                                        None => return self.invalid_utf8_char(offset + i),
-                                    }
-                                };
-                                if let Some(c) = u32::from_str_radix(&src[start..end], 16)
-                                    .ok()
-                                    .and_then(char::from_u32)
-                                {
-                                    let mut b = [0; 4];
-                                    buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
-                                } else {
-                                    return self.invalid_utf8_char(offset + i);
-                                }
-                            }
-                            _ => return self.invalid_utf8_char(offset + i),
-                        }
-                    }
-                    c => {
-                        let hi = c.to_digit(16);
-                        let lo = chars.next().and_then(|(_, c)| c.to_digit(16));
-                        match (hi, lo) {
-                            (Some(hi), Some(lo)) => {
-                                buf.push((hi * 16 + lo) as u8);
-                            }
-                            _ => return self.invalid_char_escape(offset + i),
-                        }
-                    }
-                }
-            }
-        }
-        Ok(buf)
     }
 
     fn parse_dec_float<F>(
@@ -1116,61 +1042,12 @@ impl<'s> Parse<'s> for Vec<FuncResult> {
 // https://webassembly.github.io/spec/core/text/values.html#text-name
 impl<'s> Parse<'s> for Name {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        let (src, offset) = match_token!(parser, "string literal for name", Token::String(s) => s);
-
         // A name string must form a valid UTF-8 encoding as defined by Unicode (Section 2.5)
-        let mut name = String::new();
-        let mut chars = src.char_indices();
-        while let Some((i, c)) = chars.next() {
-            if c != '\\' {
-                name.push(c);
-            } else {
-                // Note: Lexer guarantees that at least one char follows after '\'
-                match chars.next().unwrap().1 {
-                    't' => name.push('\t'),
-                    'n' => name.push('\n'),
-                    'r' => name.push('\r'),
-                    '"' => name.push('"'),
-                    '\'' => name.push('\''),
-                    '\\' => name.push('\\'),
-                    'u' => {
-                        match chars.next() {
-                            Some((i, '{')) => {
-                                let start = i + 1; // next to '{'
-                                let end = loop {
-                                    match chars.next() {
-                                        Some((i, '}')) => break i,
-                                        Some(_) => continue,
-                                        None => return parser.invalid_utf8_char(offset + i),
-                                    }
-                                };
-                                if let Some(c) = u32::from_str_radix(&src[start..end], 16)
-                                    .ok()
-                                    .and_then(char::from_u32)
-                                {
-                                    name.push(c);
-                                } else {
-                                    return parser.invalid_utf8_char(offset + i);
-                                }
-                            }
-                            _ => return parser.invalid_utf8_char(offset + i),
-                        }
-                    }
-                    c => {
-                        let hi = c.to_digit(16);
-                        let lo = chars.next().and_then(|(_, c)| c.to_digit(16));
-                        match (hi, lo) {
-                            (Some(hi), Some(lo)) => match char::from_u32(hi * 16 + lo) {
-                                Some(c) => name.push(c),
-                                None => return parser.invalid_char_escape(offset + i),
-                            },
-                            _ => return parser.invalid_char_escape(offset + i),
-                        }
-                    }
-                }
-            }
+        match match_token!(parser, "string literal for name", Token::String(s, _) => String::from_utf8(s))
+        {
+            (Ok(s), _) => Ok(Name(s)),
+            (Err(_), offset) => parser.error(ParseErrorKind::MalformedUTF8Encoding, offset),
         }
-        Ok(Name(name))
     }
 }
 
@@ -2395,9 +2272,8 @@ impl<'s> Parse<'s> for Data<'s> {
                         data: Cow::Owned(data),
                     });
                 }
-                (Token::String(s), offset) => {
-                    let mut decoded = parser.parse_bytes_encoded_in_string(s, offset)?;
-                    data.append(&mut decoded);
+                (Token::String(ref s, _), _) => {
+                    data.extend_from_slice(s);
                 }
                 (tok, offset) => {
                     return parser.unexpected_token(
@@ -2471,10 +2347,8 @@ impl<'s> Parse<'s> for MemoryAbbrev<'s> {
                                     "')' or string literal for data of memory section",
                                 )? {
                                     (Token::RParen, _) => break,
-                                    (Token::String(s), offset) => {
-                                        let mut decoded =
-                                            parser.parse_bytes_encoded_in_string(s, offset)?;
-                                        data.append(&mut decoded);
+                                    (Token::String(ref s, _), _) => {
+                                        data.extend_from_slice(s);
                                     }
                                     (tok, offset) => {
                                         return parser.unexpected_token(
@@ -3161,14 +3035,7 @@ mod tests {
         assert_parse!(r#""""#, Name, Name(n) if n.is_empty());
         assert_parse!(r#""\t\n\r\"\'\\\u{3042}\41""#, Name, Name(n) if n == "\t\n\r\"'\\あA");
 
-        assert_error!(r#""\x""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\0""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\0x""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\u""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\u{""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\u{41""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\u{}""#, Name, InvalidStringFormat(..));
-        assert_error!(r#""\u{hello!}""#, Name, InvalidStringFormat(..));
+        assert_error!(r#""\80""#, Name, MalformedUTF8Encoding);
     }
 
     #[test]
