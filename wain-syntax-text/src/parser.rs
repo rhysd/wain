@@ -5191,6 +5191,154 @@ mod tests {
     }
 
     #[test]
+    fn hex_float_out_of_range() {
+        macro_rules! assert_out_of_range {
+            ($lit:expr) => {
+                assert_error!(
+                    $lit,
+                    Vec<Instruction<'_>>,
+                    CannotParseNum { reason, .. } if reason == "float constant out of range"
+                );
+            }
+        }
+
+        assert_out_of_range!("f32.const 0x1p128");
+        assert_out_of_range!("f32.const -0x1p128");
+        assert_out_of_range!("f32.const 0x1.ffffffp127");
+        assert_out_of_range!("f32.const -0x1.ffffffp127");
+        assert_out_of_range!("f64.const 0x1p1024");
+        assert_out_of_range!("f64.const -0x1p1024");
+        assert_out_of_range!("f64.const 0x1.fffffffffffff8p1023");
+        assert_out_of_range!("f64.const -0x1.fffffffffffff8p1023");
+    }
+
+    #[test]
+    fn hex_f32_literal_edge_cases() {
+        use InsnKind::F32Const;
+
+        macro_rules! assert_f32_eq {
+            ($left:expr, $right:expr) => {
+                assert_insn!(
+                    concat!("(f32.const ", $left, ") (f32.const ", $right, ")"),
+                    [F32Const(a), F32Const(b)] if a == b
+                );
+            }
+        }
+
+        // f32, small exponent
+        assert_f32_eq!("+0x1.00000100000000001p-50", "+0x1.000002p-50");
+        assert_f32_eq!("-0x1.00000100000000001p-50", "-0x1.000002p-50");
+        assert_f32_eq!("+0x1.000001fffffffffffp-50", "+0x1.000002p-50");
+        assert_f32_eq!("-0x1.000001fffffffffffp-50", "-0x1.000002p-50");
+        assert_f32_eq!("+0x1.00000500000000001p-50", "+0x1.000006p-50");
+        assert_f32_eq!("-0x1.00000500000000001p-50", "-0x1.000006p-50");
+        assert_f32_eq!("+0x4000.004000001p-64", "+0x1.000002p-50");
+        assert_f32_eq!("-0x4000.004000001p-64", "-0x1.000002p-50");
+        assert_f32_eq!("+0x4000.014000001p-64", "+0x1.000006p-50");
+        assert_f32_eq!("-0x4000.014000001p-64", "-0x1.000006p-50");
+
+        // f32, large exponent
+        assert_f32_eq!("+0x1.00000100000000001p+50", "+0x1.000002p+50");
+        assert_f32_eq!("-0x1.00000100000000001p+50", "-0x1.000002p+50");
+        assert_f32_eq!("+0x1.000001fffffffffffp+50", "+0x1.000002p+50");
+        assert_f32_eq!("-0x1.000001fffffffffffp+50", "-0x1.000002p+50");
+        assert_f32_eq!("+0x1.00000500000000001p+50", "+0x1.000006p+50");
+        assert_f32_eq!("-0x1.00000500000000001p+50", "-0x1.000006p+50");
+        assert_f32_eq!("+0x4000004000001", "+0x1.000002p+50");
+        assert_f32_eq!("-0x4000004000001", "-0x1.000002p+50");
+
+        // f32, subnormal
+        assert_f32_eq!("+0x0.00000100000000001p-126", "+0x0.000002p-126");
+        assert_f32_eq!("-0x0.00000100000000001p-126", "-0x0.000002p-126");
+        assert_f32_eq!("+0x0.000002fffffffffffp-126", "+0x0.000002p-126");
+        assert_f32_eq!("-0x0.000002fffffffffffp-126", "-0x0.000002p-126");
+        assert_f32_eq!("+0x0.00000500000000001p-126", "+0x0.000006p-126");
+        assert_f32_eq!("-0x0.00000500000000001p-126", "-0x0.000006p-126");
+    }
+
+    #[test]
+    fn hex_f64_literal_edge_cases() {
+        use InsnKind::F64Const;
+
+        macro_rules! assert_f64_eq {
+            ($left:expr, $right:expr) => {
+                assert_insn!(
+                    concat!("(f64.const ", $left, ") (f64.const ", $right, ")"),
+                    [F64Const(a), F64Const(b)] if a == b
+                );
+            }
+        }
+
+        // f64, small exponent
+        assert_f64_eq!(
+            "+0x1.000000000000080000000001p-600",
+            "+0x1.0000000000001p-600"
+        );
+        assert_f64_eq!(
+            "-0x1.000000000000080000000001p-600",
+            "-0x1.0000000000001p-600"
+        );
+        assert_f64_eq!(
+            "+0x1.000000000000280000000001p-600",
+            "+0x1.0000000000003p-600"
+        );
+        assert_f64_eq!(
+            "-0x1.000000000000280000000001p-600",
+            "-0x1.0000000000003p-600"
+        );
+        assert_f64_eq!(
+            "+0x8000000.000000400000000001p-627",
+            "+0x1.0000000000001p-600"
+        );
+        assert_f64_eq!(
+            "-0x8000000.000000400000000001p-627",
+            "-0x1.0000000000001p-600"
+        );
+        assert_f64_eq!(
+            "+0x8000000.000001400000000001p-627",
+            "+0x1.0000000000003p-600"
+        );
+        assert_f64_eq!(
+            "-0x8000000.000001400000000001p-627",
+            "-0x1.0000000000003p-600"
+        );
+
+        // f64, large exponent
+        assert_f64_eq!(
+            "+0x1.000000000000080000000001p+600",
+            "+0x1.0000000000001p+600"
+        );
+        assert_f64_eq!(
+            "-0x1.000000000000080000000001p+600",
+            "-0x1.0000000000001p+600"
+        );
+        assert_f64_eq!(
+            "+0x1.000000000000280000000001p+600",
+            "+0x1.0000000000003p+600"
+        );
+        assert_f64_eq!(
+            "-0x1.000000000000280000000001p+600",
+            "-0x1.0000000000003p+600"
+        );
+        assert_f64_eq!("+0x2000000000000100000000001", "+0x1.0000000000001p+97");
+        assert_f64_eq!("-0x2000000000000100000000001", "-0x1.0000000000001p+97");
+        assert_f64_eq!("+0x20000000000001fffffffffff", "+0x1.0000000000001p+97");
+        assert_f64_eq!("-0x20000000000001fffffffffff", "-0x1.0000000000001p+97");
+        assert_f64_eq!("+0x2000000000000500000000001", "+0x1.0000000000003p+97");
+        assert_f64_eq!("-0x2000000000000500000000001", "-0x1.0000000000003p+97");
+
+        // f64, subnormal
+        assert_f64_eq!(
+            "+0x1.000000000000280000000001p-1022",
+            "+0x1.0000000000003p-1022"
+        );
+        assert_f64_eq!(
+            "-0x1.000000000000280000000001p-1022",
+            "-0x1.0000000000003p-1022"
+        );
+    }
+
+    #[test]
     fn hello_world() {
         assert_parse!(r#"
             (module
