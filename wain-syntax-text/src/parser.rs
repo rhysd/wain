@@ -262,6 +262,22 @@ impl<'s> ParseContext<'s> {
     }
 }
 
+trait IsInfinite {
+    fn is_infinite(self) -> bool;
+}
+
+impl IsInfinite for f32 {
+    fn is_infinite(self) -> bool {
+        self.is_infinite()
+    }
+}
+
+impl IsInfinite for f64 {
+    fn is_infinite(self) -> bool {
+        self.is_infinite()
+    }
+}
+
 // TODO: Add index-to-id tables for types, funcs, tables, mems, globals, locals and labels
 // https://webassembly.github.io/spec/core/text/modules.html#indices
 pub struct Parser<'s> {
@@ -452,7 +468,7 @@ impl<'s> Parser<'s> {
         offset: usize,
     ) -> Result<'s, F>
     where
-        F: FromStr + ops::Neg<Output = F>,
+        F: FromStr + ops::Neg<Output = F> + IsInfinite + Copy,
         F::Err: fmt::Display,
     {
         // TODO: Implement parsing floating number literals without allocation
@@ -467,6 +483,9 @@ impl<'s> Parser<'s> {
             }
         }
         match s.parse::<F>() {
+            Ok(f) if f.is_infinite() => {
+                self.cannot_parse_num("float", "float constant out of range", offset)
+            }
             Ok(f) => Ok(sign.apply(f)),
             Err(e) => self.cannot_parse_num("float", format!("{}", e), offset),
         }
