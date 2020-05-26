@@ -193,6 +193,14 @@ impl<'s> Parser<'s> {
         let size: u32 = self.parse_int()?;
         Ok(VecItems::new(self, size as usize))
     }
+
+    fn ensure_empty(&self) -> Result<'s, ()> {
+        if self.input.is_empty() {
+            Ok(())
+        } else {
+            Err(self.error(ErrorKind::MalformedSectionSize))
+        }
+    }
 }
 
 pub trait Parse<'source>: Sized {
@@ -221,7 +229,9 @@ impl<'s> Parse<'s> for Module<'s> {
         fn parse_section<'s, P: Parse<'s>>(parser: &mut Parser<'s>, id: u8) -> Result<'s, Vec<P>> {
             if parser.input.starts_with(&[id]) {
                 let mut inner = parser.section_parser()?;
-                inner.parse_vec()?.into_vec()
+                let vec = inner.parse_vec()?.into_vec();
+                inner.ensure_empty()?;
+                vec
             } else {
                 Ok(vec![])
             }
@@ -234,6 +244,7 @@ impl<'s> Parse<'s> for Module<'s> {
             _ => return Err(parser.error(ErrorKind::WasmMagicNotFound)),
         }
 
+        parser.check_len(4, "cannot get version")?;
         match parser.input {
             [0x01, 0x00, 0x00, 0x00, ..] => parser.eat(4),
             _ => {
@@ -266,6 +277,7 @@ impl<'s> Parse<'s> for Module<'s> {
                     ImportDesc::Global(g) => globals.push(g),
                 }
             }
+            inner.ensure_empty()?;
         }
 
         parser.ignore_custom_sections()?;
@@ -281,11 +293,14 @@ impl<'s> Parse<'s> for Module<'s> {
         // Table section
         if let [0x04, ..] = parser.input {
             let mut inner = parser.section_parser()?;
-            let vec = inner.parse_vec()?;
-            tables.reserve(vec.count);
-            for table in vec {
-                tables.push(table?);
+            {
+                let vec = inner.parse_vec()?;
+                tables.reserve(vec.count);
+                for table in vec {
+                    tables.push(table?);
+                }
             }
+            inner.ensure_empty()?;
         }
 
         parser.ignore_custom_sections()?;
@@ -293,11 +308,14 @@ impl<'s> Parse<'s> for Module<'s> {
         // Memory section
         if let [0x05, ..] = parser.input {
             let mut inner = parser.section_parser()?;
-            let vec = inner.parse_vec()?;
-            memories.reserve(vec.count);
-            for memory in vec {
-                memories.push(memory?);
+            {
+                let vec = inner.parse_vec()?;
+                memories.reserve(vec.count);
+                for memory in vec {
+                    memories.push(memory?);
+                }
             }
+            inner.ensure_empty()?;
         }
 
         parser.ignore_custom_sections()?;
@@ -305,11 +323,14 @@ impl<'s> Parse<'s> for Module<'s> {
         // Global section
         if let [0x06, ..] = parser.input {
             let mut inner = parser.section_parser()?;
-            let vec = inner.parse_vec()?;
-            globals.reserve(vec.count);
-            for global in vec {
-                globals.push(global?);
+            {
+                let vec = inner.parse_vec()?;
+                globals.reserve(vec.count);
+                for global in vec {
+                    globals.push(global?);
+                }
             }
+            inner.ensure_empty()?;
         }
 
         parser.ignore_custom_sections()?;
@@ -321,7 +342,9 @@ impl<'s> Parse<'s> for Module<'s> {
         // Start function section
         let entrypoint = if let [8, ..] = parser.input {
             let mut inner = parser.section_parser()?;
-            Some(inner.parse()?)
+            let start = inner.parse()?;
+            inner.ensure_empty()?;
+            Some(start)
         } else {
             None
         };
@@ -336,24 +359,27 @@ impl<'s> Parse<'s> for Module<'s> {
         // Code section
         if let [10, ..] = parser.input {
             let mut inner = parser.section_parser()?;
-            let codes = inner.parse_vec::<Code>()?;
-            if codes.count != func_indices.len() {
-                return Err(codes.parser.error(ErrorKind::FuncCodeLengthMismatch {
-                    num_funcs: func_indices.len(),
-                    num_codes: codes.count as usize,
-                }));
+            {
+                let codes = inner.parse_vec::<Code>()?;
+                if codes.count != func_indices.len() {
+                    return Err(codes.parser.error(ErrorKind::FuncCodeLengthMismatch {
+                        num_funcs: func_indices.len(),
+                        num_codes: codes.count as usize,
+                    }));
+                }
+                for (code, typeidx) in codes.zip(func_indices.into_iter()) {
+                    let code = code?;
+                    funcs.push(Func {
+                        start: code.start,
+                        idx: typeidx,
+                        kind: FuncKind::Body {
+                            locals: code.locals,
+                            expr: code.expr,
+                        },
+                    });
+                }
             }
-            for (code, typeidx) in codes.zip(func_indices.into_iter()) {
-                let code = code?;
-                funcs.push(Func {
-                    start: code.start,
-                    idx: typeidx,
-                    kind: FuncKind::Body {
-                        locals: code.locals,
-                        expr: code.expr,
-                    },
-                });
-            }
+            inner.ensure_empty()?
         }
 
         parser.ignore_custom_sections()?;
@@ -927,9 +953,20 @@ impl<'s> Parse<'s> for Code {
         let mut inner = parser.sub_parser(size, "code section")?;
         parser.eat(size);
 
-        let mut locals = vec![];
+        let mut locals_check = vec![];
+        let mut count = 0u32;
         for loc in inner.parse_vec::<Locals>()? {
             let loc = loc?;
+            if let Some(c) = count.checked_add(loc.count) {
+                count = c;
+            } else {
+                return Err(parser.error(ErrorKind::TooManyLocalVariables));
+            }
+            locals_check.push(loc);
+        }
+
+        let mut locals = vec![];
+        for loc in locals_check {
             locals.resize(locals.len() + loc.count as usize, loc.ty);
         }
 
