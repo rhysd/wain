@@ -171,10 +171,8 @@ impl<'s> Parser<'s> {
     // ignored since it is not necessary to execute wasm binary.
     fn ignore_custom_sections(&mut self) -> Result<'s, ()> {
         while let [0, ..] = self.input {
-            self.eat(1); // Eat section ID
-            let size = self.parse_int::<u32>()? as usize;
-            self.check_len(size, "custom section")?;
-            self.eat(size);
+            let mut inner = self.section_parser()?;
+            let _: Name = inner.parse()?;
         }
         Ok(())
     }
