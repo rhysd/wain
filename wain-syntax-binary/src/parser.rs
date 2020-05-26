@@ -953,21 +953,14 @@ impl<'s> Parse<'s> for Code {
         let mut inner = parser.sub_parser(size, "code section")?;
         parser.eat(size);
 
-        let mut locals_check = vec![];
-        let mut count = 0u32;
+        let mut locals = vec![];
         for loc in inner.parse_vec::<Locals>()? {
             let loc = loc?;
-            if let Some(c) = count.checked_add(loc.count) {
-                count = c;
+            if let Some(c) = loc.count.checked_add(locals.len() as u32) {
+                locals.resize(c as usize, loc.ty);
             } else {
                 return Err(parser.error(ErrorKind::TooManyLocalVariables));
             }
-            locals_check.push(loc);
-        }
-
-        let mut locals = Vec::with_capacity(count as usize);
-        for loc in locals_check {
-            locals.resize(locals.len() + loc.count as usize, loc.ty);
         }
 
         let Expr(expr) = inner.parse()?;
