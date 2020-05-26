@@ -965,7 +965,7 @@ impl<'s> Parse<'s> for Code {
             locals_check.push(loc);
         }
 
-        let mut locals = vec![];
+        let mut locals = Vec::with_capacity(count as usize);
         for loc in locals_check {
             locals.resize(locals.len() + loc.count as usize, loc.ty);
         }
