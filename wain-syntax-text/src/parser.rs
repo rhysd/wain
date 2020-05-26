@@ -262,7 +262,7 @@ impl<'s> ParseContext<'s> {
     }
 }
 
-trait IsInfinite: Copy {
+trait IsInfinite {
     fn is_infinite(self) -> bool;
 }
 
@@ -468,7 +468,7 @@ impl<'s> Parser<'s> {
         offset: usize,
     ) -> Result<'s, F>
     where
-        F: FromStr + ops::Neg<Output = F> + IsInfinite,
+        F: FromStr + ops::Neg<Output = F> + IsInfinite + Copy,
         F::Err: fmt::Display,
     {
         // TODO: Implement parsing floating number literals without allocation
