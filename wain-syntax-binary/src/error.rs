@@ -31,6 +31,8 @@ pub enum ErrorKind {
         num_funcs: usize,
         num_codes: usize,
     },
+    TooManyLocalVariables,
+    MalformedSectionSize,
     ExpectedEof(u8),
 }
 
@@ -128,6 +130,8 @@ impl<'s> fmt::Display for Error<'s> {
                 "number of function sections '{}' does not match to number of code sections '{}'",
                 num_funcs, num_codes,
             )?,
+            TooManyLocalVariables => write!(f, "too many local variables")?,
+            MalformedSectionSize => write!(f, "malformed section size")?,
             ExpectedEof(b) => write!(
                 f,
                 "expected end of input but byte 0x{:02x} is still following",

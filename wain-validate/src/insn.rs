@@ -251,7 +251,7 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
         current_offset: start,
         outer,
         op_stack: vec![],
-        label_stack: vec![],
+        label_stack: vec![ret_ty],
         current_frame: CtrlFrame {
             height: 0,
             offset: start,
