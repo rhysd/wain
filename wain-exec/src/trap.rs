@@ -58,6 +58,10 @@ pub enum TrapReason {
     },
     RemZeroDivisor,
     DivByZeroOrOverflow,
+    ValueOutOfRange {
+        src_val: Value,
+        dest_type: &'static str,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -204,6 +208,10 @@ impl fmt::Display for Trap {
             )?,
             RemZeroDivisor => f.write_str("attempt to calculate reminder with zero divisor")?,
             DivByZeroOrOverflow => f.write_str("integer overflow or attempt to devide integer by zero")?,
+            ValueOutOfRange {
+                src_val,
+                dest_type,
+            } => write!(f, "source value '{}' cannot represent destination type '{}'", src_val, dest_type)?,
         }
         write!(
             f,

@@ -426,6 +426,17 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         let ret = op(self.stack.top());
         self.stack.write_top::<T, U>(ret);
     }
+
+    fn cvtop_trap<T, U, F>(&mut self, op: F) -> Result<()>
+    where
+        T: StackAccess,
+        U: StackAccess + LittleEndian + AsValType,
+        F: FnOnce(T) -> Result<U>,
+    {
+        let ret = op(self.stack.pop())?;
+        self.stack.write_top::<T, U>(ret);
+        Ok(())
+    }
 }
 
 trait Execute<'f, 'm, 's, I: Importer> {
@@ -936,15 +947,87 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-wrap
             I32WrapI64 => machine.cvtop::<i64, i32, _>(|v| v as i32),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-trunc-u
-            I32TruncF32U => machine.cvtop::<f32, i32, _>(|v| cast::f32_to_u32(v) as i32),
-            I32TruncF64U => machine.cvtop::<f64, i32, _>(|v| cast::f64_to_u32(v) as i32),
-            I64TruncF32U => machine.cvtop::<f32, i64, _>(|v| cast::f32_to_u64(v) as i64),
-            I64TruncF64U => machine.cvtop::<f64, i64, _>(|v| cast::f64_to_u64(v) as i64),
+            I32TruncF32U => machine.cvtop_trap::<f32, i32, _>(|v| match cast::f32_to_u32(v) {
+                Some(u) => Ok(u as i32),
+                None => Err(Trap::new(
+                    TrapReason::ValueOutOfRange {
+                        src_val: Value::F32(v),
+                        dest_type: "u32",
+                    },
+                    self.start,
+                )),
+            })?,
+            I32TruncF64U => machine.cvtop_trap::<f64, i32, _>(|v| match cast::f64_to_u32(v) {
+                Some(u) => Ok(u as i32),
+                None => Err(Trap::new(
+                    TrapReason::ValueOutOfRange {
+                        src_val: Value::F64(v),
+                        dest_type: "u32",
+                    },
+                    self.start,
+                )),
+            })?,
+            I64TruncF32U => machine.cvtop_trap::<f32, i64, _>(|v| match cast::f32_to_u64(v) {
+                Some(u) => Ok(u as i64),
+                None => Err(Trap::new(
+                    TrapReason::ValueOutOfRange {
+                        src_val: Value::F32(v),
+                        dest_type: "u64",
+                    },
+                    self.start,
+                )),
+            })?,
+            I64TruncF64U => machine.cvtop_trap::<f64, i64, _>(|v| match cast::f64_to_u64(v) {
+                Some(u) => Ok(u as i64),
+                None => Err(Trap::new(
+                    TrapReason::ValueOutOfRange {
+                        src_val: Value::F64(v),
+                        dest_type: "u64",
+                    },
+                    self.start,
+                )),
+            })?,
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-trunc-s
-            I32TruncF32S => machine.cvtop::<f32, i32, _>(cast::f32_to_i32),
-            I32TruncF64S => machine.cvtop::<f64, i32, _>(cast::f64_to_i32),
-            I64TruncF32S => machine.cvtop::<f32, i64, _>(cast::f32_to_i64),
-            I64TruncF64S => machine.cvtop::<f64, i64, _>(cast::f64_to_i64),
+            I32TruncF32S => machine.cvtop_trap::<f32, i32, _>(|v| match cast::f32_to_i32(v) {
+                Some(u) => Ok(u),
+                None => Err(Trap::new(
+                    TrapReason::ValueOutOfRange {
+                        src_val: Value::F32(v),
+                        dest_type: "i32",
+                    },
+                    self.start,
+                )),
+            })?,
+            I32TruncF64S => machine.cvtop_trap::<f64, i32, _>(|v| match cast::f64_to_i32(v) {
+                Some(u) => Ok(u),
+                None => Err(Trap::new(
+                    TrapReason::ValueOutOfRange {
+                        src_val: Value::F64(v),
+                        dest_type: "i32",
+                    },
+                    self.start,
+                )),
+            })?,
+            I64TruncF32S => machine.cvtop_trap::<f32, i64, _>(|v| match cast::f32_to_i64(v) {
+                Some(u) => Ok(u),
+                None => Err(Trap::new(
+                    TrapReason::ValueOutOfRange {
+                        src_val: Value::F32(v),
+                        dest_type: "i64",
+                    },
+                    self.start,
+                )),
+            })?,
+            I64TruncF64S => machine.cvtop_trap::<f64, i64, _>(|v| match cast::f64_to_i64(v) {
+                Some(u) => Ok(u),
+                None => Err(Trap::new(
+                    TrapReason::ValueOutOfRange {
+                        src_val: Value::F64(v),
+                        dest_type: "i64",
+                    },
+                    self.start,
+                )),
+            })?,
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-promote
             F64PromoteF32 => machine.cvtop::<f32, f64, _>(|v| v as f64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-demote
