@@ -17,7 +17,7 @@ pub enum TransformErrorKind<'source> {
         what: &'static str,
     },
     LabelAndIdMismatch {
-        label: &'source str,
+        label: Option<&'source str>,
         id: &'source str,
     },
 }
@@ -59,10 +59,18 @@ impl<'s> fmt::Display for TransformError<'s> {
                 "Identifier '{}' is already defined to be mapped to index {} for {}",
                 id, idx, what
             )?,
-            LabelAndIdMismatch { label, id } => write!(
+            LabelAndIdMismatch {
+                label: Some(label),
+                id,
+            } => write!(
                 f,
                 "in control instruction, label '{}' and identifier '{}' must be the same",
                 label, id
+            )?,
+            LabelAndIdMismatch { label: None, id } => write!(
+                f,
+                "in control instruction, label None and identifier '{}' must be the same",
+                id
             )?,
         }
 
@@ -112,7 +120,7 @@ impl<'s> LabelStack<'s> {
     ) -> Result<'s, ()> {
         let label = match (label, id) {
             (Some(label), Some(id)) if label == id => label,
-            (Some(label), Some(id)) => {
+            (_, Some(id)) => {
                 return Err(TransformError::new(
                     TransformErrorKind::LabelAndIdMismatch { label, id },
                     offset,
@@ -120,7 +128,6 @@ impl<'s> LabelStack<'s> {
                 ))
             }
             (Some(label), None) => label,
-            (None, Some(id)) => id,
             (None, None) => {
                 self.stack.push(None);
                 return Ok(());
