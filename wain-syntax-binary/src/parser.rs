@@ -378,6 +378,11 @@ impl<'s> Parse<'s> for Module<'s> {
                 }
             }
             inner.ensure_empty()?
+        } else if !func_indices.is_empty() {
+            return Err(parser.error(ErrorKind::FuncCodeLengthMismatch {
+                num_funcs: func_indices.len(),
+                num_codes: 0,
+            }));
         }
 
         parser.ignore_custom_sections()?;
