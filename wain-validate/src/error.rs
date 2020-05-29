@@ -37,6 +37,8 @@ pub enum ErrorKind {
     },
     NotConstantInstruction(&'static str),
     NoInstructionForConstant,
+    TooManyInstructionForConstant(usize),
+    MutableForConstant(u32),
     StartFunctionSignature {
         idx: u32,
         params: Vec<ValType>,
@@ -133,6 +135,8 @@ impl<S: Source> fmt::Display for Error<S> {
             LimitsOutOfRange { value, min, max, what } => write!(f, "limit {} is out of range {}..{} at {}", value, min, max, what)?,
             NotConstantInstruction(op) => write!(f, "instruction '{}' is not valid for constant. only 'global.get' or '*.const' are valid in constant expressions", op)?,
             NoInstructionForConstant => write!(f, "at least one instruction is necessary for constant expressions")?,
+            TooManyInstructionForConstant(len) => write!(f, "exactly one instruction is allowed for constant expressions but {} instructions found", len)?,
+            MutableForConstant(idx) => write!(f, "constant expressions cannot reference mutable global variable {}", idx)?,
             StartFunctionSignature{ idx, params, results } => write!(
                 f,
                 "start function should have no parameter and no result [] -> [] but found function '{}' is [{}] -> [{}]",

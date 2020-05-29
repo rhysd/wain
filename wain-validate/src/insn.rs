@@ -622,57 +622,60 @@ pub(crate) fn validate_constant<'m, 's, S: Source>(
     when: &'static str,
     start: usize,
 ) -> Result<(), S> {
-    let mut last_ty = None;
-    for insn in insns {
-        let name = insn.kind.name();
-        use InsnKind::*;
-        match &insn.kind {
-            GlobalGet(globalidx) => {
-                if let Some(global) = ctx.module.globals.get(*globalidx as usize) {
-                    last_ty = Some(global.ty);
-                } else {
-                    return ctx
-                        .error(
-                            ErrorKind::IndexOutOfBounds {
-                                idx: *globalidx,
-                                upper: ctx.module.globals.len(),
-                                what: "global variable read",
-                            },
-                            "",
-                            insn.start,
-                        )
-                        .map_err(|e| {
-                            e.update_msg(format!("constant expression in {} at {}", name, when))
-                        });
-                }
-            }
-            I32Const(_) => last_ty = Some(ValType::I32),
-            I64Const(_) => last_ty = Some(ValType::I64),
-            F32Const(_) => last_ty = Some(ValType::F32),
-            F64Const(_) => last_ty = Some(ValType::F64),
-            _ => {
-                return ctx
-                    .error(ErrorKind::NotConstantInstruction(name), "", insn.start)
-                    .map_err(|e| e.update_msg(format!("constant expression at {}", when)));
-            }
-        }
+    match insns.len() {
+        0 => return ctx.error(ErrorKind::NoInstructionForConstant, when, start),
+        1 => {}
+        len => return ctx.error(ErrorKind::TooManyInstructionForConstant(len), when, start),
     }
 
-    if let Some(ty) = last_ty {
-        if ty != expr_ty {
-            ctx.error(
-                ErrorKind::TypeMismatch {
-                    expected: Some(expr_ty),
-                    actual: Some(ty),
-                },
-                "",
-                start,
-            )
-            .map_err(|e| e.update_msg(format!("type of constant expression at {}", when)))
-        } else {
-            Ok(())
+    use InsnKind::*;
+    let insn = &insns[0];
+    let name = insn.kind.name();
+    let ty = match &insn.kind {
+        GlobalGet(globalidx) => {
+            if let Some(global) = ctx.module.globals.get(*globalidx as usize) {
+                if global.mutable {
+                    return ctx.error(ErrorKind::MutableForConstant(*globalidx), when, start);
+                } else {
+                    global.ty
+                }
+            } else {
+                return ctx
+                    .error(
+                        ErrorKind::IndexOutOfBounds {
+                            idx: *globalidx,
+                            upper: ctx.module.globals.len(),
+                            what: "global variable read",
+                        },
+                        "",
+                        insn.start,
+                    )
+                    .map_err(|e| {
+                        e.update_msg(format!("constant expression in {} at {}", name, when))
+                    });
+            }
         }
+        I32Const(_) => ValType::I32,
+        I64Const(_) => ValType::I64,
+        F32Const(_) => ValType::F32,
+        F64Const(_) => ValType::F64,
+        _ => {
+            return ctx
+                .error(ErrorKind::NotConstantInstruction(name), "", insn.start)
+                .map_err(|e| e.update_msg(format!("constant expression at {}", when)));
+        }
+    };
+    if ty != expr_ty {
+        ctx.error(
+            ErrorKind::TypeMismatch {
+                expected: Some(expr_ty),
+                actual: Some(ty),
+            },
+            "",
+            start,
+        )
+        .map_err(|e| e.update_msg(format!("type of constant expression at {}", when)))
     } else {
-        ctx.error(ErrorKind::NoInstructionForConstant, when, start)
+        Ok(())
     }
 }
