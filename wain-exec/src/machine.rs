@@ -433,7 +433,7 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         U: StackAccess + LittleEndian + AsValType,
         F: FnOnce(T) -> Result<U>,
     {
-        let ret = op(self.stack.pop())?;
+        let ret = op(self.stack.top())?;
         self.stack.write_top::<T, U>(ret);
         Ok(())
     }
