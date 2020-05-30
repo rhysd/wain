@@ -55,6 +55,7 @@ pub enum ParseErrorKind<'source> {
     InvalidAlignment {
         src: &'source str,
     },
+    ParamNameNotAllowed,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -124,6 +125,7 @@ impl<'s> fmt::Display for ParseError<'s> {
             ExpectEndOfFile{after, token} => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
             ImportMustPrecedeOtherDefs{what} => write!(f, "import {} must be put before other function, memory, table and global definitions", what)?,
             InvalidAlignment{src} => write!(f, "alignment must be power of two but got {}", src)?,
+            ParamNameNotAllowed => write!(f, "parameter name not allowed")?,
         };
 
         describe_position(f, self.source, self.offset)
@@ -1718,7 +1720,17 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             }
             "return" => InsnKind::Return,
             "call" => InsnKind::Call(self.parser.parse()?),
-            "call_indirect" => InsnKind::CallIndirect(self.parser.parse()?),
+            "call_indirect" => {
+                let ty: TypeUse = self.parser.parse()?;
+                for param in &ty.params {
+                    if param.id.is_some() {
+                        return self
+                            .parser
+                            .error(ParseErrorKind::ParamNameNotAllowed, start);
+                    }
+                }
+                InsnKind::CallIndirect(ty)
+            }
             // Parametric instructions
             // https://webassembly.github.io/spec/core/text/instructions.html#parametric-instructions
             "drop" => InsnKind::Drop,
