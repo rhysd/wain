@@ -248,6 +248,7 @@ struct ParseContext<'s> {
     table_indices: Indices<'s>,
     mem_indices: Indices<'s>,
     global_indices: Indices<'s>,
+    tentatives: Vec<TentativeTypeUse<'s>>,
 }
 
 impl<'s> ParseContext<'s> {
@@ -260,6 +261,7 @@ impl<'s> ParseContext<'s> {
             table_indices: Indices::new(source, "table", "module"),
             mem_indices: Indices::new(source, "memory", "module"),
             global_indices: Indices::new(source, "global", "module"),
+            tentatives: vec![],
         }
     }
 }
@@ -491,6 +493,81 @@ impl<'s> Parser<'s> {
             Ok(f) => Ok(sign.apply(f)),
             Err(e) => self.cannot_parse_num("float", format!("{}", e), offset),
         }
+    }
+    fn create_inline_typeuse(
+        &mut self,
+        start: usize,
+        params: &[Param<'s>],
+        results: &[FuncResult],
+    ) -> u32 {
+        let idx = self.ctx.tentatives.len();
+        self.ctx.tentatives.push(TentativeTypeUse {
+            start,
+            params: params.to_vec(),
+            results: results.to_vec(),
+        });
+        idx as u32
+    }
+    fn resolve_tentatives(&mut self) -> Vec<u32> {
+        // Handle abbreviation:
+        //   https://webassembly.github.io/spec/core/text/modules.html#abbreviations
+        //
+        // A typeuse may also be replaced entirely by inline parameter and result declarations.
+        // In that case, a type index is automatically inserted.
+        //
+        //   {param}* {result}* == (type {x}) {param}* {result}*
+        //
+        // where {x} is an existing function type which has the same signature.
+        // If no function exists, insert new function type in module
+        //
+        //   (type (func {param}* {result}*))
+        //
+
+        let mut v = Vec::with_capacity(self.ctx.tentatives.len());
+        for TentativeTypeUse {
+            start,
+            params,
+            results,
+        } in self.ctx.tentatives.iter()
+        {
+            let idx = if let Some(idx) =
+                self.ctx
+                    .types
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, TypeDef { ty, .. })| {
+                        if ty
+                            .params
+                            .iter()
+                            .map(|t| t.ty)
+                            .eq(params.iter().map(|t| t.ty))
+                            && ty
+                                .results
+                                .iter()
+                                .map(|t| t.ty)
+                                .eq(results.iter().map(|t| t.ty))
+                        {
+                            Some(i)
+                        } else {
+                            None
+                        }
+                    }) {
+                idx
+            } else {
+                self.ctx.types.push(TypeDef {
+                    start: *start,
+                    id: None,
+                    ty: FuncType {
+                        start: *start,
+                        params: params.to_vec(),
+                        results: results.to_vec(),
+                    },
+                });
+                self.ctx.types.len() - 1
+            };
+            v.push(idx as u32);
+        }
+        v
     }
 }
 
@@ -932,6 +1009,8 @@ impl<'s> Parse<'s> for Module<'s> {
             parser.closing_paren("module")?;
         }
 
+        let tentatives = parser.resolve_tentatives();
+
         Ok(Module {
             start,
             id,
@@ -944,6 +1023,7 @@ impl<'s> Parse<'s> for Module<'s> {
             memories,
             globals,
             entrypoint,
+            tentatives,
         })
     }
 }
@@ -1189,85 +1269,15 @@ impl<'s> Parse<'s> for TypeUse<'s> {
             None
         };
 
-        let params = parser.parse()?;
-        let results = parser.parse()?;
-
-        if let Some(idx) = idx {
-            return Ok(TypeUse {
-                start,
-                idx,
-                params,
-                results,
-            });
-        }
-
-        // Handle abbreviation:
-        //   https://webassembly.github.io/spec/core/text/modules.html#abbreviations
-        //
-        // A typeuse may also be replaced entirely by inline parameter and result declarations.
-        // In that case, a type index is automatically inserted.
-        //
-        //   {param}* {result}* == (type {x}) {param}* {result}*
-        //
-        // where {x} is an existing function type which has the same signature.
-        // If no function exists, insert new function type in module
-        //
-        //   (type (func {param}* {result}*))
-        //
-
-        if let Some(idx) = parser
-            .ctx
-            .types
-            .iter()
-            .enumerate()
-            .find_map(|(i, type_def)| {
-                // Find function type whose signature completely matches
-                if type_def
-                    .ty
-                    .params
-                    .iter()
-                    .map(|t| t.ty)
-                    .eq(params.iter().map(|t| t.ty))
-                    && type_def
-                        .ty
-                        .results
-                        .iter()
-                        .map(|t| t.ty)
-                        .eq(results.iter().map(|t| t.ty))
-                {
-                    // Index of parser.ctx.types is available as typeidx here because all types are defined
-                    // with (type ...) syntax unlike memory, globals, tables and funcs.
-                    Some(i as u32)
-                } else {
-                    None
-                }
-            })
-        {
-            return Ok(TypeUse {
-                start,
-                idx: Index::Num(idx),
-                params,
-                results,
-            });
-        }
-
-        // When no existing function type found, generate and insert new one to current module
-        parser.ctx.types.push(TypeDef {
-            start,
-            id: None,
-            ty: FuncType {
-                start,
-                params: params.clone(),
-                results: results.clone(),
-            },
-        });
-
-        // Generated function type does not have explicit type index
-        let idx = parser.ctx.type_indices.new_idx(None, start)?;
+        let params: Vec<Param<'s>> = parser.parse()?;
+        let results: Vec<FuncResult> = parser.parse()?;
 
         Ok(TypeUse {
             start,
-            idx: Index::Num(idx),
+            idx: match idx {
+                Some(idx) => RefOrInline::Reference(idx),
+                None => RefOrInline::Inline(parser.create_inline_typeuse(start, &params, &results)),
+            },
             params,
             results,
         })
@@ -3225,7 +3235,7 @@ mod tests {
             r#"(import "m" "n" (func (type 0)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: Index::Num(0), .. },
+                ty: TypeUse { params, results, idx: RefOrInline::Reference(Index::Num(0)), .. },
                 ..
             }) if params.is_empty() && results.is_empty()
         );
@@ -3233,7 +3243,7 @@ mod tests {
             r#"(import "m" "n" (func (type $f)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: Index::Ident("$f"), .. },
+                ty: TypeUse { params, results, idx: RefOrInline::Reference(Index::Ident("$f")), .. },
                 ..
             }) if params.is_empty() && results.is_empty()
         );
@@ -3241,7 +3251,7 @@ mod tests {
             r#"(import "m" "n" (func (type 0) (param i32)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: Index::Num(0), .. },
+                ty: TypeUse { params, results, idx: RefOrInline::Reference(Index::Num(0)), .. },
                 ..
             }) if params.len() == 1 && results.is_empty()
         );
@@ -3249,7 +3259,7 @@ mod tests {
             r#"(import "m" "n" (func (type 0) (result i32)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: Index::Num(0), .. },
+                ty: TypeUse { params, results, idx: RefOrInline::Reference(Index::Num(0)), .. },
                 ..
             }) if params.is_empty() && results.len() == 1
         );
@@ -3257,7 +3267,7 @@ mod tests {
             r#"(import "m" "n" (func (type 0) (param i32) (result i32)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: Index::Num(0), .. },
+                ty: TypeUse { params, results, idx: RefOrInline::Reference(Index::Num(0)), .. },
                 ..
             }) if params.len() == 1 && results.len() == 1
         );
@@ -3266,7 +3276,7 @@ mod tests {
             r#"(import "m" "n" (func (param i32) (result i32)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: Index::Num(0), .. },
+                ty: TypeUse { params, results, idx: RefOrInline::Inline(0), .. },
                 ..
             }) if params.len() == 1 && results.len() == 1
         );
@@ -3274,7 +3284,7 @@ mod tests {
             r#"(import "m" "n" (func (result i32)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: Index::Num(0), .. },
+                ty: TypeUse { params, results, idx: RefOrInline::Inline(0), .. },
                 ..
             }) if params.is_empty() && results.len() == 1
         );
@@ -3282,7 +3292,7 @@ mod tests {
             r#"(import "m" "n" (func))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: Index::Num(0), .. },
+                ty: TypeUse { params, results, idx: RefOrInline::Inline(0), .. },
                 ..
             }) if params.is_empty() && results.is_empty()
         );
@@ -3300,7 +3310,7 @@ mod tests {
             let mut parser = Parser::new(input);
             let m: Module<'_> = parser.parse().unwrap();
             // First function type which has the same signature is chosen
-            assert_eq!(m.funcs[0].ty.idx, Index::Num(0));
+            assert_eq!(m.funcs[0].ty.idx, RefOrInline::Inline(0));
         }
         {
             let input = r#"
@@ -3313,7 +3323,7 @@ mod tests {
             let mut parser = Parser::new(input);
             let m: Module<'_> = parser.parse().unwrap();
             // First function type which has the same signature is chosen
-            assert_eq!(m.funcs[0].ty.idx, Index::Num(1));
+            assert_eq!(m.funcs[0].ty.idx, RefOrInline::Inline(0));
         }
         {
             let input = r#"
@@ -3479,7 +3489,7 @@ mod tests {
             Func<'_>,
             Func {
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: RefOrInline::Reference(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3506,7 +3516,7 @@ mod tests {
             Func {
                 id: None,
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: RefOrInline::Reference(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3522,7 +3532,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: Index::Num(0), ..
+                    idx: RefOrInline::Reference(Index::Num(0)), ..
                 },
                 ..
             }
@@ -3533,7 +3543,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: Index::Num(0), ..
+                    idx: RefOrInline::Inline(0), ..
                 },
                 ..
             }
@@ -3544,7 +3554,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: RefOrInline::Reference(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3560,7 +3570,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: RefOrInline::Reference(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3576,7 +3586,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: RefOrInline::Reference(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3592,7 +3602,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: RefOrInline::Reference(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3609,7 +3619,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: RefOrInline::Reference(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3626,7 +3636,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: RefOrInline::Reference(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3643,7 +3653,7 @@ mod tests {
             Func {
                 id: Some("$_start"),
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: RefOrInline::Inline(0),
                     params,
                     results,
                     ..
@@ -3689,7 +3699,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: Index::Num(0),
+                    idx: RefOrInline::Reference(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -4088,7 +4098,7 @@ mod tests {
         assert_insn!(r#"call $f"#, [Call(Index::Ident("$f"))]);
         assert_insn!(
             r#"call_indirect (type 0)"#,
-            [CallIndirect(TypeUse{ idx: Index::Num(0), .. })]
+            [CallIndirect(TypeUse{ idx: RefOrInline::Reference(Index::Num(0)), .. })]
         );
 
         assert_error!(r#"br_table)"#, Vec<Instruction<'_>>, InvalidOperand{ .. });
