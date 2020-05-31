@@ -55,7 +55,7 @@ pub enum ParseErrorKind<'source> {
     InvalidAlignment {
         src: &'source str,
     },
-    ParamNameNotAllowed,
+    IdBoundToParam(&'source str),
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -125,7 +125,7 @@ impl<'s> fmt::Display for ParseError<'s> {
             ExpectEndOfFile{after, token} => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
             ImportMustPrecedeOtherDefs{what} => write!(f, "import {} must be put before other function, memory, table and global definitions", what)?,
             InvalidAlignment{src} => write!(f, "alignment must be power of two but got {}", src)?,
-            ParamNameNotAllowed => write!(f, "parameter name not allowed")?,
+            IdBoundToParam(id) => write!(f, "id '{}' must not be bound to parameter of call_indirect", id)?,
         };
 
         describe_position(f, self.source, self.offset)
@@ -1722,12 +1722,9 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             "call" => InsnKind::Call(self.parser.parse()?),
             "call_indirect" => {
                 let ty: TypeUse = self.parser.parse()?;
-                for param in &ty.params {
-                    if param.id.is_some() {
-                        return self
-                            .parser
-                            .error(ParseErrorKind::ParamNameNotAllowed, start);
-                    }
+                // No identifier can be bound in any param declaration appearing in the type annotation
+                if let Some(id) = ty.params.iter().find_map(|p| p.id) {
+                    return self.parser.error(ParseErrorKind::IdBoundToParam(id), start);
                 }
                 InsnKind::CallIndirect(ty)
             }
@@ -4099,6 +4096,11 @@ mod tests {
             r#"(if (then nop) else nop)"#,
             Vec<Instruction<'_>>,
             UnexpectedToken{ got: Token::Keyword("else"), .. }
+        );
+        assert_error!(
+            r#"call_indirect (type 0) (param $p i32))"#,
+            Vec<Instruction<'_>>,
+            IdBoundToParam("$p")
         );
     }
 
