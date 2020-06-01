@@ -859,6 +859,7 @@ impl<'s> Parse<'s> for Module<'s> {
         let mut memories = vec![];
         let mut globals = vec![];
         let mut entrypoint = None;
+        let mut import_globals_len = 0;
 
         // Any import must be put before other definitions because indices of imports must precede
         // indices of other definitions
@@ -913,7 +914,10 @@ impl<'s> Parse<'s> for Module<'s> {
                         global.start,
                     );
                 }
-                ModuleField::Import(ImportItem::Global(global)) => globals.push(global),
+                ModuleField::Import(ImportItem::Global(global)) => {
+                    import_globals_len += 1;
+                    globals.push(global)
+                }
                 ModuleField::Export(export) => parser.ctx.exports.push(export),
                 ModuleField::Func(func) => {
                     if let FuncKind::Body { .. } = func.kind {
@@ -982,6 +986,8 @@ impl<'s> Parse<'s> for Module<'s> {
                             ParseErrorKind::ImportMustPrecedeOtherDefs { what: "global" },
                             global.start,
                         );
+                    } else {
+                        import_globals_len += 1;
                     }
                     globals.push(global);
                 }
@@ -1026,6 +1032,7 @@ impl<'s> Parse<'s> for Module<'s> {
             globals,
             entrypoint,
             implicit_type_uses,
+            import_globals_len,
         })
     }
 }

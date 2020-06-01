@@ -633,7 +633,8 @@ pub(crate) fn validate_constant<'m, 's, S: Source>(
     let name = insn.kind.name();
     let ty = match &insn.kind {
         GlobalGet(globalidx) => {
-            if let Some(global) = ctx.module.globals.get(*globalidx as usize) {
+            if *globalidx < ctx.module.import_globals_len {
+                let global = ctx.module.globals.get(*globalidx as usize).unwrap();
                 if global.mutable {
                     return ctx.error(ErrorKind::MutableForConstant(*globalidx), when, start);
                 } else {
@@ -644,7 +645,7 @@ pub(crate) fn validate_constant<'m, 's, S: Source>(
                     .error(
                         ErrorKind::IndexOutOfBounds {
                             idx: *globalidx,
-                            upper: ctx.module.globals.len(),
+                            upper: ctx.module.import_globals_len as usize,
                             what: "global variable read",
                         },
                         "",
