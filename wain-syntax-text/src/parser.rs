@@ -494,6 +494,7 @@ impl<'s> Parser<'s> {
             Err(e) => self.cannot_parse_num("float", format!("{}", e), offset),
         }
     }
+
     fn create_inline_typeuse(
         &mut self,
         start: usize,
@@ -508,6 +509,7 @@ impl<'s> Parser<'s> {
         });
         idx as u32
     }
+
     fn resolve_tentatives(&mut self) -> Vec<u32> {
         // Handle abbreviation:
         //   https://webassembly.github.io/spec/core/text/modules.html#abbreviations

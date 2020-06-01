@@ -186,12 +186,12 @@ impl<'s> Context<'s> {
     fn resolve_index(
         &self,
         indices: &Indices,
-        idx: &wat::Index<'s>,
+        idx: wat::Index<'s>,
         offset: usize,
         what: &'static str,
     ) -> Result<'s, u32> {
         match idx {
-            wat::Index::Num(i) => Ok(*i),
+            wat::Index::Num(i) => Ok(i),
             wat::Index::Ident(id) => {
                 if let Some(idx) = indices.get(id) {
                     Ok(*idx)
@@ -206,8 +206,8 @@ impl<'s> Context<'s> {
         }
     }
 
-    fn resolve_type_idx(&mut self, ty: &wat::TypeUse<'s>, offset: usize) -> Result<'s, u32> {
-        match &ty.idx {
+    fn resolve_type_idx(&mut self, ty: wat::TypeUse<'s>, offset: usize) -> Result<'s, u32> {
+        match ty.idx {
             wat::RefOrInline::Reference(idx) => {
                 let idx = self.resolve_index(&self.type_indices, idx, offset, "type")?;
                 if idx as usize >= self.types.len() {
@@ -217,18 +217,16 @@ impl<'s> Context<'s> {
                     params, results, ..
                 } = &self.types[idx as usize];
                 if ty.params.is_empty() && ty.results.is_empty()
-                    || ty.params.len() == params.len()
-                        && ty.results.len() == results.len()
-                        && ty
-                            .params
-                            .iter()
-                            .zip(params.iter())
-                            .all(|(l, r)| l.ty == r.ty)
+                    || ty
+                        .params
+                        .iter()
+                        .map(|p| p.ty)
+                        .eq(params.iter().map(|p| p.ty))
                         && ty
                             .results
                             .iter()
-                            .zip(results.iter())
-                            .all(|(l, r)| l.ty == r.ty)
+                            .map(|r| r.ty)
+                            .eq(results.iter().map(|r| r.ty))
                 {
                     Ok(idx)
                 } else {
@@ -239,24 +237,24 @@ impl<'s> Context<'s> {
                     ))
                 }
             }
-            wat::RefOrInline::Inline(idx) => Ok(self.tentatives[*idx as usize]),
+            wat::RefOrInline::Inline(idx) => Ok(self.tentatives[idx as usize]),
         }
     }
 
     fn resolve_func_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
-        self.resolve_index(&self.func_indices, &idx, offset, "function")
+        self.resolve_index(&self.func_indices, idx, offset, "function")
     }
 
     fn resolve_table_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
-        self.resolve_index(&self.table_indices, &idx, offset, "table")
+        self.resolve_index(&self.table_indices, idx, offset, "table")
     }
 
     fn resolve_mem_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
-        self.resolve_index(&self.mem_indices, &idx, offset, "memory")
+        self.resolve_index(&self.mem_indices, idx, offset, "memory")
     }
 
     fn resolve_global_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
-        self.resolve_index(&self.global_indices, &idx, offset, "global")
+        self.resolve_index(&self.global_indices, idx, offset, "global")
     }
 
     fn start_func_scope(&mut self) {
@@ -284,7 +282,7 @@ impl<'s> Context<'s> {
     }
 
     fn resolve_local_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
-        self.resolve_index(&self.local_indices, &idx, offset, "local variable")
+        self.resolve_index(&self.local_indices, idx, offset, "local variable")
     }
 }
 
@@ -302,7 +300,7 @@ pub fn wat2wasm<'s>(
         local_indices: Indices::new(),
         next_local_idx: 0,
         label_stack: LabelStack::new(source),
-        tentatives: std::mem::replace(&mut parsed.module.tentatives, Vec::new()),
+        tentatives: std::mem::take(&mut parsed.module.tentatives),
         types: Vec::new(),
     };
     let module = parsed.module.transform(&mut ctx)?;
@@ -334,13 +332,10 @@ impl<'s, T: Transform<'s>> Transform<'s> for Option<T> {
 impl<'s> Transform<'s> for wat::Module<'s> {
     type Target = wasm::Module<'s>;
     fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
-        ctx.types.append(
-            &mut self
-                .types
-                .iter()
-                .map(|wat::TypeDef { ty, .. }| ty.clone())
-                .collect(),
-        );
+        ctx.types.reserve(self.types.len());
+        for type_def in self.types.iter() {
+            ctx.types.push(type_def.ty.clone());
+        }
         Ok(wasm::Module {
             start: self.start,
             id: self.id,
@@ -372,22 +367,20 @@ impl<'s> Transform<'s> for wat::ValType {
 impl<'s> Transform<'s> for wat::TypeDef<'s> {
     type Target = wasm::FuncType;
     fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
-        let params = self
-            .ty
-            .params
-            .iter()
-            .map(|p| p.ty.transform(ctx))
-            .collect::<Result<'_, _>>()?;
-        let results = self
-            .ty
-            .results
-            .iter()
-            .map(|p| p.ty.transform(ctx))
-            .collect::<Result<'_, _>>()?;
         Ok(wasm::FuncType {
             start: self.start,
-            params,
-            results,
+            params: self
+                .ty
+                .params
+                .iter()
+                .map(|p| p.ty.transform(ctx))
+                .collect::<Result<'_, _>>()?,
+            results: self
+                .ty
+                .results
+                .iter()
+                .map(|p| p.ty.transform(ctx))
+                .collect::<Result<'_, _>>()?,
         })
     }
 }
@@ -518,7 +511,7 @@ impl<'s> Transform<'s> for wat::Instruction<'s> {
             wat::InsnKind::Return => wasm::InsnKind::Return,
             wat::InsnKind::Call(idx) => wasm::InsnKind::Call(ctx.resolve_func_idx(idx, start)?),
             wat::InsnKind::CallIndirect(ty) => {
-                wasm::InsnKind::CallIndirect(ctx.resolve_type_idx(&ty, start)?)
+                wasm::InsnKind::CallIndirect(ctx.resolve_type_idx(ty, start)?)
             }
             // Parametric instructions
             wat::InsnKind::Drop => wasm::InsnKind::Drop,
@@ -714,7 +707,6 @@ impl<'s> Transform<'s> for wat::Func<'s> {
     fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Func {
             start: self.start,
-            idx: ctx.resolve_type_idx(&self.ty, self.start)?,
             kind: match self.kind {
                 wat::FuncKind::Import(import) => wasm::FuncKind::Import(import.transform(ctx)?),
                 wat::FuncKind::Body { locals, body } => {
@@ -735,6 +727,7 @@ impl<'s> Transform<'s> for wat::Func<'s> {
                     }
                 }
             },
+            idx: ctx.resolve_type_idx(self.ty, self.start)?,
         })
     }
 }
