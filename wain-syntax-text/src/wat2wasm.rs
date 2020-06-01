@@ -178,7 +178,7 @@ struct Context<'s> {
     local_indices: Indices<'s>,
     next_local_idx: u32,
     label_stack: LabelStack<'s>,
-    tentatives: Vec<u32>,
+    implicit_type_uses: Vec<u32>,
     types: Vec<wat::FuncType<'s>>,
 }
 
@@ -208,7 +208,7 @@ impl<'s> Context<'s> {
 
     fn resolve_type_idx(&mut self, ty: wat::TypeUse<'s>, offset: usize) -> Result<'s, u32> {
         match ty.idx {
-            wat::RefOrInline::Reference(idx) => {
+            wat::TypeUseKind::Explicit(idx) => {
                 let idx = self.resolve_index(&self.type_indices, idx, offset, "type")?;
                 if idx as usize >= self.types.len() {
                     return Ok(idx);
@@ -237,7 +237,7 @@ impl<'s> Context<'s> {
                     ))
                 }
             }
-            wat::RefOrInline::Inline(idx) => Ok(self.tentatives[idx as usize]),
+            wat::TypeUseKind::Implicit(idx) => Ok(self.implicit_type_uses[idx as usize]),
         }
     }
 
@@ -300,7 +300,7 @@ pub fn wat2wasm<'s>(
         local_indices: Indices::new(),
         next_local_idx: 0,
         label_stack: LabelStack::new(source),
-        tentatives: std::mem::take(&mut parsed.module.tentatives),
+        implicit_type_uses: std::mem::take(&mut parsed.module.implicit_type_uses),
         types: Vec::new(),
     };
     let module = parsed.module.transform(&mut ctx)?;

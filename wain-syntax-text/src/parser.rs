@@ -248,7 +248,7 @@ struct ParseContext<'s> {
     table_indices: Indices<'s>,
     mem_indices: Indices<'s>,
     global_indices: Indices<'s>,
-    tentatives: Vec<TentativeTypeUse<'s>>,
+    implicit_type_uses: Vec<ImplicitTypeUse<'s>>,
 }
 
 impl<'s> ParseContext<'s> {
@@ -261,7 +261,7 @@ impl<'s> ParseContext<'s> {
             table_indices: Indices::new(source, "table", "module"),
             mem_indices: Indices::new(source, "memory", "module"),
             global_indices: Indices::new(source, "global", "module"),
-            tentatives: vec![],
+            implicit_type_uses: vec![],
         }
     }
 }
@@ -501,8 +501,8 @@ impl<'s> Parser<'s> {
         params: &[Param<'s>],
         results: &[FuncResult],
     ) -> u32 {
-        let idx = self.ctx.tentatives.len();
-        self.ctx.tentatives.push(TentativeTypeUse {
+        let idx = self.ctx.implicit_type_uses.len();
+        self.ctx.implicit_type_uses.push(ImplicitTypeUse {
             start,
             params: params.to_vec(),
             results: results.to_vec(),
@@ -525,12 +525,12 @@ impl<'s> Parser<'s> {
         //   (type (func {param}* {result}*))
         //
 
-        let mut v = Vec::with_capacity(self.ctx.tentatives.len());
-        for TentativeTypeUse {
+        let mut v = Vec::with_capacity(self.ctx.implicit_type_uses.len());
+        for ImplicitTypeUse {
             start,
             params,
             results,
-        } in self.ctx.tentatives.iter()
+        } in self.ctx.implicit_type_uses.iter()
         {
             let idx = if let Some(idx) =
                 self.ctx
@@ -1011,7 +1011,7 @@ impl<'s> Parse<'s> for Module<'s> {
             parser.closing_paren("module")?;
         }
 
-        let tentatives = parser.resolve_tentatives();
+        let implicit_type_uses = parser.resolve_tentatives();
 
         Ok(Module {
             start,
@@ -1025,7 +1025,7 @@ impl<'s> Parse<'s> for Module<'s> {
             memories,
             globals,
             entrypoint,
-            tentatives,
+            implicit_type_uses,
         })
     }
 }
@@ -1277,8 +1277,10 @@ impl<'s> Parse<'s> for TypeUse<'s> {
         Ok(TypeUse {
             start,
             idx: match idx {
-                Some(idx) => RefOrInline::Reference(idx),
-                None => RefOrInline::Inline(parser.create_inline_typeuse(start, &params, &results)),
+                Some(idx) => TypeUseKind::Explicit(idx),
+                None => {
+                    TypeUseKind::Implicit(parser.create_inline_typeuse(start, &params, &results))
+                }
             },
             params,
             results,
@@ -3237,7 +3239,7 @@ mod tests {
             r#"(import "m" "n" (func (type 0)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: RefOrInline::Reference(Index::Num(0)), .. },
+                ty: TypeUse { params, results, idx: TypeUseKind::Explicit(Index::Num(0)), .. },
                 ..
             }) if params.is_empty() && results.is_empty()
         );
@@ -3245,7 +3247,7 @@ mod tests {
             r#"(import "m" "n" (func (type $f)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: RefOrInline::Reference(Index::Ident("$f")), .. },
+                ty: TypeUse { params, results, idx: TypeUseKind::Explicit(Index::Ident("$f")), .. },
                 ..
             }) if params.is_empty() && results.is_empty()
         );
@@ -3253,7 +3255,7 @@ mod tests {
             r#"(import "m" "n" (func (type 0) (param i32)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: RefOrInline::Reference(Index::Num(0)), .. },
+                ty: TypeUse { params, results, idx: TypeUseKind::Explicit(Index::Num(0)), .. },
                 ..
             }) if params.len() == 1 && results.is_empty()
         );
@@ -3261,7 +3263,7 @@ mod tests {
             r#"(import "m" "n" (func (type 0) (result i32)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: RefOrInline::Reference(Index::Num(0)), .. },
+                ty: TypeUse { params, results, idx: TypeUseKind::Explicit(Index::Num(0)), .. },
                 ..
             }) if params.is_empty() && results.len() == 1
         );
@@ -3269,7 +3271,7 @@ mod tests {
             r#"(import "m" "n" (func (type 0) (param i32) (result i32)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: RefOrInline::Reference(Index::Num(0)), .. },
+                ty: TypeUse { params, results, idx: TypeUseKind::Explicit(Index::Num(0)), .. },
                 ..
             }) if params.len() == 1 && results.len() == 1
         );
@@ -3278,7 +3280,7 @@ mod tests {
             r#"(import "m" "n" (func (param i32) (result i32)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: RefOrInline::Inline(0), .. },
+                ty: TypeUse { params, results, idx: TypeUseKind::Implicit(0), .. },
                 ..
             }) if params.len() == 1 && results.len() == 1
         );
@@ -3286,7 +3288,7 @@ mod tests {
             r#"(import "m" "n" (func (result i32)))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: RefOrInline::Inline(0), .. },
+                ty: TypeUse { params, results, idx: TypeUseKind::Implicit(0), .. },
                 ..
             }) if params.is_empty() && results.len() == 1
         );
@@ -3294,7 +3296,7 @@ mod tests {
             r#"(import "m" "n" (func))"#,
             ImportItem<'_>,
             ImportItem::Func(Func {
-                ty: TypeUse { params, results, idx: RefOrInline::Inline(0), .. },
+                ty: TypeUse { params, results, idx: TypeUseKind::Implicit(0), .. },
                 ..
             }) if params.is_empty() && results.is_empty()
         );
@@ -3312,7 +3314,7 @@ mod tests {
             let mut parser = Parser::new(input);
             let m: Module<'_> = parser.parse().unwrap();
             // First function type which has the same signature is chosen
-            assert_eq!(m.funcs[0].ty.idx, RefOrInline::Inline(0));
+            assert_eq!(m.funcs[0].ty.idx, TypeUseKind::Implicit(0));
         }
         {
             let input = r#"
@@ -3325,7 +3327,7 @@ mod tests {
             let mut parser = Parser::new(input);
             let m: Module<'_> = parser.parse().unwrap();
             // First function type which has the same signature is chosen
-            assert_eq!(m.funcs[0].ty.idx, RefOrInline::Inline(0));
+            assert_eq!(m.funcs[0].ty.idx, TypeUseKind::Implicit(0));
         }
         {
             let input = r#"
@@ -3491,7 +3493,7 @@ mod tests {
             Func<'_>,
             Func {
                 ty: TypeUse {
-                    idx: RefOrInline::Reference(Index::Num(0)),
+                    idx: TypeUseKind::Explicit(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3518,7 +3520,7 @@ mod tests {
             Func {
                 id: None,
                 ty: TypeUse {
-                    idx: RefOrInline::Reference(Index::Num(0)),
+                    idx: TypeUseKind::Explicit(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3534,7 +3536,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: RefOrInline::Reference(Index::Num(0)), ..
+                    idx: TypeUseKind::Explicit(Index::Num(0)), ..
                 },
                 ..
             }
@@ -3545,7 +3547,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: RefOrInline::Inline(0), ..
+                    idx: TypeUseKind::Implicit(0), ..
                 },
                 ..
             }
@@ -3556,7 +3558,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: RefOrInline::Reference(Index::Num(0)),
+                    idx: TypeUseKind::Explicit(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3572,7 +3574,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: RefOrInline::Reference(Index::Num(0)),
+                    idx: TypeUseKind::Explicit(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3588,7 +3590,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: RefOrInline::Reference(Index::Num(0)),
+                    idx: TypeUseKind::Explicit(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3604,7 +3606,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: RefOrInline::Reference(Index::Num(0)),
+                    idx: TypeUseKind::Explicit(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3621,7 +3623,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: RefOrInline::Reference(Index::Num(0)),
+                    idx: TypeUseKind::Explicit(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3638,7 +3640,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: RefOrInline::Reference(Index::Num(0)),
+                    idx: TypeUseKind::Explicit(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -3655,7 +3657,7 @@ mod tests {
             Func {
                 id: Some("$_start"),
                 ty: TypeUse {
-                    idx: RefOrInline::Inline(0),
+                    idx: TypeUseKind::Implicit(0),
                     params,
                     results,
                     ..
@@ -3701,7 +3703,7 @@ mod tests {
             Func {
                 id: Some("$f"),
                 ty: TypeUse {
-                    idx: RefOrInline::Reference(Index::Num(0)),
+                    idx: TypeUseKind::Explicit(Index::Num(0)),
                     ..
                 },
                 kind: FuncKind::Body {
@@ -4100,7 +4102,7 @@ mod tests {
         assert_insn!(r#"call $f"#, [Call(Index::Ident("$f"))]);
         assert_insn!(
             r#"call_indirect (type 0)"#,
-            [CallIndirect(TypeUse{ idx: RefOrInline::Reference(Index::Num(0)), .. })]
+            [CallIndirect(TypeUse{ idx: TypeUseKind::Explicit(Index::Num(0)), .. })]
         );
 
         assert_error!(r#"br_table)"#, Vec<Instruction<'_>>, InvalidOperand{ .. });

@@ -36,7 +36,7 @@ pub struct Module<'s> {
     pub memories: Vec<Memory<'s>>,
     pub globals: Vec<Global<'s>>,
     pub entrypoint: Option<Start<'s>>,
-    pub tentatives: Vec<u32>,
+    pub implicit_type_uses: Vec<u32>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -100,21 +100,21 @@ pub struct Import {
 pub struct Name(pub String);
 
 #[cfg_attr(test, derive(Debug, PartialEq))]
-pub enum RefOrInline<'s> {
-    Reference(Index<'s>),
-    Inline(u32),
+pub enum TypeUseKind<'s> {
+    Explicit(Index<'s>),
+    Implicit(u32),
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#type-uses
 #[cfg_attr(test, derive(Debug))]
 pub struct TypeUse<'s> {
     pub start: usize,
-    pub idx: RefOrInline<'s>,
+    pub idx: TypeUseKind<'s>,
     pub params: Vec<Param<'s>>,
     pub results: Vec<FuncResult>,
 }
 
-pub struct TentativeTypeUse<'s> {
+pub struct ImplicitTypeUse<'s> {
     pub start: usize,
     pub params: Vec<Param<'s>>,
     pub results: Vec<FuncResult>,
