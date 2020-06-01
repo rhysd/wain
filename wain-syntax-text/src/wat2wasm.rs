@@ -20,6 +20,7 @@ pub enum TransformErrorKind<'source> {
         label: Option<&'source str>,
         id: &'source str,
     },
+    FuncTypeMismatch,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -72,6 +73,7 @@ impl<'s> fmt::Display for TransformError<'s> {
                 "in control instruction, label None and identifier '{}' must be the same",
                 id
             )?,
+            FuncTypeMismatch => write!(f, "function type mismatch")?,
         }
 
         describe_position(f, self.source, self.offset)
@@ -176,6 +178,8 @@ struct Context<'s> {
     local_indices: Indices<'s>,
     next_local_idx: u32,
     label_stack: LabelStack<'s>,
+    implicit_type_uses: Vec<u32>,
+    types: Vec<wat::FuncType<'s>>,
 }
 
 impl<'s> Context<'s> {
@@ -202,8 +206,39 @@ impl<'s> Context<'s> {
         }
     }
 
-    fn resolve_type_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
-        self.resolve_index(&self.type_indices, idx, offset, "type")
+    fn resolve_type_idx(&mut self, ty: wat::TypeUse<'s>, offset: usize) -> Result<'s, u32> {
+        match ty.idx {
+            wat::TypeUseKind::Explicit(idx) => {
+                let idx = self.resolve_index(&self.type_indices, idx, offset, "type")?;
+                if idx as usize >= self.types.len() {
+                    return Ok(idx);
+                }
+                let wat::FuncType {
+                    params, results, ..
+                } = &self.types[idx as usize];
+                if ty.params.is_empty() && ty.results.is_empty()
+                    || ty
+                        .params
+                        .iter()
+                        .map(|p| p.ty)
+                        .eq(params.iter().map(|p| p.ty))
+                        && ty
+                            .results
+                            .iter()
+                            .map(|r| r.ty)
+                            .eq(results.iter().map(|r| r.ty))
+                {
+                    Ok(idx)
+                } else {
+                    Err(TransformError::new(
+                        TransformErrorKind::FuncTypeMismatch,
+                        offset,
+                        self.source,
+                    ))
+                }
+            }
+            wat::TypeUseKind::Implicit(idx) => Ok(self.implicit_type_uses[idx as usize]),
+        }
     }
 
     fn resolve_func_idx(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
@@ -252,7 +287,7 @@ impl<'s> Context<'s> {
 }
 
 pub fn wat2wasm<'s>(
-    parsed: wat::Parsed<'s>,
+    mut parsed: wat::Parsed<'s>,
     source: &'s str,
 ) -> Result<'s, wasm::Root<'s, TextSource<'s>>> {
     let mut ctx = Context {
@@ -265,6 +300,8 @@ pub fn wat2wasm<'s>(
         local_indices: Indices::new(),
         next_local_idx: 0,
         label_stack: LabelStack::new(source),
+        implicit_type_uses: std::mem::take(&mut parsed.module.implicit_type_uses),
+        types: Vec::new(),
     };
     let module = parsed.module.transform(&mut ctx)?;
     Ok(wasm::Root {
@@ -295,6 +332,10 @@ impl<'s, T: Transform<'s>> Transform<'s> for Option<T> {
 impl<'s> Transform<'s> for wat::Module<'s> {
     type Target = wasm::Module<'s>;
     fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
+        ctx.types.reserve(self.types.len());
+        for type_def in self.types.iter() {
+            ctx.types.push(type_def.ty.clone());
+        }
         Ok(wasm::Module {
             start: self.start,
             id: self.id,
@@ -470,7 +511,7 @@ impl<'s> Transform<'s> for wat::Instruction<'s> {
             wat::InsnKind::Return => wasm::InsnKind::Return,
             wat::InsnKind::Call(idx) => wasm::InsnKind::Call(ctx.resolve_func_idx(idx, start)?),
             wat::InsnKind::CallIndirect(ty) => {
-                wasm::InsnKind::CallIndirect(ctx.resolve_type_idx(ty.idx, start)?)
+                wasm::InsnKind::CallIndirect(ctx.resolve_type_idx(ty, start)?)
             }
             // Parametric instructions
             wat::InsnKind::Drop => wasm::InsnKind::Drop,
@@ -666,7 +707,6 @@ impl<'s> Transform<'s> for wat::Func<'s> {
     fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Func {
             start: self.start,
-            idx: ctx.resolve_type_idx(self.ty.idx, self.start)?,
             kind: match self.kind {
                 wat::FuncKind::Import(import) => wasm::FuncKind::Import(import.transform(ctx)?),
                 wat::FuncKind::Body { locals, body } => {
@@ -687,6 +727,7 @@ impl<'s> Transform<'s> for wat::Func<'s> {
                     }
                 }
             },
+            idx: ctx.resolve_type_idx(self.ty, self.start)?,
         })
     }
 }

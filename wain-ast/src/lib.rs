@@ -46,6 +46,7 @@ pub struct Import<'s> {
 }
 
 // https://webassembly.github.io/spec/core/syntax/types.html#function-types
+#[derive(Clone)]
 pub struct FuncType {
     pub start: usize,
     pub params: Vec<ValType>,

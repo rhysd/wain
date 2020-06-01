@@ -36,6 +36,7 @@ pub struct Module<'s> {
     pub memories: Vec<Memory<'s>>,
     pub globals: Vec<Global<'s>>,
     pub entrypoint: Option<Start<'s>>,
+    pub implicit_type_uses: Vec<u32>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
@@ -47,6 +48,7 @@ pub struct TypeDef<'s> {
 }
 
 // https://webassembly.github.io/spec/core/text/types.html#text-functype
+#[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 pub struct FuncType<'s> {
     pub start: usize,
@@ -97,11 +99,23 @@ pub struct Import {
 #[cfg_attr(test, derive(Debug))]
 pub struct Name(pub String);
 
+#[cfg_attr(test, derive(Debug, PartialEq))]
+pub enum TypeUseKind<'s> {
+    Explicit(Index<'s>),
+    Implicit(u32),
+}
+
 // https://webassembly.github.io/spec/core/text/modules.html#type-uses
 #[cfg_attr(test, derive(Debug))]
 pub struct TypeUse<'s> {
     pub start: usize,
-    pub idx: Index<'s>,
+    pub idx: TypeUseKind<'s>,
+    pub params: Vec<Param<'s>>,
+    pub results: Vec<FuncResult>,
+}
+
+pub struct ImplicitTypeUse<'s> {
+    pub start: usize,
     pub params: Vec<Param<'s>>,
     pub results: Vec<FuncResult>,
 }
