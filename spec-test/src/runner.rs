@@ -524,10 +524,7 @@ impl<'a> Tester<'a> {
             }) => {
                 validate(root)?;
                 let importer = DefaultImporter::with_stdio(Discard, Discard);
-                let mut machine = Machine::instantiate(&root.module, importer).map_err(|err| {
-                    Error::run_error(RunKind::Trapped(*err), self.source, root.module.start)
-                })?;
-                match machine.execute() {
+                match Machine::instantiate(&root.module, importer) {
                     Ok(_) => Err(Error::run_error(
                         RunKind::InvokeTrapExpected {
                             ret: None,
