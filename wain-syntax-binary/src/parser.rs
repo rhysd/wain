@@ -277,6 +277,7 @@ impl<'s> Parse<'s> for Module<'s> {
             }
             inner.ensure_empty()?;
         }
+        let import_globals_len = globals.len() as u32;
 
         parser.ignore_custom_sections()?;
 
@@ -407,6 +408,7 @@ impl<'s> Parse<'s> for Module<'s> {
             memories,
             globals,
             entrypoint,
+            import_globals_len,
         })
     }
 }
