@@ -348,7 +348,6 @@ impl<'s> Transform<'s> for wat::Module<'s> {
             memories: self.memories.transform(ctx)?,
             globals: self.globals.transform(ctx)?,
             entrypoint: self.entrypoint.transform(ctx)?,
-            import_globals_len: self.import_globals_len,
         })
     }
 }

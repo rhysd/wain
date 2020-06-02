@@ -21,9 +21,19 @@ use wain_ast::*;
 struct Context<'module, 'source: 'module, S: Source> {
     module: &'module Module<'source>,
     source: &'module S,
+    num_import_globals: usize,
 }
 
 impl<'m, 's, S: Source> Context<'m, 's, S> {
+    pub fn new(module: &'m Module<'s>, source: &'m S) -> Context<'m, 's, S> {
+        let num_import_globals = module.globals.iter().take_while(|g| matches!(g.kind, GlobalKind::Import(_))).count();
+        Context {
+            module,
+            source,
+            num_import_globals,
+        }
+    }
+
     fn error<T>(&self, kind: ErrorKind, when: &'static str, offset: usize) -> Result<T, S> {
         Err(Error::new(kind, Cow::Borrowed(when), offset, self.source))
     }
@@ -88,10 +98,7 @@ impl<'m, 's, S: Source> Context<'m, 's, S> {
 }
 
 pub fn validate<'m, 's, S: Source>(root: &'m Root<'s, S>) -> Result<(), S> {
-    let mut ctx = Context {
-        module: &root.module,
-        source: &root.source,
-    };
+    let mut ctx = Context::new(&root.module, &root.source);
     root.module.validate(&mut ctx)
 }
 

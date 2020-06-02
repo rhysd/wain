@@ -37,7 +37,6 @@ pub struct Module<'s> {
     pub memories: Vec<Memory<'s>>,
     pub globals: Vec<Global<'s>>,
     pub entrypoint: Option<StartFunction>,
-    pub import_globals_len: u32,
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#syntax-module

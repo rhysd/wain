@@ -633,19 +633,24 @@ pub(crate) fn validate_constant<'m, 's, S: Source>(
     let name = insn.kind.name();
     let ty = match &insn.kind {
         GlobalGet(globalidx) => {
-            if *globalidx < ctx.module.import_globals_len {
+            // https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions
+            // Contained global.get instructions are only allowed to refer to imported globals.
+            //
+            // https://webassembly.github.io/spec/core/valid/modules.html#valid-module
+            // As formal manner, the context of globals is C', not C, where C' only contains imported globals.
+            // Globals are validated under C'. It means only imported globals are visible while the validation.
+            if *globalidx < ctx.num_import_globals as u32 {
                 let global = ctx.module.globals.get(*globalidx as usize).unwrap();
                 if global.mutable {
                     return ctx.error(ErrorKind::MutableForConstant(*globalidx), when, start);
-                } else {
-                    global.ty
                 }
+                global.ty
             } else {
                 return ctx
                     .error(
                         ErrorKind::IndexOutOfBounds {
                             idx: *globalidx,
-                            upper: ctx.module.import_globals_len as usize,
+                            upper: ctx.num_import_globals,
                             what: "global variable read",
                         },
                         "",

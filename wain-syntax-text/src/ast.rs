@@ -37,7 +37,6 @@ pub struct Module<'s> {
     pub globals: Vec<Global<'s>>,
     pub entrypoint: Option<Start<'s>>,
     pub implicit_type_uses: Vec<u32>,
-    pub import_globals_len: u32,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-typedef
