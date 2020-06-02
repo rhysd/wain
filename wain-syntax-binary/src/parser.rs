@@ -857,10 +857,8 @@ impl<'s> Parse<'s> for Instruction {
 // https://webassembly.github.io/spec/core/binary/instructions.html#binary-memarg
 impl<'s> Parse<'s> for Mem {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        let align: u32 = parser.parse_int()?;
+        let align = parser.parse_int()?;
         let offset = parser.parse_int()?;
-        let align = if align == 0 { None } else { Some(align as u8) };
-        let offset = if offset == 0 { None } else { Some(offset) };
         Ok(Mem { align, offset })
     }
 }

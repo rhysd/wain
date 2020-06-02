@@ -339,11 +339,8 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
     }
 
     fn mem_addr(&mut self, mem: &ast::Mem) -> usize {
-        let mut addr = self.stack.pop::<i32>() as usize;
-        if let Some(off) = mem.offset {
-            addr += off as usize;
-        }
-        addr
+        let addr = self.stack.pop::<i32>() as usize;
+        addr + mem.offset as usize
     }
 
     fn load<V: LittleEndian>(&mut self, mem: &ast::Mem, at: usize) -> Result<V> {

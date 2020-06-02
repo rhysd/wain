@@ -25,8 +25,8 @@ pub enum ErrorKind {
         idx: u32,
     },
     TooLargeAlign {
-        align: u8,
-        bits: u8,
+        align: u32,
+        bits: u32,
     },
     InvalidLimitRange(u32, u32),
     LimitsOutOfRange {
