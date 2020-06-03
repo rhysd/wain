@@ -26,7 +26,11 @@ struct Context<'module, 'source: 'module, S: Source> {
 
 impl<'m, 's, S: Source> Context<'m, 's, S> {
     pub fn new(module: &'m Module<'s>, source: &'m S) -> Context<'m, 's, S> {
-        let num_import_globals = module.globals.iter().take_while(|g| matches!(g.kind, GlobalKind::Import(_))).count();
+        let num_import_globals = module
+            .globals
+            .iter()
+            .take_while(|g| matches!(g.kind, GlobalKind::Import(_)))
+            .count();
         Context {
             module,
             source,
