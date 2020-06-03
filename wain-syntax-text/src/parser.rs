@@ -495,6 +495,41 @@ impl<'s> Parser<'s> {
         }
     }
 
+    fn parse_mem_arg(&mut self, default_align: u32) -> Result<'s, Mem> {
+        fn base_and_digits(s: &str) -> (NumBase, &'_ str) {
+            if s.starts_with("0x") {
+                (NumBase::Hex, &s[2..])
+            } else {
+                (NumBase::Dec, s)
+            }
+        }
+
+        let offset = match self.peek("'offset' keyword for memory instruction")? {
+            (Token::Keyword(kw), offset) if kw.starts_with("offset=") => {
+                let (base, digits) = base_and_digits(&kw[7..]);
+                let u = parse_u32_str(self, digits, base, offset)?;
+                self.eat_token(); // Eat 'offset' keyword
+                u
+            }
+            _ => 0,
+        };
+
+        let align = match self.peek("'align' keyword for memory instruction")? {
+            (Token::Keyword(kw), offset) if kw.starts_with("align=") => {
+                let (base, digits) = base_and_digits(&kw[6..]);
+                let u = parse_u32_str(self, digits, base, offset)?;
+                if u.count_ones() != 1 {
+                    return self.error(ParseErrorKind::InvalidAlignment { src: &kw[6..] }, offset);
+                }
+                self.eat_token(); // Eat 'align' keyword
+                u.trailing_zeros()
+            }
+            _ => default_align,
+        };
+
+        Ok(Mem { offset, align })
+    }
+
     fn create_inline_typeuse(
         &mut self,
         start: usize,
@@ -510,7 +545,7 @@ impl<'s> Parser<'s> {
         idx as u32
     }
 
-    fn resolve_tentatives(&mut self) -> Vec<u32> {
+    fn resolve_implicit_type_uses(&mut self) -> Vec<u32> {
         // Handle abbreviation:
         //   https://webassembly.github.io/spec/core/text/modules.html#abbreviations
         //
@@ -525,7 +560,7 @@ impl<'s> Parser<'s> {
         //   (type (func {param}* {result}*))
         //
 
-        let mut v = Vec::with_capacity(self.ctx.implicit_type_uses.len());
+        let mut resolved = Vec::with_capacity(self.ctx.implicit_type_uses.len());
         for ImplicitTypeUse {
             start,
             params,
@@ -567,9 +602,9 @@ impl<'s> Parser<'s> {
                 });
                 self.ctx.types.len() - 1
             };
-            v.push(idx as u32);
+            resolved.push(idx as u32);
         }
-        v
+        resolved
     }
 }
 
@@ -1010,13 +1045,13 @@ impl<'s> Parse<'s> for Module<'s> {
             parser.closing_paren("module")?;
         }
 
-        let implicit_type_uses = parser.resolve_tentatives();
+        let implicit_type_uses = parser.resolve_implicit_type_uses();
 
         Ok(Module {
             start,
             id,
-            types: mem::replace(&mut parser.ctx.types, vec![]),
-            exports: mem::replace(&mut parser.ctx.exports, vec![]),
+            types: mem::take(&mut parser.ctx.types),
+            exports: mem::take(&mut parser.ctx.exports),
             funcs,
             elems,
             tables,
@@ -1502,57 +1537,6 @@ impl<'s> Parse<'s> for Vec<Local<'s>> {
     }
 }
 
-fn adjust_mem(mem: Mem, default_align: u32) -> Mem {
-    match mem {
-        Mem { offset, align: 0 } => Mem {
-            offset,
-            align: default_align,
-        },
-        Mem { offset, align } => Mem {
-            offset,
-            align: align.trailing_zeros(),
-        },
-    }
-}
-
-impl<'s> Parse<'s> for Mem {
-    fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        fn base_and_digits(s: &str) -> (NumBase, &'_ str) {
-            if s.starts_with("0x") {
-                (NumBase::Hex, &s[2..])
-            } else {
-                (NumBase::Dec, s)
-            }
-        }
-
-        let offset = match parser.peek("'offset' keyword for memory instruction")? {
-            (Token::Keyword(kw), offset) if kw.starts_with("offset=") => {
-                let (base, digits) = base_and_digits(&kw[7..]);
-                let u = parse_u32_str(parser, digits, base, offset)?;
-                parser.eat_token(); // Eat 'offset' keyword
-                u
-            }
-            _ => 0,
-        };
-
-        let align = match parser.peek("'align' keyword for memory instruction")? {
-            (Token::Keyword(kw), offset) if kw.starts_with("align=") => {
-                let (base, digits) = base_and_digits(&kw[6..]);
-                let u = parse_u32_str(parser, digits, base, offset)?;
-                if u.count_ones() != 1 {
-                    return parser
-                        .error(ParseErrorKind::InvalidAlignment { src: &kw[6..] }, offset);
-                }
-                parser.eat_token(); // Eat 'align' keyword
-                u
-            }
-            _ => 0,
-        };
-
-        Ok(Mem { offset, align })
-    }
-}
-
 // Instructions has special abbreviation. It can be folded and nested. This struct parses sequence
 // of instructions with the abbreviation.
 //
@@ -1767,29 +1751,29 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             "global.set" => InsnKind::GlobalSet(self.parser.parse()?),
             // Memory instructions
             // https://webassembly.github.io/spec/core/text/instructions.html#memory-instructions
-            "i32.load" => InsnKind::I32Load(adjust_mem(self.parser.parse()?, 2)),
-            "i64.load" => InsnKind::I64Load(adjust_mem(self.parser.parse()?, 3)),
-            "f32.load" => InsnKind::F32Load(adjust_mem(self.parser.parse()?, 2)),
-            "f64.load" => InsnKind::F64Load(adjust_mem(self.parser.parse()?, 3)),
-            "i32.load8_s" => InsnKind::I32Load8S(adjust_mem(self.parser.parse()?, 0)),
-            "i32.load8_u" => InsnKind::I32Load8U(adjust_mem(self.parser.parse()?, 0)),
-            "i32.load16_s" => InsnKind::I32Load16S(adjust_mem(self.parser.parse()?, 1)),
-            "i32.load16_u" => InsnKind::I32Load16U(adjust_mem(self.parser.parse()?, 1)),
-            "i64.load8_s" => InsnKind::I64Load8S(adjust_mem(self.parser.parse()?, 0)),
-            "i64.load8_u" => InsnKind::I64Load8U(adjust_mem(self.parser.parse()?, 0)),
-            "i64.load16_s" => InsnKind::I64Load16S(adjust_mem(self.parser.parse()?, 1)),
-            "i64.load16_u" => InsnKind::I64Load16U(adjust_mem(self.parser.parse()?, 1)),
-            "i64.load32_s" => InsnKind::I64Load32S(adjust_mem(self.parser.parse()?, 2)),
-            "i64.load32_u" => InsnKind::I64Load32U(adjust_mem(self.parser.parse()?, 2)),
-            "i32.store" => InsnKind::I32Store(adjust_mem(self.parser.parse()?, 2)),
-            "i64.store" => InsnKind::I64Store(adjust_mem(self.parser.parse()?, 3)),
-            "f32.store" => InsnKind::F32Store(adjust_mem(self.parser.parse()?, 2)),
-            "f64.store" => InsnKind::F64Store(adjust_mem(self.parser.parse()?, 3)),
-            "i32.store8" => InsnKind::I32Store8(adjust_mem(self.parser.parse()?, 0)),
-            "i32.store16" => InsnKind::I32Store16(adjust_mem(self.parser.parse()?, 1)),
-            "i64.store8" => InsnKind::I64Store8(adjust_mem(self.parser.parse()?, 0)),
-            "i64.store16" => InsnKind::I64Store16(adjust_mem(self.parser.parse()?, 1)),
-            "i64.store32" => InsnKind::I64Store32(adjust_mem(self.parser.parse()?, 2)),
+            "i32.load" => InsnKind::I32Load(self.parser.parse_mem_arg(2)?),
+            "i64.load" => InsnKind::I64Load(self.parser.parse_mem_arg(3)?),
+            "f32.load" => InsnKind::F32Load(self.parser.parse_mem_arg(2)?),
+            "f64.load" => InsnKind::F64Load(self.parser.parse_mem_arg(3)?),
+            "i32.load8_s" => InsnKind::I32Load8S(self.parser.parse_mem_arg(0)?),
+            "i32.load8_u" => InsnKind::I32Load8U(self.parser.parse_mem_arg(0)?),
+            "i32.load16_s" => InsnKind::I32Load16S(self.parser.parse_mem_arg(1)?),
+            "i32.load16_u" => InsnKind::I32Load16U(self.parser.parse_mem_arg(1)?),
+            "i64.load8_s" => InsnKind::I64Load8S(self.parser.parse_mem_arg(0)?),
+            "i64.load8_u" => InsnKind::I64Load8U(self.parser.parse_mem_arg(0)?),
+            "i64.load16_s" => InsnKind::I64Load16S(self.parser.parse_mem_arg(1)?),
+            "i64.load16_u" => InsnKind::I64Load16U(self.parser.parse_mem_arg(1)?),
+            "i64.load32_s" => InsnKind::I64Load32S(self.parser.parse_mem_arg(2)?),
+            "i64.load32_u" => InsnKind::I64Load32U(self.parser.parse_mem_arg(2)?),
+            "i32.store" => InsnKind::I32Store(self.parser.parse_mem_arg(2)?),
+            "i64.store" => InsnKind::I64Store(self.parser.parse_mem_arg(3)?),
+            "f32.store" => InsnKind::F32Store(self.parser.parse_mem_arg(2)?),
+            "f64.store" => InsnKind::F64Store(self.parser.parse_mem_arg(3)?),
+            "i32.store8" => InsnKind::I32Store8(self.parser.parse_mem_arg(0)?),
+            "i32.store16" => InsnKind::I32Store16(self.parser.parse_mem_arg(1)?),
+            "i64.store8" => InsnKind::I64Store8(self.parser.parse_mem_arg(0)?),
+            "i64.store16" => InsnKind::I64Store16(self.parser.parse_mem_arg(1)?),
+            "i64.store32" => InsnKind::I64Store32(self.parser.parse_mem_arg(2)?),
             "memory.size" => InsnKind::MemorySize,
             "memory.grow" => InsnKind::MemoryGrow,
             // Numeric instructions
