@@ -203,26 +203,27 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         }
     }
 
-    fn validate_memarg(&self, mem: &Mem, bits: u8) -> Result<(), S> {
+    fn validate_memarg(&self, mem: &Mem, bits: u32) -> Result<(), S> {
         self.outer
             .memory_from_idx(0, self.current_op, self.current_offset)?;
         // The alignment must not be larger than the bit width of t divided by 8.
-        if let Some(align) = mem.align {
-            if align > bits / 8 {
-                return self.error(ErrorKind::TooLargeAlign { align, bits });
-            }
+        if mem.align > (bits / 8).trailing_zeros() {
+            return self.error(ErrorKind::TooLargeAlign {
+                align: mem.align,
+                bits,
+            });
         }
         Ok(())
     }
 
-    fn validate_load(&mut self, mem: &Mem, bits: u8, ty: ValType) -> Result<(), S> {
+    fn validate_load(&mut self, mem: &Mem, bits: u32, ty: ValType) -> Result<(), S> {
         self.validate_memarg(mem, bits)?;
         self.pop_op_stack(Type::I32)?; // load address
         self.op_stack.push(Type::Known(ty));
         Ok(())
     }
 
-    fn validate_store(&mut self, mem: &Mem, bits: u8, ty: ValType) -> Result<(), S> {
+    fn validate_store(&mut self, mem: &Mem, bits: u32, ty: ValType) -> Result<(), S> {
         self.validate_memarg(mem, bits)?;
         self.pop_op_stack(Type::Known(ty))?; // value to store
         self.pop_op_stack(Type::I32)?; // store address

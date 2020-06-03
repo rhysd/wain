@@ -215,8 +215,8 @@ pub struct Instruction<'s> {
 // https://webassembly.github.io/spec/core/text/instructions.html#text-memarg
 #[cfg_attr(test, derive(Debug))]
 pub struct Mem {
-    pub align: Option<u8>,
-    pub offset: Option<u32>,
+    pub align: u32,
+    pub offset: u32,
 }
 
 #[cfg_attr(test, derive(Debug))]

@@ -615,7 +615,6 @@ macro_rules! parse_uint_function {
     };
 }
 
-parse_uint_function!(parse_u8_str, u8);
 parse_uint_function!(parse_u32_str, u32);
 parse_uint_function!(parse_u64_str, u64);
 
@@ -1503,6 +1502,19 @@ impl<'s> Parse<'s> for Vec<Local<'s>> {
     }
 }
 
+fn adjust_mem(mem: Mem, default_align: u32) -> Mem {
+    match mem {
+        Mem { offset, align: 0 } => Mem {
+            offset,
+            align: default_align,
+        },
+        Mem { offset, align } => Mem {
+            offset,
+            align: align.trailing_zeros(),
+        },
+    }
+}
+
 impl<'s> Parse<'s> for Mem {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         fn base_and_digits(s: &str) -> (NumBase, &'_ str) {
@@ -1518,23 +1530,23 @@ impl<'s> Parse<'s> for Mem {
                 let (base, digits) = base_and_digits(&kw[7..]);
                 let u = parse_u32_str(parser, digits, base, offset)?;
                 parser.eat_token(); // Eat 'offset' keyword
-                Some(u)
+                u
             }
-            _ => None,
+            _ => 0,
         };
 
         let align = match parser.peek("'align' keyword for memory instruction")? {
             (Token::Keyword(kw), offset) if kw.starts_with("align=") => {
                 let (base, digits) = base_and_digits(&kw[6..]);
-                let u = parse_u8_str(parser, digits, base, offset)?;
+                let u = parse_u32_str(parser, digits, base, offset)?;
                 if u.count_ones() != 1 {
                     return parser
                         .error(ParseErrorKind::InvalidAlignment { src: &kw[6..] }, offset);
                 }
                 parser.eat_token(); // Eat 'align' keyword
-                Some(u)
+                u
             }
-            _ => None,
+            _ => 0,
         };
 
         Ok(Mem { offset, align })
@@ -1755,29 +1767,29 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             "global.set" => InsnKind::GlobalSet(self.parser.parse()?),
             // Memory instructions
             // https://webassembly.github.io/spec/core/text/instructions.html#memory-instructions
-            "i32.load" => InsnKind::I32Load(self.parser.parse()?),
-            "i64.load" => InsnKind::I64Load(self.parser.parse()?),
-            "f32.load" => InsnKind::F32Load(self.parser.parse()?),
-            "f64.load" => InsnKind::F64Load(self.parser.parse()?),
-            "i32.load8_s" => InsnKind::I32Load8S(self.parser.parse()?),
-            "i32.load8_u" => InsnKind::I32Load8U(self.parser.parse()?),
-            "i32.load16_s" => InsnKind::I32Load16S(self.parser.parse()?),
-            "i32.load16_u" => InsnKind::I32Load16U(self.parser.parse()?),
-            "i64.load8_s" => InsnKind::I64Load8S(self.parser.parse()?),
-            "i64.load8_u" => InsnKind::I64Load8U(self.parser.parse()?),
-            "i64.load16_s" => InsnKind::I64Load16S(self.parser.parse()?),
-            "i64.load16_u" => InsnKind::I64Load16U(self.parser.parse()?),
-            "i64.load32_s" => InsnKind::I64Load32S(self.parser.parse()?),
-            "i64.load32_u" => InsnKind::I64Load32U(self.parser.parse()?),
-            "i32.store" => InsnKind::I32Store(self.parser.parse()?),
-            "i64.store" => InsnKind::I64Store(self.parser.parse()?),
-            "f32.store" => InsnKind::F32Store(self.parser.parse()?),
-            "f64.store" => InsnKind::F64Store(self.parser.parse()?),
-            "i32.store8" => InsnKind::I32Store8(self.parser.parse()?),
-            "i32.store16" => InsnKind::I32Store16(self.parser.parse()?),
-            "i64.store8" => InsnKind::I64Store8(self.parser.parse()?),
-            "i64.store16" => InsnKind::I64Store16(self.parser.parse()?),
-            "i64.store32" => InsnKind::I64Store32(self.parser.parse()?),
+            "i32.load" => InsnKind::I32Load(adjust_mem(self.parser.parse()?, 2)),
+            "i64.load" => InsnKind::I64Load(adjust_mem(self.parser.parse()?, 3)),
+            "f32.load" => InsnKind::F32Load(adjust_mem(self.parser.parse()?, 2)),
+            "f64.load" => InsnKind::F64Load(adjust_mem(self.parser.parse()?, 3)),
+            "i32.load8_s" => InsnKind::I32Load8S(adjust_mem(self.parser.parse()?, 0)),
+            "i32.load8_u" => InsnKind::I32Load8U(adjust_mem(self.parser.parse()?, 0)),
+            "i32.load16_s" => InsnKind::I32Load16S(adjust_mem(self.parser.parse()?, 1)),
+            "i32.load16_u" => InsnKind::I32Load16U(adjust_mem(self.parser.parse()?, 1)),
+            "i64.load8_s" => InsnKind::I64Load8S(adjust_mem(self.parser.parse()?, 0)),
+            "i64.load8_u" => InsnKind::I64Load8U(adjust_mem(self.parser.parse()?, 0)),
+            "i64.load16_s" => InsnKind::I64Load16S(adjust_mem(self.parser.parse()?, 1)),
+            "i64.load16_u" => InsnKind::I64Load16U(adjust_mem(self.parser.parse()?, 1)),
+            "i64.load32_s" => InsnKind::I64Load32S(adjust_mem(self.parser.parse()?, 2)),
+            "i64.load32_u" => InsnKind::I64Load32U(adjust_mem(self.parser.parse()?, 2)),
+            "i32.store" => InsnKind::I32Store(adjust_mem(self.parser.parse()?, 2)),
+            "i64.store" => InsnKind::I64Store(adjust_mem(self.parser.parse()?, 3)),
+            "f32.store" => InsnKind::F32Store(adjust_mem(self.parser.parse()?, 2)),
+            "f64.store" => InsnKind::F64Store(adjust_mem(self.parser.parse()?, 3)),
+            "i32.store8" => InsnKind::I32Store8(adjust_mem(self.parser.parse()?, 0)),
+            "i32.store16" => InsnKind::I32Store16(adjust_mem(self.parser.parse()?, 1)),
+            "i64.store8" => InsnKind::I64Store8(adjust_mem(self.parser.parse()?, 0)),
+            "i64.store16" => InsnKind::I64Store16(adjust_mem(self.parser.parse()?, 1)),
+            "i64.store32" => InsnKind::I64Store32(adjust_mem(self.parser.parse()?, 2)),
             "memory.size" => InsnKind::MemorySize,
             "memory.grow" => InsnKind::MemoryGrow,
             // Numeric instructions
@@ -4144,36 +4156,36 @@ mod tests {
         assert_insn!(
             r#"i32.load"#,
             [I32Load(Mem {
-                align: None,
-                offset: None
+                align: 2,
+                offset: 0
             })]
         );
         assert_insn!(
             r#"i32.load align=32"#,
             [I32Load(Mem {
-                align: Some(32),
-                offset: None,
+                align: 5,
+                offset: 0,
             })]
         );
         assert_insn!(
             r#"i32.load offset=10"#,
             [I32Load(Mem {
-                align: None,
-                offset: Some(10),
+                align: 2,
+                offset: 10,
             })]
         );
         assert_insn!(
             r#"i32.load offset=10 align=32"#,
             [I32Load(Mem {
-                align: Some(32),
-                offset: Some(10),
+                align: 5,
+                offset: 10,
             })]
         );
         assert_insn!(
             r#"i32.load offset=0x1f align=0x80"#,
             [I32Load(Mem {
-                align: Some(0x80),
-                offset: Some(0x1f),
+                align: 7,
+                offset: 0x1f,
             })]
         );
         assert_insn!(r#"i64.load"#, [I64Load(..)]);
@@ -5103,7 +5115,7 @@ mod tests {
             Global<'_>,
             Global { kind: GlobalKind::Init(init), .. }
             if matches!(&init[0].kind, InsnKind::I32Const(32)) &&
-               matches!(&init[1].kind, InsnKind::I32Load(Mem{ align: Some(8), .. }))
+               matches!(&init[1].kind, InsnKind::I32Load(Mem{ align: 3, .. }))
         );
         assert_parse!(
             r#"(global i32 (i32.add (i32.const 4)))"#,
