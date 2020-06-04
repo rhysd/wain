@@ -227,21 +227,17 @@ pub enum InsnKind<'s> {
         label: Option<&'s str>,
         ty: Option<ValType>,
         body: Vec<Instruction<'s>>,
-        id: Option<&'s str>,
     },
     Loop {
         label: Option<&'s str>,
         ty: Option<ValType>,
         body: Vec<Instruction<'s>>,
-        id: Option<&'s str>,
     },
     If {
         label: Option<&'s str>,
         ty: Option<ValType>,
         then_body: Vec<Instruction<'s>>,
-        else_id: Option<&'s str>,
         else_body: Vec<Instruction<'s>>,
-        end_id: Option<&'s str>,
     },
     Unreachable,
     Nop,
@@ -510,7 +506,6 @@ mod tests {
             label: None,
             ty: None,
             body: vec![],
-            id: None,
         };
         assert!(insn.is_block());
         assert!(!InsnKind::Nop.is_block());

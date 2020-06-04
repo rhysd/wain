@@ -114,36 +114,14 @@ impl<'s> LabelStack<'s> {
         }
     }
 
-    fn push(
-        &mut self,
-        label: Option<&'s str>,
-        id: Option<&'s str>,
-        offset: usize,
-    ) -> Result<'s, ()> {
-        let label = match (label, id) {
-            (Some(label), Some(id)) if label == id => label,
-            (_, Some(id)) => {
-                return Err(TransformError::new(
-                    TransformErrorKind::LabelAndIdMismatch { label, id },
-                    offset,
-                    self.source,
-                ))
-            }
-            (Some(label), None) => label,
-            (None, None) => {
-                self.stack.push(None);
-                return Ok(());
-            }
-        };
-
+    fn push(&mut self, label: Option<&'s str>) {
         // Note: Labels can be redefined.
         //
         //   (block $l (result i32)
         //     (block $l (result i32) (i32.const 2))
         //   )
 
-        self.stack.push(Some(label));
-        Ok(())
+        self.stack.push(label);
     }
 
     fn pop(&mut self) {
@@ -446,13 +424,8 @@ impl<'s> Transform<'s> for wat::Instruction<'s> {
     fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         let start = self.start;
         let kind = match self.kind {
-            wat::InsnKind::Block {
-                label,
-                ty,
-                body,
-                id,
-            } => {
-                ctx.label_stack.push(label, id, start)?;
+            wat::InsnKind::Block { label, ty, body } => {
+                ctx.label_stack.push(label);
                 let body = body.transform(ctx)?;
                 ctx.label_stack.pop();
                 wasm::InsnKind::Block {
@@ -460,13 +433,8 @@ impl<'s> Transform<'s> for wat::Instruction<'s> {
                     body,
                 }
             }
-            wat::InsnKind::Loop {
-                label,
-                ty,
-                body,
-                id,
-            } => {
-                ctx.label_stack.push(label, id, start)?;
+            wat::InsnKind::Loop { label, ty, body } => {
+                ctx.label_stack.push(label);
                 let body = body.transform(ctx)?;
                 ctx.label_stack.pop();
                 wasm::InsnKind::Loop {
@@ -478,14 +446,10 @@ impl<'s> Transform<'s> for wat::Instruction<'s> {
                 label,
                 ty,
                 then_body,
-                else_id,
                 else_body,
-                end_id,
             } => {
-                ctx.label_stack.push(label, else_id, start)?;
+                ctx.label_stack.push(label);
                 let then_body = then_body.transform(ctx)?;
-                ctx.label_stack.pop();
-                ctx.label_stack.push(label, end_id, start)?;
                 let else_body = else_body.transform(ctx)?;
                 ctx.label_stack.pop();
                 wasm::InsnKind::If {
