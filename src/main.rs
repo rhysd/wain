@@ -140,26 +140,26 @@ fn unwrap<T, E: std::fmt::Display>(phase: &'static str, result: Result<T, E>) ->
     }
 }
 
-fn run<S: wain_ast::source::Source>(ast: wain_ast::Root<'_, S>) -> wain_exec::Run {
+fn run<S: wain_ast::source::Source>(ast: wain_ast::Root<'_, S>) {
     unwrap("validation", wain_validate::validate(&ast));
     unwrap("running wasm", wain_exec::execute(&ast.module))
 }
 
 #[cfg(feature = "binary")]
-fn run_binary(bin: Vec<u8>) -> wain_exec::Run {
+fn run_binary(bin: Vec<u8>) {
     run(unwrap("parsing", wain_syntax_binary::parse(&bin)))
 }
 #[cfg(not(feature = "binary"))]
-fn run_binary(_: Vec<u8>) -> wain_exec::Run {
+fn run_binary(_: Vec<u8>) {
     unimplemented!("running binary format is not supported since built without 'binary' feature")
 }
 
 #[cfg(feature = "text")]
-fn run_text(text: String) -> wain_exec::Run {
+fn run_text(text: String) {
     run(unwrap("parsing", wain_syntax_text::parse(&text)))
 }
 #[cfg(not(feature = "text"))]
-fn run_text(_: String) -> wain_exec::Run {
+fn run_text(_: String) {
     unimplemented!("running text format is not supported since built without 'text' feature")
 }
 
@@ -175,12 +175,8 @@ fn main() {
         exit(0);
     }
 
-    let result = match unwrap("reading input", opts.file.read()) {
+    match unwrap("reading input", opts.file.read()) {
         Input::Binary(bin) => run_binary(bin),
         Input::Text(text) => run_text(text),
-    };
-
-    if let wain_exec::Run::Warning(msg) = result {
-        eprintln!("Warning: {}", msg);
     }
 }

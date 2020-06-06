@@ -14,13 +14,6 @@ use wain_ast::AsValType;
 
 // TODO: Handle external values for imports and exports
 
-#[cfg_attr(test, derive(Debug))]
-#[derive(PartialEq)]
-pub enum Run {
-    Success,
-    Warning(&'static str),
-}
-
 enum ExecState {
     Breaking(u32), // Breaking
     Ret,           // Returning from current function call
@@ -69,7 +62,12 @@ pub struct Machine<'module, 'source, I: Importer> {
 }
 
 impl<'m, 's, I: Importer> Machine<'m, 's, I> {
-    // https://webassembly.github.io/spec/core/exec/modules.html#instantiation
+    /// Initialize states of execution (stack, memory, ...) and instantiate a given module. It means
+    /// that 'start function' is invoked in this function if presents.
+    /// The module is assumed to be validated. If an invalid module is given, the behavior is
+    /// unspecified, meaning that it may crash or the result may be incorrect.
+    ///
+    /// https://webassembly.github.io/spec/core/exec/modules.html#instantiation
     pub fn instantiate(module: &'m ast::Module<'s>, importer: I) -> Result<Self> {
         // TODO: 2., 3., 4. Validate external values before instantiate globals
 
@@ -219,6 +217,7 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         );
     }
 
+    // https://webassembly.github.io/spec/core/exec/modules.html#invocation
     // https://webassembly.github.io/spec/core/exec/instructions.html#function-calls
     // Returns if it has return value on stack or not
     fn invoke_by_funcidx(&mut self, funcidx: u32) -> Result<bool> {
@@ -261,6 +260,7 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         }
     }
 
+    // Invoke function by name
     pub fn invoke(&mut self, name: impl AsRef<str>, args: &[Value]) -> Result<Option<Value>> {
         fn find_func_to_invoke<'s>(
             name: &str,
@@ -322,24 +322,6 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         } else {
             Ok(None)
         }
-    }
-
-    // Invoke '_start' exported function
-    pub fn execute(&mut self) -> Result<Run> {
-        // Note: This behavior is not described in spec. But current Clang does not emit 'start' section
-        // even if a main function is included in the source. Instead, wasm-ld recognizes '_start' exported
-        // function as entrypoint. Here the behavior is implemented
-        for export in self.module.exports.iter() {
-            if export.name.0 == "_start" {
-                if let ast::ExportKind::Func(idx) = &export.kind {
-                    return self.invoke_by_funcidx(*idx).map(|_| Run::Success);
-                }
-            }
-        }
-
-        Ok(Run::Warning(
-            "no entrypoint found. no '_start' exported function is set to the module.",
-        ))
     }
 
     fn mem_addr(&mut self, mem: &ast::Mem) -> usize {
@@ -1094,17 +1076,17 @@ mod tests {
             }
         }
 
-        fn exec(file: PathBuf) -> (Run, Vec<u8>) {
+        fn exec(file: PathBuf) -> Result<Vec<u8>> {
             let source = fs::read_to_string(file).unwrap();
             let ast = unwrap(parse(&source));
             unwrap(validate(&ast));
             let mut stdout = vec![];
-            let run = {
+            {
                 let importer = DefaultImporter::with_stdio(Discard, &mut stdout);
                 let mut machine = unwrap(Machine::instantiate(&ast.module, importer));
-                unwrap(machine.execute())
-            };
-            (run, stdout)
+                machine.invoke("_start", &[])?;
+            }
+            Ok(stdout)
         }
 
         let mut dir = env::current_dir().unwrap();
@@ -1113,20 +1095,16 @@ mod tests {
         dir.push("hello");
         let dir = dir;
 
-        let (run, stdout) = exec(dir.join("hello.wat"));
-        assert_eq!(run, Run::Success);
+        let stdout = exec(dir.join("hello.wat")).unwrap();
         assert_eq!(stdout, b"Hello, world\n");
 
-        let (run, stdout) = exec(dir.join("hello_global.wat"));
-        assert_eq!(run, Run::Success);
+        let stdout = exec(dir.join("hello_global.wat")).unwrap();
         assert_eq!(stdout, b"Hello, world\n");
 
-        let (run, stdout) = exec(dir.join("hello_indirect_call.wat"));
-        assert_eq!(run, Run::Success);
+        let stdout = exec(dir.join("hello_indirect_call.wat")).unwrap();
         assert_eq!(stdout, b"Hello, world\n");
 
-        let (run, stdout) = exec(dir.join("hello_struct.wat"));
-        assert_eq!(run, Run::Success);
+        let stdout = exec(dir.join("hello_struct.wat")).unwrap();
         assert_eq!(stdout, b"Hello, world\n");
     }
 

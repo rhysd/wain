@@ -29,8 +29,8 @@ and `wain-syntax-text` parsers and validated by `wain-validate` validator:
 - [wain-syntax-binary](https://crates.io/crates/wain-syntax-binary)
 - [wain-validate](https://crates.io/crates/wain-validate)
 
-Using `wain_exec::execute()` is the easiest way. It returns `wain_exec::Run` enum which represents
-how the module was run.
+Using `wain_exec::execute()` is the easiest way. It invokes a start function in given module if presents.
+Otherwise it invokes a function exported as `_start`.
 
 ```rust
 extern crate wain_syntax_binary;
@@ -41,7 +41,7 @@ use std::fs;
 use std::process::exit;
 use wain_syntax_binary::parse;
 use wain_validate::validate;
-use wain_exec::{execute, Run};
+use wain_exec::execute;
 
 // Read wasm binary
 let source = fs::read("foo.wasm").unwrap();
@@ -62,13 +62,9 @@ if let Err(err) = validate(&tree) {
 }
 
 // Execute module
-match execute(&tree.module) {
-    Ok(run) => {
-        if let Run::Warning(msg) = run {
-            eprintln!("Warning: {}", msg);
-        }
-    }
-    Err(trap) => eprintln!("Execution was trapped: {}", trap),
+if let Err(trap) = execute(&tree.module) {
+    eprintln!("Execution was trapped: {}", trap);
+    exit(1);
 }
 ```
 

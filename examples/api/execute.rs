@@ -3,7 +3,7 @@ extern crate wain_syntax_binary;
 extern crate wain_validate;
 
 use std::process::exit;
-use wain_exec::{execute, Run};
+use wain_exec::execute;
 use wain_syntax_binary::parse;
 use wain_validate::validate;
 
@@ -52,9 +52,8 @@ fn main() {
     }
 
     // Execute module. It invokes 'start function'
-    match execute(&tree.module) {
-        Ok(Run::Success) => {}
-        Ok(Run::Warning(msg)) => eprintln!("Warning: {}", msg),
-        Err(trap) => eprintln!("Execution was trapped: {}", trap),
+    if let Err(trap) = execute(&tree.module) {
+        eprintln!("Execution was trapped: {}", trap);
+        exit(1);
     }
 }

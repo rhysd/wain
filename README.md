@@ -122,7 +122,7 @@ use std::fs;
 use std::process::exit;
 use wain_syntax_binary::parse;
 use wain_validate::validate;
-use wain_exec::{execute, Run};
+use wain_exec::execute;
 
 // Read wasm binary
 let source = fs::read("foo.wasm").unwrap();
@@ -143,13 +143,9 @@ if let Err(err) = validate(&tree) {
 }
 
 // Execute module
-match execute(&tree.module) {
-    Ok(run) => {
-        if let Run::Warning(msg) = run {
-            eprintln!("Warning: {}", msg);
-        }
-    }
-    Err(trap) => eprintln!("Execution was trapped: {}", trap),
+if let Err(trap) = execute(&tree.module) {
+    eprintln!("Execution was trapped: {}", trap);
+    exit(1);
 }
 ```
 

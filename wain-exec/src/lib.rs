@@ -16,7 +16,7 @@ mod value;
 pub use import::{
     check_func_signature, DefaultImporter, ImportInvalidError, ImportInvokeError, Importer,
 };
-pub use machine::{Machine, Run};
+pub use machine::Machine;
 pub use memory::Memory;
 pub use stack::Stack;
 pub use value::Value;
@@ -27,20 +27,24 @@ use wain_ast::Module;
 
 /// A convenient function to execute a WebAssembly module.
 ///
-/// This function takes parsed and validated WebAssembly module and executes it until the end.
+/// This function takes parsed and validated WebAssembly module and it invokes a start function if
+/// presents. Otherwise it invokes a function exported as '_start' with no argument.
 ///
 /// For standard I/O speed, this function locks io::Stdin and io::Stdout objects because currently
 /// getchar() and putchar() don't buffer its input/output. This behavior may change in the future.
 ///
 /// If the behavior is not acceptable, please make an abstract machine instance with
-/// Machine::instantiate and execute by Machine::execute method.
+/// Machine::instantiate.
 ///
 /// You will need importer for initializing Machine struct. Please use DefaultImporter::with_stdio()
 /// or make your own importer struct which implements Importer trait.
-pub fn execute(module: &Module<'_>) -> Result<Run> {
+pub fn execute(module: &Module<'_>) -> Result<()> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let importer = DefaultImporter::with_stdio(stdin.lock(), stdout.lock());
     let mut machine = Machine::instantiate(module, importer)?;
-    machine.execute()
+    if machine.module().entrypoint.is_none() {
+        machine.invoke("_start", &[])?;
+    }
+    Ok(())
 }
