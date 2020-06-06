@@ -148,14 +148,22 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
 
         // 11. and 12. pop frame (unnecessary for now)
 
-        Ok(Self {
+        let mut machine = Self {
             module,
             table,
             stack,
             memory,
             globals,
             importer,
-        })
+        };
+
+        // 15. If the start function is not empty, invoke it
+        if let Some(start) = &machine.module.entrypoint {
+            // Execute entrypoint
+            machine.invoke_by_funcidx(start.idx)?;
+        }
+
+        Ok(machine)
     }
 
     pub fn module(&self) -> &'m ast::Module<'s> {
@@ -316,14 +324,8 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
         }
     }
 
-    // As the last step of instantiation, invoke start function
+    // Invoke '_start' exported function
     pub fn execute(&mut self) -> Result<Run> {
-        // 15. If the start function is not empty, invoke it
-        if let Some(start) = &self.module.entrypoint {
-            // Execute entrypoint
-            return self.invoke_by_funcidx(start.idx).map(|_| Run::Success);
-        }
-
         // Note: This behavior is not described in spec. But current Clang does not emit 'start' section
         // even if a main function is included in the source. Instead, wasm-ld recognizes '_start' exported
         // function as entrypoint. Here the behavior is implemented
@@ -335,7 +337,9 @@ impl<'m, 's, I: Importer> Machine<'m, 's, I> {
             }
         }
 
-        Ok(Run::Warning("no entrypoint found. 'start' section nor '_start' exported function is set to the module"))
+        Ok(Run::Warning(
+            "no entrypoint found. no '_start' exported function is set to the module.",
+        ))
     }
 
     fn mem_addr(&mut self, mem: &ast::Mem) -> usize {
