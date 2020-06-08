@@ -37,6 +37,9 @@ wain-syntax-binary = { path = "./wain-syntax-binary", version = "0.1", optional 
 wain-validate = { path = "./wain-validate", version = "0.1" }
 wain-exec = { path = "./wain-exec", version = "0.2" }
 
+[dev-dependencies]
+cargo-husky = { version = "1", features = ["run-cargo-clippy", "run-cargo-fmt"] }
+
 [workspace]
 members = [
     ".",
