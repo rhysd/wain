@@ -565,7 +565,7 @@ impl<'s> Parser<'s> {
             start,
             params,
             results,
-        } in self.ctx.implicit_type_uses.iter()
+        } in mem::take(&mut self.ctx.implicit_type_uses).into_iter()
         {
             let idx = if let Some(idx) =
                 self.ctx
@@ -592,12 +592,12 @@ impl<'s> Parser<'s> {
                 idx
             } else {
                 self.ctx.types.push(TypeDef {
-                    start: *start,
+                    start,
                     id: None,
                     ty: FuncType {
-                        start: *start,
-                        params: params.to_vec(),
-                        results: results.to_vec(),
+                        start,
+                        params,
+                        results,
                     },
                 });
                 self.ctx.types.len() - 1
@@ -1045,11 +1045,10 @@ impl<'s> Parse<'s> for Module<'s> {
             parser.closing_paren("module")?;
         }
 
-        let implicit_type_uses = parser.resolve_implicit_type_uses();
-
         Ok(Module {
             start,
             id,
+            implicit_type_uses: parser.resolve_implicit_type_uses(), // This consumes parser.ctx.implicit_type_uses
             types: mem::take(&mut parser.ctx.types),
             exports: mem::take(&mut parser.ctx.exports),
             funcs,
@@ -1059,7 +1058,6 @@ impl<'s> Parse<'s> for Module<'s> {
             memories,
             globals,
             entrypoint,
-            implicit_type_uses,
         })
     }
 }
