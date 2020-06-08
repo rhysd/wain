@@ -99,8 +99,11 @@ pub struct Import {
 #[cfg_attr(test, derive(Debug))]
 pub struct Name(pub String);
 
+// Type index has two flavors. One is specified by user explicitly in u32 index or identifier name.
+// Another is inserted implicitly and automatically by interpreter when typeuse is omitted.
+// For the implicit typeuse, we use a separate index space and resolve the indices after.
 #[cfg_attr(test, derive(Debug, PartialEq))]
-pub enum TypeUseKind<'s> {
+pub enum TypeIndex<'s> {
     Explicit(Index<'s>),
     Implicit(u32),
 }
@@ -109,11 +112,12 @@ pub enum TypeUseKind<'s> {
 #[cfg_attr(test, derive(Debug))]
 pub struct TypeUse<'s> {
     pub start: usize,
-    pub idx: TypeUseKind<'s>,
+    pub idx: TypeIndex<'s>,
     pub params: Vec<Param<'s>>,
     pub results: Vec<FuncResult>,
 }
 
+// https://webassembly.github.io/spec/core/text/modules.html#type-uses
 pub struct ImplicitTypeUse<'s> {
     pub start: usize,
     pub params: Vec<Param<'s>>,

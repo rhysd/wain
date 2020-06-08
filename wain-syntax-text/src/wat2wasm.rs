@@ -208,7 +208,7 @@ impl<'s> Context<'s> {
 
     fn resolve_type_idx(&mut self, ty: wat::TypeUse<'s>, offset: usize) -> Result<'s, u32> {
         match ty.idx {
-            wat::TypeUseKind::Explicit(idx) => {
+            wat::TypeIndex::Explicit(idx) => {
                 let idx = self.resolve_index(&self.type_indices, idx, offset, "type")?;
                 if idx as usize >= self.types.len() {
                     return Ok(idx);
@@ -237,7 +237,7 @@ impl<'s> Context<'s> {
                     ))
                 }
             }
-            wat::TypeUseKind::Implicit(idx) => Ok(self.implicit_type_uses[idx as usize]),
+            wat::TypeIndex::Implicit(idx) => Ok(self.implicit_type_uses[idx as usize]),
         }
     }
 
