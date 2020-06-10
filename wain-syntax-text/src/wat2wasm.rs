@@ -3,6 +3,7 @@ use crate::source::{describe_position, TextSource};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
+use std::mem;
 use wain_ast as wasm;
 
 #[cfg_attr(test, derive(Debug))]
@@ -300,7 +301,7 @@ pub fn wat2wasm<'s>(
         local_indices: Indices::new(),
         next_local_idx: 0,
         label_stack: LabelStack::new(source),
-        implicit_type_uses: std::mem::take(&mut parsed.module.implicit_type_uses),
+        implicit_type_uses: mem::take(&mut parsed.module.implicit_type_uses),
         types: Vec::new(),
     };
     let module = parsed.module.transform(&mut ctx)?;

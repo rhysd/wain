@@ -14,14 +14,6 @@ use wain_ast::AsValType;
 
 // TODO: Handle external values for imports and exports
 
-enum ExecState {
-    Breaking(u32), // Breaking
-    Ret,           // Returning from current function call
-    Continue,      // Continuing execution
-}
-
-type ExecResult = Result<ExecState>;
-
 // https://webassembly.github.io/spec/core/exec/numerics.html?highlight=ieee#xref-exec-numerics-op-fmin-mathrm-fmin-n-z-1-z-2
 fn fmin<F: Float>(l: F, r: F) -> F {
     // f32::min() cannot use directly because of NaN handling divergence.
@@ -50,6 +42,14 @@ fn fmax<F: Float>(l: F, r: F) -> F {
         l.max(r)
     }
 }
+
+enum ExecState {
+    Breaking(u32), // Breaking
+    Ret,           // Returning from current function call
+    Continue,      // Continuing execution
+}
+
+type ExecResult = Result<ExecState>;
 
 // State of abtract machine to run wasm code. This struct contains both store and stack
 pub struct Machine<'module, 'source, I: Importer> {

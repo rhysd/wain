@@ -5,6 +5,7 @@ extern crate test;
 #[cfg(test)]
 mod benches {
     use std::env;
+    use std::fmt;
     use std::fs;
     use std::io::{self, Read, Write};
     use test::Bencher;
@@ -29,7 +30,7 @@ mod benches {
         }
     }
 
-    fn unwrap<T, E: std::fmt::Display>(result: Result<T, E>) -> T {
+    fn unwrap<T, E: fmt::Display>(result: Result<T, E>) -> T {
         match result {
             Ok(r) => r,
             Err(e) => panic!("Unexpected error: {}", e),
