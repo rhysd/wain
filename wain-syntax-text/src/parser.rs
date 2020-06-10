@@ -52,9 +52,7 @@ pub enum ParseErrorKind<'source> {
     ImportMustPrecedeOtherDefs {
         what: &'static str,
     },
-    InvalidAlignment {
-        src: &'source str,
-    },
+    InvalidAlignment(u32),
     IdBoundToParam(&'source str),
 }
 
@@ -124,7 +122,7 @@ impl<'s> fmt::Display for ParseError<'s> {
             IdAlreadyDefined{id, prev_idx, what, scope} => write!(f, "identifier '{}' for {} is already defined for index {} in the {}", id, what, prev_idx, scope)?,
             ExpectEndOfFile{after, token} => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
             ImportMustPrecedeOtherDefs{what} => write!(f, "import {} must be put before other function, memory, table and global definitions", what)?,
-            InvalidAlignment{src} => write!(f, "alignment must be power of two but got {}", src)?,
+            InvalidAlignment(align) => write!(f, "alignment must be power of two but got {}", align)?,
             IdBoundToParam(id) => write!(f, "id '{}' must not be bound to parameter of call_indirect", id)?,
         };
 
@@ -519,7 +517,7 @@ impl<'s> Parser<'s> {
                 let (base, digits) = base_and_digits(&kw[6..]);
                 let u = parse_u32_str(self, digits, base, offset)?;
                 if u.count_ones() != 1 {
-                    return self.error(ParseErrorKind::InvalidAlignment { src: &kw[6..] }, offset);
+                    return self.error(ParseErrorKind::InvalidAlignment(u), offset);
                 }
                 self.eat_token(); // Eat 'align' keyword
                 u.trailing_zeros()
@@ -4206,12 +4204,12 @@ mod tests {
         assert_error!(
             r#"i32.load align=0"#,
             Vec<Instruction<'_>>,
-            InvalidAlignment{ .. }
+            InvalidAlignment(0)
         );
         assert_error!(
             r#"i32.load align=7"#,
             Vec<Instruction<'_>>,
-            InvalidAlignment{ .. }
+            InvalidAlignment(7)
         );
     }
 
