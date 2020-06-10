@@ -1,4 +1,5 @@
 use crate::source::describe_position;
+use std::borrow::Cow;
 use std::char;
 use std::fmt;
 use std::iter;
@@ -132,7 +133,7 @@ pub enum Token<'source> {
     Keyword(&'source str), // Too many keywords so it'source not pragmatic to define `Keyword` enum in terms of maintenance
     Int(Sign, NumBase, &'source str),
     Float(Sign, Float<'source>),
-    String(Vec<u8>, &'source str),
+    String(Cow<'source, [u8]>, &'source str),
     Ident(&'source str),
 }
 
@@ -247,10 +248,24 @@ impl<'s> Lexer<'s> {
         while let Some((i, c)) = self.chars.next() {
             match c {
                 '"' => {
-                    let token = Token::String(buf, &self.source[start..i + 1]);
+                    let content = if buf.is_empty() {
+                        // When no escape is included in string literal, keep slice without copy
+                        // omitting the first and last double quotes
+                        Cow::Borrowed(self.source[start + 1..i].as_bytes())
+                    } else {
+                        Cow::Owned(buf)
+                    };
+                    let token = Token::String(content, &self.source[start..i + 1]);
                     return Ok(Some((token, start)));
                 }
                 '\\' => {
+                    if buf.is_empty() {
+                        // Encounter the first escaped character. It means the source of literal is
+                        // different from its content. Need to allocate another buffer to keep its
+                        // content. Note that `+ 1` omits the first '"'
+                        buf.extend_from_slice(self.source[start + 1..i].as_bytes());
+                    }
+
                     match self.chars.next() {
                         Some((_, 't')) => buf.push(b'\t'),
                         Some((_, 'n')) => buf.push(b'\n'),
@@ -261,7 +276,7 @@ impl<'s> Lexer<'s> {
                         Some((_, 'u')) => {
                             match self.chars.next() {
                                 Some((i, '{')) => {
-                                    let ustart = i + 1; // next to '{'
+                                    let brace_start = i + 1; // next to '{'
                                     let uend = loop {
                                         match self.chars.next() {
                                             Some((i, '}')) => break i,
@@ -273,7 +288,7 @@ impl<'s> Lexer<'s> {
                                         }
                                     };
                                     if let Some(c) =
-                                        u32::from_str_radix(&self.source[ustart..uend], 16)
+                                        u32::from_str_radix(&self.source[brace_start..uend], 16)
                                             .ok()
                                             .and_then(char::from_u32)
                                     {
@@ -303,10 +318,11 @@ impl<'s> Lexer<'s> {
                 _ if c.is_ascii_control() => {
                     return self.fail(LexErrorKind::ControlCharInString, start)
                 }
-                _ => {
+                _ if !buf.is_empty() => {
                     let mut b = [0; 4];
                     buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
                 }
+                _ => { /* Have not seen any escape chars yet */ }
             }
         }
 
@@ -1101,8 +1117,8 @@ mod tests {
                 Token::RParen,
                 Token::LParen,
                 Token::Keyword("import"),
-                Token::String(b"env".to_vec(), r#""env""#),
-                Token::String(b"print".to_vec(), r#""print""#),
+                Token::String(Cow::Borrowed(b"env"), r#""env""#),
+                Token::String(Cow::Borrowed(b"print"), r#""print""#),
                 Token::LParen,
                 Token::Keyword("func"),
                 Token::Ident("$print"),
@@ -1123,7 +1139,10 @@ mod tests {
                 Token::Keyword("i32.const"),
                 Token::Int(Sign::Plus, NumBase::Dec, "1024"),
                 Token::RParen,
-                Token::String(b"Hello, world\n\x00".to_vec(), r#""Hello, world\n\00""#),
+                Token::String(
+                    Cow::Borrowed(b"Hello, world\n\x00"),
+                    r#""Hello, world\n\00""#
+                ),
                 Token::RParen,
                 Token::LParen,
                 Token::Keyword("table"),
@@ -1146,7 +1165,7 @@ mod tests {
                 Token::RParen,
                 Token::LParen,
                 Token::Keyword("export"),
-                Token::String(b"memory".to_vec(), r#""memory""#),
+                Token::String(Cow::Borrowed(b"memory"), r#""memory""#),
                 Token::LParen,
                 Token::Keyword("memory"),
                 Token::Ident("$0"),
@@ -1154,7 +1173,7 @@ mod tests {
                 Token::RParen,
                 Token::LParen,
                 Token::Keyword("export"),
-                Token::String(b"_start".to_vec(), r#""_start""#),
+                Token::String(Cow::Borrowed(b"_start"), r#""_start""#),
                 Token::LParen,
                 Token::Keyword("func"),
                 Token::Ident("$_start"),

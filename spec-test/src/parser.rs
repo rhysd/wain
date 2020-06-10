@@ -173,7 +173,7 @@ pub trait Parse<'source>: Sized {
 // Parse {string}
 impl<'s> Parse<'s> for String {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        expect!(parser, Token::String(s, _) => parser.parse_escaped_text(s))
+        expect!(parser, Token::String(s, _) => parser.parse_escaped_text(s.into_owned()))
     }
 }
 
@@ -194,7 +194,7 @@ impl<'s> Parse<'s> for EmbeddedModule {
                 loop {
                     match parser.consume()? {
                         Some(Token::String(s, _)) => {
-                            text.push_str(&parser.parse_escaped_text(s)?);
+                            text.push_str(&parser.parse_escaped_text(s.into_owned())?);
                         }
                         Some(Token::RParen) => {
                             return Ok(EmbeddedModule {

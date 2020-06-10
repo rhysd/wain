@@ -9,6 +9,7 @@ use std::f64;
 use std::fmt;
 use std::mem;
 use std::ops;
+use std::str;
 use std::str::FromStr;
 
 #[cfg_attr(test, derive(Debug))]
@@ -1200,20 +1201,26 @@ impl<'s> Parse<'s> for Vec<FuncResult> {
 }
 
 // https://webassembly.github.io/spec/core/text/values.html#text-name
-impl<'s> Parse<'s> for Name {
+impl<'s> Parse<'s> for Name<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         // A name string must form a valid UTF-8 encoding as defined by Unicode (Section 2.5)
-        match match_token!(parser, "string literal for name", Token::String(s, _) => String::from_utf8(s))
-        {
-            (Ok(s), _) => Ok(Name(s)),
-            (Err(_), offset) => parser.error(ParseErrorKind::MalformedUTF8Encoding, offset),
+        let (content, offset) =
+            match_token!(parser, "string literal for name", Token::String(s, _) => s);
+        let encoded = match content {
+            Cow::Borrowed(slice) => str::from_utf8(slice).ok().map(Cow::Borrowed),
+            Cow::Owned(vec) => String::from_utf8(vec).ok().map(Cow::Owned),
+        };
+        if let Some(encoded) = encoded {
+            Ok(Name(encoded))
+        } else {
+            parser.error(ParseErrorKind::MalformedUTF8Encoding, offset)
         }
     }
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-import
 // Parse "mod name" "name" sequence in import section
-impl<'s> Parse<'s> for Import {
+impl<'s> Parse<'s> for Import<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let mod_name = parser.parse()?;
         let name = parser.parse()?;
@@ -2331,9 +2338,7 @@ impl<'s> Parse<'s> for Data<'s> {
                         data: Cow::Owned(data),
                     });
                 }
-                (Token::String(ref s, _), _) => {
-                    data.extend_from_slice(s);
-                }
+                (Token::String(content, _), _) => data.extend_from_slice(content.as_ref()),
                 (tok, offset) => {
                     return parser.unexpected_token(
                         tok.clone(),
@@ -2406,8 +2411,8 @@ impl<'s> Parse<'s> for MemoryAbbrev<'s> {
                                     "')' or string literal for data of memory section",
                                 )? {
                                     (Token::RParen, _) => break,
-                                    (Token::String(ref s, _), _) => {
-                                        data.extend_from_slice(s);
+                                    (Token::String(content, _), _) => {
+                                        data.extend_from_slice(content.as_ref())
                                     }
                                     (tok, offset) => {
                                         return parser.unexpected_token(

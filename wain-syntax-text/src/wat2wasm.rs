@@ -1,6 +1,5 @@
 use crate::ast as wat;
 use crate::source::{describe_position, TextSource};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::mem;
@@ -386,10 +385,10 @@ impl<'s> Transform<'s> for wat::TypeDef<'s> {
     }
 }
 
-impl<'s> Transform<'s> for wat::Name {
+impl<'s> Transform<'s> for wat::Name<'s> {
     type Target = wasm::Name<'s>;
     fn transform(self, _ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
-        Ok(wasm::Name(Cow::Owned(self.0)))
+        Ok(wasm::Name(self.0))
     }
 }
 
@@ -422,7 +421,7 @@ impl<'s> Transform<'s> for wat::Export<'s> {
     }
 }
 
-impl<'s> Transform<'s> for wat::Import {
+impl<'s> Transform<'s> for wat::Import<'s> {
     type Target = wasm::Import<'s>;
     fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Import {
