@@ -88,7 +88,7 @@ impl<'s> fmt::Display for Error<'s> {
                 what,
             } => write!(
                 f,
-                "{} ({} bytes) is larger than rest input ({} bytes)",
+                "{} ({} bytes) is larger than the rest of input ({} bytes)",
                 what, specified, input
             )?,
             InvalidUtf8 { what, error } => write!(f, "{} must be UTF-8 sequence: {}", what, error)?,
@@ -138,7 +138,7 @@ impl<'s> fmt::Display for Error<'s> {
                 b
             )?,
         }
-        write!(f, " while parsing {}", self.when)?;
+        write!(f, " while parsing {}.", self.when)?;
         describe_position(f, self.source, self.pos)
     }
 }

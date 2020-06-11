@@ -242,7 +242,7 @@ impl<'s> Parse<'s> for Module<'s> {
             _ => return Err(parser.error(ErrorKind::WasmMagicNotFound)),
         }
 
-        parser.check_len(4, "cannot get version")?;
+        parser.check_len(4, "wasm version")?;
         match parser.input {
             [0x01, 0x00, 0x00, 0x00, ..] => parser.eat(4),
             _ => {
