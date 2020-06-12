@@ -81,7 +81,7 @@ impl<'s> fmt::Display for Error<'s> {
                 f,
                 "WebAssembly binary must start with magic 0x00 0x61 0x73 0x6d"
             )?,
-            VersionMismatch(v) => write!(f, "expected version [1 0 0 0] but got {:?}", v)?,
+            VersionMismatch(v) => write!(f, "expected version [1, 0, 0, 0] but got {:?}", v)?,
             LengthOutOfInput {
                 input,
                 specified,
