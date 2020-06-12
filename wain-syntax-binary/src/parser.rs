@@ -188,8 +188,11 @@ impl<'s> Parser<'s> {
 
     // https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec
     fn parse_vec<P: Parse<'s>>(&mut self) -> Result<'s, VecItems<'_, 's, P>> {
-        let size: u32 = self.parse_int()?;
-        Ok(VecItems::new(self, size as usize))
+        let size = self.parse_int::<u32>()? as usize;
+        // At least `size` bytes must be followed. This is necessary to check the size is correct
+        // before actually allocating Vec capacity. Otherwise Vec::reserve crashes (#30)
+        self.check_len(size, "size of vec elements")?;
+        Ok(VecItems::new(self, size))
     }
 
     fn ensure_empty(&self) -> Result<'s, ()> {
@@ -1153,14 +1156,29 @@ mod tests {
         let _: Root<'_, _> = unwrap(parser.parse());
     }
 
-    #[test]
-    fn regression_issue_29() {
-        // .asm.19.asm.195.
-        let bin: &[_] = b"\x00\x61\x73\x6d\x01\x31\x39\x00\x61\x73\x6d\x01\x31\x39\x35\x01";
-        let mut parser = Parser::new(bin);
-        match parser.parse::<Module<'_>>() {
-            Ok(_) => panic!("unexpected success"),
-            Err(err) => assert!(matches!(err.kind, ErrorKind::VersionMismatch(_))),
-        }
+    macro_rules! test_parse_error {
+        ($name:ident, $expected:pat, $bin:expr) => {
+            #[test]
+            fn $name() {
+                let bin: &[_] = $bin;
+                let mut parser = Parser::new(bin);
+                match parser.parse::<Module<'_>>() {
+                    Ok(_) => panic!("unexpected success"),
+                    Err(err) => assert!(matches!(err.kind, $expected)),
+                }
+            }
+        };
     }
+
+    test_parse_error!(
+        regresssion_issue_29,
+        ErrorKind::VersionMismatch(_),
+        b"\x00\x61\x73\x6d\x01\x31\x39\x00\x61\x73\x6d\x01\x31\x39\x35\x01" // .asm.19.asm.195.
+    );
+
+    test_parse_error!(
+        regression_issue_30,
+        ErrorKind::LengthOutOfInput { what: "size of vec elements", .. },
+        b"\x00\x61\x73\x6d\x01\x00\x00\x00\x05\x05\xff\xff\xff\x0d\xfb\x81\x05\x00\x00"
+    );
 }
