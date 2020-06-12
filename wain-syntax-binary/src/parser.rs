@@ -246,9 +246,8 @@ impl<'s> Parse<'s> for Module<'s> {
         match parser.input {
             [0x01, 0x00, 0x00, 0x00, ..] => parser.eat(4),
             _ => {
-                return Err(
-                    parser.error(ErrorKind::VersionMismatch(parser.input.try_into().unwrap()))
-                )
+                let bytes = parser.input[..4].try_into().unwrap();
+                return Err(parser.error(ErrorKind::VersionMismatch(bytes)));
             }
         }
 
@@ -1152,5 +1151,16 @@ mod tests {
         let bin = read_hello_file("hello_struct.wasm");
         let mut parser = Parser::new(&bin);
         let _: Root<'_, _> = unwrap(parser.parse());
+    }
+
+    #[test]
+    fn regression_issue_29() {
+        // .asm.19.asm.195.
+        let bin: &[_] = b"\x00\x61\x73\x6d\x01\x31\x39\x00\x61\x73\x6d\x01\x31\x39\x35\x01";
+        let mut parser = Parser::new(bin);
+        match parser.parse::<Module<'_>>() {
+            Ok(_) => panic!("unexpected success"),
+            Err(err) => assert!(matches!(err.kind, ErrorKind::VersionMismatch(_))),
+        }
     }
 }
