@@ -83,6 +83,17 @@ pub enum ValType {
     F64,
 }
 
+impl<'s> fmt::Display for ValType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            ValType::I32 => "i32",
+            ValType::I64 => "i64",
+            ValType::F32 => "f32",
+            ValType::F64 => "f64",
+        })
+    }
+}
+
 // https://webassembly.github.io/spec/core/text/modules.html#text-import
 #[cfg_attr(test, derive(Debug))]
 pub struct Import<'s> {

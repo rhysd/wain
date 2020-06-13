@@ -20,7 +20,12 @@ pub enum TransformErrorKind<'source> {
         label: Option<&'source str>,
         id: &'source str,
     },
-    FuncTypeMismatch,
+    FuncTypeMismatch {
+        left_params: Vec<wat::ValType>,
+        left_results: Vec<wat::ValType>,
+        right_params: Vec<wat::ValType>,
+        right_results: Vec<wat::ValType>,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -73,7 +78,32 @@ impl<'s> fmt::Display for TransformError<'s> {
                 "in control instruction, no label specified but identifier '{}' is set",
                 id
             )?,
-            FuncTypeMismatch => write!(f, "function type mismatch")?,
+            FuncTypeMismatch {
+                left_params,
+                left_results,
+                right_params,
+                right_results,
+            } => {
+                fn write_type_seq(f: &mut fmt::Formatter<'_>, tys: &[wat::ValType]) -> fmt::Result {
+                    f.write_str("[")?;
+                    let mut tys = tys.iter();
+                    if let Some(ty) = tys.next() {
+                        write!(f, "{}", ty)?;
+                    }
+                    for ty in tys {
+                        write!(f, " {}", ty)?;
+                    }
+                    f.write_str("]")
+                }
+                write!(f, "function type mismatch between ")?;
+                write_type_seq(f, left_params)?;
+                write!(f, " -> ")?;
+                write_type_seq(f, left_results)?;
+                write!(f, " and ")?;
+                write_type_seq(f, right_params)?;
+                write!(f, " -> ")?;
+                write_type_seq(f, right_results)?;
+            }
         }
 
         describe_position(f, self.source, self.offset)
@@ -233,7 +263,12 @@ impl<'s> Context<'s> {
                     Ok(idx)
                 } else {
                     Err(TransformError::new(
-                        TransformErrorKind::FuncTypeMismatch,
+                        TransformErrorKind::FuncTypeMismatch {
+                            left_params: ty.params.iter().map(|p| p.ty).collect(),
+                            left_results: ty.results.iter().map(|p| p.ty).collect(),
+                            right_params: params.iter().map(|p| p.ty).collect(),
+                            right_results: results.iter().map(|p| p.ty).collect(),
+                        },
                         offset,
                         self.source,
                     ))
