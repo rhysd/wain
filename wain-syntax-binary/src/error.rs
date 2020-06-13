@@ -36,6 +36,9 @@ pub enum ErrorKind {
         name: &'static str,
         remaining_bytes: usize,
     },
+    MalformedCodeSize {
+        remaining_bytes: usize,
+    },
     ExpectedEof(u8),
 }
 
@@ -141,6 +144,11 @@ impl<'s> fmt::Display for Error<'s> {
                 f,
                 "expected end of {} but trailing {} bytes still remain",
                 name, remaining_bytes
+            )?,
+            MalformedCodeSize { remaining_bytes } => write!(
+                f,
+                "expected end of code but trailing {} bytes still remain",
+                remaining_bytes
             )?,
             ExpectedEof(b) => write!(
                 f,
