@@ -83,11 +83,22 @@ pub enum ValType {
     F64,
 }
 
+impl<'s> fmt::Display for ValType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            ValType::I32 => "i32",
+            ValType::I64 => "i64",
+            ValType::F32 => "f32",
+            ValType::F64 => "f64",
+        })
+    }
+}
+
 // https://webassembly.github.io/spec/core/text/modules.html#text-import
 #[cfg_attr(test, derive(Debug))]
-pub struct Import {
-    pub mod_name: Name,
-    pub name: Name,
+pub struct Import<'s> {
+    pub mod_name: Name<'s>,
+    pub name: Name<'s>,
 }
 
 // https://webassembly.github.io/spec/core/text/values.html#text-name
@@ -97,7 +108,7 @@ pub struct Import {
 // be allocated in heap. In binary format, it is directly encoded as bytes so borrowing the
 // part of source is enough.
 #[cfg_attr(test, derive(Debug))]
-pub struct Name(pub String);
+pub struct Name<'s>(pub Cow<'s, str>);
 
 // Type index has two flavors. One is specified by user explicitly in u32 index or identifier name.
 // Another is inserted implicitly and automatically by interpreter when typeuse is omitted.
@@ -170,7 +181,7 @@ pub struct GlobalType {
 #[cfg_attr(test, derive(Debug))]
 pub struct Export<'s> {
     pub start: usize,
-    pub name: Name,
+    pub name: Name<'s>,
     pub kind: ExportKind,
     pub idx: Index<'s>,
 }
@@ -187,7 +198,7 @@ pub enum ExportKind {
 // https://webassembly.github.io/spec/core/text/modules.html#text-func
 #[cfg_attr(test, derive(Debug))]
 pub enum FuncKind<'s> {
-    Import(Import),
+    Import(Import<'s>),
     Body {
         locals: Vec<Local<'s>>,
         body: Vec<Instruction<'s>>,
@@ -462,7 +473,7 @@ pub struct Table<'s> {
     pub start: usize,
     pub id: Option<&'s str>,
     pub ty: TableType,
-    pub import: Option<Import>,
+    pub import: Option<Import<'s>>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-data
@@ -480,13 +491,13 @@ pub struct Memory<'s> {
     pub start: usize,
     pub id: Option<&'s str>,
     pub ty: MemType,
-    pub import: Option<Import>,
+    pub import: Option<Import<'s>>,
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#globals
 #[cfg_attr(test, derive(Debug))]
 pub enum GlobalKind<'s> {
-    Import(Import),
+    Import(Import<'s>),
     Init(Vec<Instruction<'s>>),
 }
 #[cfg_attr(test, derive(Debug))]

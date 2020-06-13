@@ -1,6 +1,7 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::mem::size_of;
+use std::ops;
 use wain_ast::ValType;
 
 #[cfg_attr(test, derive(Debug))]
@@ -22,6 +23,19 @@ impl Value {
         }
     }
 }
+
+macro_rules! impl_from_values {
+    ($($ty:ty => $variant:ident),*) => {
+        $(
+            impl From<$ty> for Value {
+                fn from(v: $ty) -> Value {
+                    Value::$variant(v)
+                }
+            }
+        )*
+    };
+}
+impl_from_values!(i32 => I32, i64 => I64, f32 => F32, f64 => F64);
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -90,7 +104,7 @@ impl_le_rw!(u32);
 
 // Trait to handle f32 and f64 in the same way
 pub(crate) trait Float: Clone + Copy + PartialEq + PartialOrd {
-    type UInt: Copy + std::ops::BitOr<Output = Self::UInt> + std::ops::BitAnd<Output = Self::UInt>;
+    type UInt: Copy + ops::BitOr<Output = Self::UInt> + ops::BitAnd<Output = Self::UInt>;
     const ARITHMETIC_NAN: Self::UInt;
     fn is_nan(self) -> bool;
     fn min(self, other: Self) -> Self;

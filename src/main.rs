@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::env;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::io::Read;
@@ -130,7 +131,7 @@ REPOSITORY:
     exit(0);
 }
 
-fn unwrap<T, E: std::fmt::Display>(phase: &'static str, result: Result<T, E>) -> T {
+fn unwrap<T, E: fmt::Display>(phase: &'static str, result: Result<T, E>) -> T {
     match result {
         Ok(r) => r,
         Err(e) => {

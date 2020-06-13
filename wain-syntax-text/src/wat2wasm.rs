@@ -1,8 +1,8 @@
 use crate::ast as wat;
 use crate::source::{describe_position, TextSource};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
+use std::mem;
 use wain_ast as wasm;
 
 #[cfg_attr(test, derive(Debug))]
@@ -20,7 +20,12 @@ pub enum TransformErrorKind<'source> {
         label: Option<&'source str>,
         id: &'source str,
     },
-    FuncTypeMismatch,
+    FuncTypeMismatch {
+        left_params: Vec<wat::ValType>,
+        left_results: Vec<wat::ValType>,
+        right_params: Vec<wat::ValType>,
+        right_results: Vec<wat::ValType>,
+    },
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -70,10 +75,35 @@ impl<'s> fmt::Display for TransformError<'s> {
             )?,
             LabelAndIdMismatch { label: None, id } => write!(
                 f,
-                "in control instruction, label None and identifier '{}' must be the same",
+                "in control instruction, no label specified but identifier '{}' is set",
                 id
             )?,
-            FuncTypeMismatch => write!(f, "function type mismatch")?,
+            FuncTypeMismatch {
+                left_params,
+                left_results,
+                right_params,
+                right_results,
+            } => {
+                fn write_type_seq(f: &mut fmt::Formatter<'_>, tys: &[wat::ValType]) -> fmt::Result {
+                    f.write_str("[")?;
+                    let mut tys = tys.iter();
+                    if let Some(ty) = tys.next() {
+                        write!(f, "{}", ty)?;
+                    }
+                    for ty in tys {
+                        write!(f, " {}", ty)?;
+                    }
+                    f.write_str("]")
+                }
+                write!(f, "function type mismatch between ")?;
+                write_type_seq(f, left_params)?;
+                write!(f, " -> ")?;
+                write_type_seq(f, left_results)?;
+                write!(f, " and ")?;
+                write_type_seq(f, right_params)?;
+                write!(f, " -> ")?;
+                write_type_seq(f, right_results)?;
+            }
         }
 
         describe_position(f, self.source, self.offset)
@@ -123,11 +153,13 @@ impl<'s> LabelStack<'s> {
         let label = match (label, id) {
             (Some(label), Some(id)) if label == id => label,
             (_, Some(id)) => {
+                // When id is set, label must be specified since id indicates matching delimiters.
+                // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
                 return Err(TransformError::new(
                     TransformErrorKind::LabelAndIdMismatch { label, id },
                     offset,
                     self.source,
-                ))
+                ));
             }
             (Some(label), None) => label,
             (None, None) => {
@@ -231,7 +263,12 @@ impl<'s> Context<'s> {
                     Ok(idx)
                 } else {
                     Err(TransformError::new(
-                        TransformErrorKind::FuncTypeMismatch,
+                        TransformErrorKind::FuncTypeMismatch {
+                            left_params: ty.params.iter().map(|p| p.ty).collect(),
+                            left_results: ty.results.iter().map(|p| p.ty).collect(),
+                            right_params: params.iter().map(|p| p.ty).collect(),
+                            right_results: results.iter().map(|p| p.ty).collect(),
+                        },
                         offset,
                         self.source,
                     ))
@@ -300,7 +337,7 @@ pub fn wat2wasm<'s>(
         local_indices: Indices::new(),
         next_local_idx: 0,
         label_stack: LabelStack::new(source),
-        implicit_type_uses: std::mem::take(&mut parsed.module.implicit_type_uses),
+        implicit_type_uses: mem::take(&mut parsed.module.implicit_type_uses),
         types: Vec::new(),
     };
     let module = parsed.module.transform(&mut ctx)?;
@@ -385,10 +422,10 @@ impl<'s> Transform<'s> for wat::TypeDef<'s> {
     }
 }
 
-impl<'s> Transform<'s> for wat::Name {
+impl<'s> Transform<'s> for wat::Name<'s> {
     type Target = wasm::Name<'s>;
     fn transform(self, _ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
-        Ok(wasm::Name(Cow::Owned(self.0)))
+        Ok(wasm::Name(self.0))
     }
 }
 
@@ -421,7 +458,7 @@ impl<'s> Transform<'s> for wat::Export<'s> {
     }
 }
 
-impl<'s> Transform<'s> for wat::Import {
+impl<'s> Transform<'s> for wat::Import<'s> {
     type Target = wasm::Import<'s>;
     fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         Ok(wasm::Import {

@@ -9,6 +9,7 @@ use std::f64;
 use std::fmt;
 use std::mem;
 use std::ops;
+use std::str;
 use std::str::FromStr;
 
 #[cfg_attr(test, derive(Debug))]
@@ -52,9 +53,7 @@ pub enum ParseErrorKind<'source> {
     ImportMustPrecedeOtherDefs {
         what: &'static str,
     },
-    InvalidAlignment {
-        src: &'source str,
-    },
+    InvalidAlignment(u32),
     IdBoundToParam(&'source str),
 }
 
@@ -124,7 +123,7 @@ impl<'s> fmt::Display for ParseError<'s> {
             IdAlreadyDefined{id, prev_idx, what, scope} => write!(f, "identifier '{}' for {} is already defined for index {} in the {}", id, what, prev_idx, scope)?,
             ExpectEndOfFile{after, token} => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
             ImportMustPrecedeOtherDefs{what} => write!(f, "import {} must be put before other function, memory, table and global definitions", what)?,
-            InvalidAlignment{src} => write!(f, "alignment must be power of two but got {}", src)?,
+            InvalidAlignment(align) => write!(f, "alignment must be power of two but got {}", align)?,
             IdBoundToParam(id) => write!(f, "id '{}' must not be bound to parameter of call_indirect", id)?,
         };
 
@@ -519,7 +518,7 @@ impl<'s> Parser<'s> {
                 let (base, digits) = base_and_digits(&kw[6..]);
                 let u = parse_u32_str(self, digits, base, offset)?;
                 if u.count_ones() != 1 {
-                    return self.error(ParseErrorKind::InvalidAlignment { src: &kw[6..] }, offset);
+                    return self.error(ParseErrorKind::InvalidAlignment(u), offset);
                 }
                 self.eat_token(); // Eat 'align' keyword
                 u.trailing_zeros()
@@ -656,28 +655,7 @@ parse_uint_function!(parse_u64_str, u64);
 macro_rules! parse_hex_float_fn {
     ($name:ident, $float:ty, $uint:ty) => {
         fn $name<'s>(parser: &Parser<'s>, sign: Sign, m_str: &'s str, exp: Option<(Sign, &'s str)>, offset: usize) -> Result<'s, $float> {
-            // Parse logic is explained here in Japanese https://github.com/rhysd/wain/pull/9/files#r429552186
-            const ONE: $uint = 1;
-            const BITS: i32 = (mem::size_of::<$float>() * 8) as i32;
-            const SIGNIFICAND_BITS: i32 = <$float>::MANTISSA_DIGITS as i32;
-            const INFINITY: $uint = (ONE << BITS - SIGNIFICAND_BITS) - 1 << SIGNIFICAND_BITS - 1;
-            // For rounding to nearest, at least two more bits than actual fraction is necessary.
-            // Since digits are hexadecimal, it requires 4 bits to read one digit. And 1 bit is
-            // necessary to remember all bits are 1 or not to determine round up or round down.
-            //
-            // Explained at 2. of https://github.com/rhysd/wain/pull/9/files#r429552186
-            const TEMP_SIG_BITS: i32 = SIGNIFICAND_BITS + 4 + 1;
-            // This bias considers to adjust significand to IEEE 754 format. We compute the significand
-            // as unsigned integer. But integer part is 1 bit in IEEE 754 format. (e.g. 0b1011101 -> 0b1.011101).
-            // Since the unsigned integer significand has TEMP_SIG_BITS bits, the value should be multiplid
-            // with 1 / 2^(TEMP_SIG_BITS - 1). It means adding TEMP_SIG_BITS - 1 to exp value.
-            //
-            // https://github.com/rhysd/wain/pull/9/files#r429528984
-            const TEMP_EXP_BIAS: i32 = (<$float>::MAX_EXP - 1) + (TEMP_SIG_BITS - 1);
-            // The same reason as above comment for TEMP_SIG_BITS - 1.
-            // https://github.com/rhysd/wain/pull/9/files#r429529571
-            const TEMP_MAX_EXP: i32 = (<$float>::MAX_EXP - 1) - (TEMP_SIG_BITS - 1);
-            const TEMP_MIN_EXP: i32 = (<$float>::MIN_EXP - 1) - (TEMP_SIG_BITS - 1);
+            // Parse logic is explained in Japanese at https://github.com/rhysd/wain/pull/9/files#r429552186
 
             // Parse exponent part
             let mut temp_exp = if let Some((exp_sign, exp_str)) = exp {
@@ -685,9 +663,9 @@ macro_rules! parse_hex_float_fn {
                     Ok(exp) if exp_sign == Sign::Plus && exp as i32 >= 0 => exp as i32,
                     Ok(exp) if exp_sign == Sign::Minus && exp.wrapping_neg() as i32 <= 0 => exp.wrapping_neg() as i32,
                     _ => {
-                        // Ok(_)  -> u32::MAX <= expu < i32::MIN or i32::MAX < expu <= u32::MAX
-                        // Err(_) -> exp_str is larger than u32::MAX
-                        //           (Lexer guarantees that "invalid digit" cannot occur)
+                        // Ok(exp) means u32::MAX <= exp < i32::MIN or i32::MAX < exp <= u32::MAX.
+                        // Err(_) means exp_str is larger than u32::MAX because the lexer guarantees
+                        // that invalid digit cannot occur.
                         return parser.cannot_parse_num(
                             stringify!($float),
                             format!("exponent value out of range '{}{}'", exp_sign, exp_str),
@@ -699,6 +677,8 @@ macro_rules! parse_hex_float_fn {
                 0
             };
 
+            const SIGNIFICAND_BITS: i32 = <$float>::MANTISSA_DIGITS as i32;
+
             // Parse significand as unsigned integer. and adjust exponent
             // For example, 0x123.456 is parsed into 0x123456p-12 (temp_sig = 0x123456 and temp_exp -= 12)
             let mut temp_sig: $uint = 0;
@@ -709,7 +689,7 @@ macro_rules! parse_hex_float_fn {
                     '_' => continue,
                     // There are not enough significant digits. It means that SIGNIFICAND_BITS bits
                     // are not filled yet in temp_sig
-                    _ if temp_sig < ONE << SIGNIFICAND_BITS + 1 => {
+                    _ if temp_sig < 1 << SIGNIFICAND_BITS + 1 => {
                         // Shift significand & append significant digit
                         // .unwrap() assumes `c` has hexadecimal character thanks to lexer
                         temp_sig = (temp_sig << 4) | c.to_digit(16).unwrap() as $uint;
@@ -734,7 +714,26 @@ macro_rules! parse_hex_float_fn {
 
             // Encode float bits
             if temp_sig != 0 {
-                if temp_sig < ONE << TEMP_SIG_BITS - 1 {
+                const BITS: i32 = (mem::size_of::<$float>() * 8) as i32;
+                // For rounding to nearest, at least two more bits than actual fraction is necessary.
+                // Since digits are hexadecimal, it requires 4 bits to read one digit. And 1 bit is
+                // necessary to remember all bits are 1 or not to determine round up or round down.
+                //
+                // Explained at 2. of https://github.com/rhysd/wain/pull/9/files#r429552186
+                const TEMP_SIG_BITS: i32 = SIGNIFICAND_BITS + 4 + 1;
+                // This bias considers to adjust significand to IEEE 754 format. We compute the significand
+                // as unsigned integer. But integer part is 1 bit in IEEE 754 format. (e.g. 0b1011101 -> 0b1.011101).
+                // Since the unsigned integer significand has TEMP_SIG_BITS bits, the value should be multiplid
+                // with 1 / 2^(TEMP_SIG_BITS - 1). It means adding TEMP_SIG_BITS - 1 to exp value.
+                //
+                // https://github.com/rhysd/wain/pull/9/files#r429528984
+                const TEMP_EXP_BIAS: i32 = (<$float>::MAX_EXP - 1) + (TEMP_SIG_BITS - 1);
+                // The same reason as above comment for TEMP_SIG_BITS - 1.
+                // https://github.com/rhysd/wain/pull/9/files#r429529571
+                const TEMP_MAX_EXP: i32 = (<$float>::MAX_EXP - 1) - (TEMP_SIG_BITS - 1);
+                const TEMP_MIN_EXP: i32 = (<$float>::MIN_EXP - 1) - (TEMP_SIG_BITS - 1);
+
+                if temp_sig < 1 << TEMP_SIG_BITS - 1 {
                     // Normalize significand and adjust exponent. Adjust temp_sig to use all
                     // TEMP_SIG_BITS bits.
                     // Explained at 3. in https://github.com/rhysd/wain/pull/9#discussion_r429552186
@@ -748,7 +747,7 @@ macro_rules! parse_hex_float_fn {
                     // Explained at 4.i. in https://github.com/rhysd/wain/pull/9#discussion_r429552186
 
                     // Mask "implicit" bit. Extract TEMP_SIG_BITS bits from temp_sig
-                    temp_sig &= (ONE << TEMP_SIG_BITS - 1) - 1;
+                    temp_sig &= (1 << TEMP_SIG_BITS - 1) - 1;
 
                     // Round to nearest even
                     // 0x2f is 0b101111 and 0x10 is 0b001_0000.
@@ -782,7 +781,7 @@ macro_rules! parse_hex_float_fn {
                     // Adjust significand to set exponent part to MIN_EXP - 1. Here, set 1 to LSB
                     // for rounding to nearest when the shifted bits contain 1
                     let shift = TEMP_MIN_EXP - temp_exp;
-                    let lsb = ((temp_sig & (ONE << shift) - 1) != 0) as $uint;
+                    let lsb = ((temp_sig & (1 << shift) - 1) != 0) as $uint;
                     temp_sig = (temp_sig >> shift) | lsb;
 
                     // Round to nearest even
@@ -790,13 +789,13 @@ macro_rules! parse_hex_float_fn {
                         temp_sig += 0x10;
                     }
 
-                    // encode significand (biased exponent = 0). Note that significand may be zero
+                    // Encode significand (biased exponent = 0). Note that significand may be zero
                     temp_sig >> 5
                 } else if TEMP_MAX_EXP < temp_exp {
-                    // infinity
-                    INFINITY
+                    // Infinity
+                    (1 << BITS - SIGNIFICAND_BITS) - 1 << SIGNIFICAND_BITS - 1
                 } else {
-                    // zero
+                    // Zero
                     0
                 };
             }
@@ -1202,20 +1201,26 @@ impl<'s> Parse<'s> for Vec<FuncResult> {
 }
 
 // https://webassembly.github.io/spec/core/text/values.html#text-name
-impl<'s> Parse<'s> for Name {
+impl<'s> Parse<'s> for Name<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         // A name string must form a valid UTF-8 encoding as defined by Unicode (Section 2.5)
-        match match_token!(parser, "string literal for name", Token::String(s, _) => String::from_utf8(s))
-        {
-            (Ok(s), _) => Ok(Name(s)),
-            (Err(_), offset) => parser.error(ParseErrorKind::MalformedUTF8Encoding, offset),
+        let (content, offset) =
+            match_token!(parser, "string literal for name", Token::String(s, _) => s);
+        let encoded = match content {
+            Cow::Borrowed(slice) => str::from_utf8(slice).ok().map(Cow::Borrowed),
+            Cow::Owned(vec) => String::from_utf8(vec).ok().map(Cow::Owned),
+        };
+        if let Some(encoded) = encoded {
+            Ok(Name(encoded))
+        } else {
+            parser.error(ParseErrorKind::MalformedUTF8Encoding, offset)
         }
     }
 }
 
 // https://webassembly.github.io/spec/core/text/modules.html#text-import
 // Parse "mod name" "name" sequence in import section
-impl<'s> Parse<'s> for Import {
+impl<'s> Parse<'s> for Import<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let mod_name = parser.parse()?;
         let name = parser.parse()?;
@@ -2333,9 +2338,7 @@ impl<'s> Parse<'s> for Data<'s> {
                         data: Cow::Owned(data),
                     });
                 }
-                (Token::String(ref s, _), _) => {
-                    data.extend_from_slice(s);
-                }
+                (Token::String(content, _), _) => data.extend_from_slice(content.as_ref()),
                 (tok, offset) => {
                     return parser.unexpected_token(
                         tok.clone(),
@@ -2408,8 +2411,8 @@ impl<'s> Parse<'s> for MemoryAbbrev<'s> {
                                     "')' or string literal for data of memory section",
                                 )? {
                                     (Token::RParen, _) => break,
-                                    (Token::String(ref s, _), _) => {
-                                        data.extend_from_slice(s);
+                                    (Token::String(content, _), _) => {
+                                        data.extend_from_slice(content.as_ref())
                                     }
                                     (tok, offset) => {
                                         return parser.unexpected_token(
@@ -4206,12 +4209,12 @@ mod tests {
         assert_error!(
             r#"i32.load align=0"#,
             Vec<Instruction<'_>>,
-            InvalidAlignment{ .. }
+            InvalidAlignment(0)
         );
         assert_error!(
             r#"i32.load align=7"#,
             Vec<Instruction<'_>>,
-            InvalidAlignment{ .. }
+            InvalidAlignment(7)
         );
     }
 
