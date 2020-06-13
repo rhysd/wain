@@ -192,11 +192,14 @@ impl<'s> Parser<'s> {
         Ok(VecItems::new(self, size as usize))
     }
 
-    fn ensure_empty(&self) -> Result<'s, ()> {
+    fn check_section_end(&self, section_id: u8) -> Result<'s, ()> {
         if self.input.is_empty() {
             Ok(())
         } else {
-            Err(self.error(ErrorKind::MalformedSectionSize))
+            Err(self.error(ErrorKind::MalformedSectionSize {
+                name: section_name(section_id),
+                remaining_bytes: self.input.len(),
+            }))
         }
     }
 }
@@ -228,7 +231,7 @@ impl<'s> Parse<'s> for Module<'s> {
             if parser.input.starts_with(&[id]) {
                 let mut inner = parser.section_parser()?;
                 let vec = inner.parse_vec()?.into_vec();
-                inner.ensure_empty()?;
+                inner.check_section_end(id)?;
                 vec
             } else {
                 Ok(vec![])
@@ -275,7 +278,7 @@ impl<'s> Parse<'s> for Module<'s> {
                     ImportDesc::Global(g) => globals.push(g),
                 }
             }
-            inner.ensure_empty()?;
+            inner.check_section_end(2)?;
         }
 
         parser.ignore_custom_sections()?;
@@ -289,7 +292,7 @@ impl<'s> Parse<'s> for Module<'s> {
         parser.ignore_custom_sections()?;
 
         // Table section
-        if let [0x04, ..] = parser.input {
+        if let [4, ..] = parser.input {
             let mut inner = parser.section_parser()?;
             {
                 let vec = inner.parse_vec()?;
@@ -298,13 +301,13 @@ impl<'s> Parse<'s> for Module<'s> {
                     tables.push(table?);
                 }
             }
-            inner.ensure_empty()?;
+            inner.check_section_end(4)?;
         }
 
         parser.ignore_custom_sections()?;
 
         // Memory section
-        if let [0x05, ..] = parser.input {
+        if let [5, ..] = parser.input {
             let mut inner = parser.section_parser()?;
             {
                 let vec = inner.parse_vec()?;
@@ -313,13 +316,13 @@ impl<'s> Parse<'s> for Module<'s> {
                     memories.push(memory?);
                 }
             }
-            inner.ensure_empty()?;
+            inner.check_section_end(5)?;
         }
 
         parser.ignore_custom_sections()?;
 
         // Global section
-        if let [0x06, ..] = parser.input {
+        if let [6, ..] = parser.input {
             let mut inner = parser.section_parser()?;
             {
                 let vec = inner.parse_vec()?;
@@ -328,7 +331,7 @@ impl<'s> Parse<'s> for Module<'s> {
                     globals.push(global?);
                 }
             }
-            inner.ensure_empty()?;
+            inner.check_section_end(6)?;
         }
 
         parser.ignore_custom_sections()?;
@@ -341,7 +344,7 @@ impl<'s> Parse<'s> for Module<'s> {
         let entrypoint = if let [8, ..] = parser.input {
             let mut inner = parser.section_parser()?;
             let start = inner.parse()?;
-            inner.ensure_empty()?;
+            inner.check_section_end(8)?;
             Some(start)
         } else {
             None
@@ -377,7 +380,7 @@ impl<'s> Parse<'s> for Module<'s> {
                     });
                 }
             }
-            inner.ensure_empty()?
+            inner.check_section_end(10)?
         } else if !func_indices.is_empty() {
             return Err(parser.error(ErrorKind::FuncCodeLengthMismatch {
                 num_funcs: func_indices.len(),
@@ -960,7 +963,7 @@ impl<'s> Parse<'s> for Code {
             if let Some(c) = loc.count.checked_add(locals.len() as u32) {
                 locals.resize(c as usize, loc.ty);
             } else {
-                return Err(parser.error(ErrorKind::TooManyLocalVariables));
+                return Err(parser.error(ErrorKind::TooManyLocalVariables(locals.len())));
             }
         }
 
