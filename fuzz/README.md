@@ -22,3 +22,4 @@ After crash was found, the input which caused the crash is put in `fuzz/artifact
 Current targets are:
 
 - `binary_parser`: Fuzzing `wain_syntax_binary::Parser`
+- `text_parser`: Fuzzing `wain_syntax_text::Parser`
