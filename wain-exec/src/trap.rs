@@ -86,6 +86,20 @@ impl Trap {
         )
     }
 
+    pub(crate) fn out_of_range<N: Into<Value>>(
+        num: N,
+        type_name: &'static str,
+        offset: usize,
+    ) -> Box<Self> {
+        Self::new(
+            TrapReason::ValueOutOfRange {
+                src_val: num.into(),
+                dest_type: type_name,
+            },
+            offset,
+        )
+    }
+
     pub(crate) fn new(reason: TrapReason, offset: usize) -> Box<Trap> {
         Box::new(Trap { reason, offset })
     }

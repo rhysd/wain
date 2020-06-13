@@ -24,6 +24,19 @@ impl Value {
     }
 }
 
+macro_rules! impl_from_values {
+    ($($ty:ty => $variant:ident),*) => {
+        $(
+            impl From<$ty> for Value {
+                fn from(v: $ty) -> Value {
+                    Value::$variant(v)
+                }
+            }
+        )*
+    };
+}
+impl_from_values!(i32 => I32, i64 => I64, f32 => F32, f64 => F64);
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
