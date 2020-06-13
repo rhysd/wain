@@ -70,7 +70,7 @@ impl<'s> fmt::Display for TransformError<'s> {
             )?,
             LabelAndIdMismatch { label: None, id } => write!(
                 f,
-                "in control instruction, label None and identifier '{}' must be the same",
+                "in control instruction, no label specified but identifier '{}' is set",
                 id
             )?,
             FuncTypeMismatch => write!(f, "function type mismatch")?,
@@ -123,11 +123,13 @@ impl<'s> LabelStack<'s> {
         let label = match (label, id) {
             (Some(label), Some(id)) if label == id => label,
             (_, Some(id)) => {
+                // When id is set, label must be specified since id indicates matching delimiters.
+                // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
                 return Err(TransformError::new(
                     TransformErrorKind::LabelAndIdMismatch { label, id },
                     offset,
                     self.source,
-                ))
+                ));
             }
             (Some(label), None) => label,
             (None, None) => {
