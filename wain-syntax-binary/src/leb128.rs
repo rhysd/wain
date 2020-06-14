@@ -40,7 +40,7 @@ impl Leb128 for i32 {
 fn read_64(bytes: &[u8], signed: bool) -> Result<(u64, usize)> {
     let mut ret = 0;
 
-    for (idx, b) in bytes.iter().cloned().enumerate() {
+    for (idx, b) in bytes.iter().copied().enumerate() {
         // 7bits * 9 = 63bits
         // unsigned:
         //   Next 1byte (idx=10) must be 0 or 1
@@ -71,7 +71,7 @@ fn read_64(bytes: &[u8], signed: bool) -> Result<(u64, usize)> {
 fn read_32(bytes: &[u8], signed: bool) -> Result<(u32, usize)> {
     let mut ret = 0;
 
-    for (idx, b) in bytes.iter().cloned().enumerate() {
+    for (idx, b) in bytes.iter().copied().enumerate() {
         // 7bits * 4 = 28bits.
         // unsigned:
         //   Next byte must be <= 0b1111
