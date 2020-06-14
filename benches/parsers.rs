@@ -16,63 +16,52 @@ mod parser_benches {
         file
     }
 
-    mod binary {
-        use super::*;
+    macro_rules! bench_suites {
+        ($($name:ident,)+) => {
+            mod binary {
+                use super::*;
+                $(
+                    #[bench]
+                    pub fn $name(b: &mut Bencher) {
+                        let file = example_path(concat!(stringify!($name), ".wasm"));
+                        let source = fs::read(file).unwrap();
+                        b.iter(|| {
+                            if let Err(err) = wain_syntax_binary::parse(&source) {
+                                panic!("binary parse failed at {}.wasm: {}", stringify!($name), err);
+                            }
+                        });
+                    }
+                )+
+            }
 
-        macro_rules! bench_binary_parser {
-            ($name:ident, $file:expr) => {
-                #[bench]
-                pub fn $name(b: &mut Bencher) {
-                    let file = example_path($file);
-                    let source = fs::read(file).unwrap();
-                    b.iter(|| {
-                        if let Err(err) = wain_syntax_binary::parse(&source) {
-                            panic!("binary parse failed at {}: {}", $file, err);
-                        }
-                    });
-                }
-            };
+            mod text {
+                use super::*;
+                $(
+                    #[bench]
+                    pub fn $name(b: &mut Bencher) {
+                        let file = example_path(concat!(stringify!($name), ".wat"));
+                        let source = fs::read_to_string(file).unwrap();
+                        b.iter(|| {
+                            if let Err(err) = wain_syntax_text::parse(&source) {
+                                panic!("text parse failed at {}.wat: {}", stringify!($name), err);
+                            }
+                        });
+                    }
+                )+
+            }
         }
-
-        bench_binary_parser!(brainfxxk, "brainfxxk.wasm");
-        bench_binary_parser!(guessing_game, "guessing_game.wasm");
-        bench_binary_parser!(mandelbrot, "mandelbrot.wasm");
-        bench_binary_parser!(mt19937, "mt19937.wasm");
-        bench_binary_parser!(nbodies, "nbodies.wasm");
-        bench_binary_parser!(n_queens, "n_queens.wasm");
-        bench_binary_parser!(pi, "pi.wasm");
-        bench_binary_parser!(primes, "primes.wasm");
-        bench_binary_parser!(quicksort, "quicksort.wasm");
-        bench_binary_parser!(sqrt, "sqrt.wasm");
     }
 
-    mod text {
-        use super::*;
-
-        macro_rules! bench_text_parser {
-            ($name:ident, $file:expr) => {
-                #[bench]
-                pub fn $name(b: &mut Bencher) {
-                    let file = example_path($file);
-                    let source = fs::read_to_string(file).unwrap();
-                    b.iter(|| {
-                        if let Err(err) = wain_syntax_text::parse(&source) {
-                            panic!("text parse failed at {}: {}", $file, err);
-                        }
-                    });
-                }
-            };
-        }
-
-        bench_text_parser!(brainfxxk, "brainfxxk.wat");
-        bench_text_parser!(guessing_game, "guessing_game.wat");
-        bench_text_parser!(mandelbrot, "mandelbrot.wat");
-        bench_text_parser!(mt19937, "mt19937.wat");
-        bench_text_parser!(nbodies, "nbodies.wat");
-        bench_text_parser!(n_queens, "n_queens.wat");
-        bench_text_parser!(pi, "pi.wat");
-        bench_text_parser!(primes, "primes.wat");
-        bench_text_parser!(quicksort, "quicksort.wat");
-        bench_text_parser!(sqrt, "sqrt.wat");
-    }
+    bench_suites!(
+        brainfxxk,
+        guessing_game,
+        mandelbrot,
+        mt19937,
+        nbodies,
+        n_queens,
+        pi,
+        primes,
+        quicksort,
+        sqrt,
+    );
 }
