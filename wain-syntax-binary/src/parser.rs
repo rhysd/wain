@@ -970,6 +970,11 @@ impl<'s> Parse<'s> for Code {
         }
 
         let Expr(expr) = inner.parse()?;
+        if !inner.input.is_empty() {
+            return Err(inner.error(ErrorKind::MalformedCodeSize {
+                remaining_bytes: inner.input.len(),
+            }));
+        }
         Ok(Code {
             start,
             locals,
@@ -1183,5 +1188,15 @@ mod tests {
         regression_issue_30,
         ErrorKind::LengthOutOfInput { what: "size of vec elements", .. },
         b"\x00\x61\x73\x6d\x01\x00\x00\x00\x05\x05\xff\xff\xff\x0d\xfb\x81\x05\x00\x00"
+    );
+
+    test_parse_error!(
+        code_size,
+        ErrorKind::MalformedCodeSize { remaining_bytes: 1 },
+        b"\x00\x61\x73\x6d\
+          \x01\x00\x00\x00\
+          \x01\x04\x01\x60\x00\x00\
+          \x03\x02\x01\x00\
+          \x0a\x05\x01\x03\x00\x0b\x0b"
     );
 }
