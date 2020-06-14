@@ -58,6 +58,10 @@ maintenance = { status = "actively-developed" }
 name = "examples"
 path = "benches/examples.rs"
 
+[[bench]]
+name = "parsers"
+path = "benches/parsers.rs"
+
 [[example]]
 name = "execute"
 path = "examples/api/execute.rs"
