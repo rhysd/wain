@@ -3,7 +3,7 @@
 extern crate test;
 
 #[cfg(test)]
-mod benches {
+mod example_benches {
     use std::env;
     use std::fmt;
     use std::fs;
@@ -46,7 +46,7 @@ mod benches {
         unwrap(validate(&ast));
         let importer = DefaultImporter::with_stdio(Discard, Discard);
         let mut machine = unwrap(Machine::instantiate(&ast.module, importer));
-        unwrap(machine.execute());
+        unwrap(machine.invoke("_start", &[]));
     }
 
     macro_rules! bench_example {

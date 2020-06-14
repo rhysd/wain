@@ -152,7 +152,7 @@ impl Importer for YourOwnImporter {
 let ast = ...; // Parse abstract syntax tree and validate it
 
 let mut machine = Machine::instantiate(&ast.module, YourOwnImporter{ /* ... */ }).unwrap();
-let run = machine.execute().unwrap();
+let result = machine.invoke("do_something", &[]);
 ```
 
 Working examples can be seen at [examples/api/ directory][examples]
