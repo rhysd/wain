@@ -39,15 +39,8 @@ impl Leb128 for i32 {
 
 fn read_64(bytes: &[u8], signed: bool) -> Result<(u64, usize)> {
     let mut ret = 0;
-    let mut idx = 0;
 
-    loop {
-        if bytes.len() <= idx {
-            return Err(Box::new(ErrorKind::UnexpectedEof {
-                expected: "part of LEB128-encoded integer",
-            }));
-        }
-        let b = bytes[idx];
+    for (idx, b) in bytes.iter().copied().enumerate() {
         // 7bits * 9 = 63bits
         // unsigned:
         //   Next 1byte (idx=10) must be 0 or 1
@@ -63,30 +56,22 @@ fn read_64(bytes: &[u8], signed: bool) -> Result<(u64, usize)> {
         if b & 0b1000_0000 == 0 {
             let len = idx + 1;
             // For negative signed integers, sign bit must be extended to fill significant bits
-            if signed {
-                let shift = len * 7;
-                if shift < 64 && b & 0b0100_0000 != 0 {
-                    ret |= !0 << shift;
-                }
+            if signed && len < 10 && b & 0b0100_0000 != 0 {
+                ret |= !0 << (len * 7);
             }
             return Ok((ret, len));
         }
-
-        idx += 1;
     }
+
+    Err(Box::new(ErrorKind::UnexpectedEof {
+        expected: "part of LEB128-encoded integer",
+    }))
 }
 
 fn read_32(bytes: &[u8], signed: bool) -> Result<(u32, usize)> {
     let mut ret = 0;
-    let mut idx = 0;
 
-    loop {
-        if bytes.len() <= idx {
-            return Err(Box::new(ErrorKind::UnexpectedEof {
-                expected: "part of LEB128-encoded integer",
-            }));
-        }
-        let b = bytes[idx];
+    for (idx, b) in bytes.iter().copied().enumerate() {
         // 7bits * 4 = 28bits.
         // unsigned:
         //   Next byte must be <= 0b1111
@@ -103,17 +88,16 @@ fn read_32(bytes: &[u8], signed: bool) -> Result<(u32, usize)> {
         if b & 0b1000_0000 == 0 {
             let len = idx + 1;
             // For negative signed integers, sign bit must be extended
-            if signed {
-                let shift = len * 7;
-                if signed && shift < 32 && b & 0b0100_0000 != 0 {
-                    ret |= !0 << shift
-                }
+            if signed && len < 5 && b & 0b0100_0000 != 0 {
+                ret |= !0 << (len * 7);
             }
             return Ok((ret, len));
         }
-
-        idx += 1;
     }
+
+    Err(Box::new(ErrorKind::UnexpectedEof {
+        expected: "part of LEB128-encoded integer",
+    }))
 }
 
 #[cfg(test)]
