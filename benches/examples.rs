@@ -37,23 +37,25 @@ mod example_benches {
         }
     }
 
-    fn run_example(name: &'static str) {
+    fn read_source(name: &'static str) -> Vec<u8> {
         let mut file = env::current_dir().unwrap();
         file.push("examples");
         file.push(name);
-        let source = fs::read(file).unwrap();
-        let ast = unwrap(parse(&source));
-        unwrap(validate(&ast));
-        let importer = DefaultImporter::with_stdio(Discard, Discard);
-        let mut machine = unwrap(Machine::instantiate(&ast.module, importer));
-        unwrap(machine.invoke("_start", &[]));
+        fs::read(file).unwrap()
     }
 
     macro_rules! bench_example {
         ($name:ident, $file:expr) => {
             #[bench]
             pub fn $name(b: &mut Bencher) {
-                b.iter(|| run_example($file));
+                let source = read_source($file);
+                b.iter(|| {
+                    let ast = unwrap(parse(&source));
+                    unwrap(validate(&ast));
+                    let importer = DefaultImporter::with_stdio(Discard, Discard);
+                    let mut machine = unwrap(Machine::instantiate(&ast.module, importer));
+                    unwrap(machine.invoke("_start", &[]));
+                });
             }
         };
     }
