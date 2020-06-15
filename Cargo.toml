@@ -62,6 +62,10 @@ path = "benches/examples.rs"
 name = "parsers"
 path = "benches/parsers.rs"
 
+[[bench]]
+name = "validation"
+path = "benches/validation.rs"
+
 [[example]]
 name = "execute"
 path = "examples/api/execute.rs"

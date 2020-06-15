@@ -16,3 +16,4 @@ Followings are the list of benchmark suite specified to `{suite}`:
 
 - `examples`: Executing examples
 - `parsers`: Parsing binary/text examples
+- `validation`: Validating examples
