@@ -2,6 +2,7 @@
 // - https://webassembly.github.io/spec/core/valid/index.html
 // - https://webassembly.github.io/spec/core/appendix/algorithm.html#algo-valid
 #![forbid(unsafe_code)]
+#![warn(clippy::dbg_macro)]
 
 extern crate wain_ast;
 

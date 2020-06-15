@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![warn(clippy::dbg_macro)]
 #![allow(clippy::cognitive_complexity)]
 
 extern crate wain_ast;

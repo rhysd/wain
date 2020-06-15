@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![warn(clippy::dbg_macro)]
 
 use std::env;
 use std::fmt;
