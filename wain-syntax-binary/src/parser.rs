@@ -206,17 +206,17 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn push_vec<P: Parse<'s>>(&mut self, section_id: u8, vec: &mut Vec<P>) -> Result<'s, ()> {
-        if self.input.get(0).copied() == Some(section_id) {
-            let mut inner = self.section_parser()?;
-            {
+    fn push_vec_items<P: Parse<'s>>(&mut self, section_id: u8, vec: &mut Vec<P>) -> Result<'s, ()> {
+        if let [b, ..] = self.input {
+            if *b == section_id {
+                let mut inner = self.section_parser()?;
                 let vec_items = inner.parse_vec()?;
                 vec.reserve(vec_items.count);
                 for elem in vec_items {
                     vec.push(elem?);
                 }
+                inner.check_section_end(section_id)?;
             }
-            inner.check_section_end(section_id)?;
         }
         Ok(())
     }
@@ -309,17 +309,17 @@ impl<'s> Parse<'s> for Module<'s> {
         parser.ignore_custom_sections()?;
 
         // Table section
-        parser.push_vec(4, &mut tables)?;
+        parser.push_vec_items(4, &mut tables)?;
 
         parser.ignore_custom_sections()?;
 
         // Memory section
-        parser.push_vec(5, &mut memories)?;
+        parser.push_vec_items(5, &mut memories)?;
 
         parser.ignore_custom_sections()?;
 
         // Global section
-        parser.push_vec(6, &mut globals)?;
+        parser.push_vec_items(6, &mut globals)?;
 
         parser.ignore_custom_sections()?;
 
@@ -347,26 +347,27 @@ impl<'s> Parse<'s> for Module<'s> {
         // Code section
         if let [10, ..] = parser.input {
             let mut inner = parser.section_parser()?;
-            {
-                let codes = inner.parse_vec::<Code>()?;
-                if codes.count != func_indices.len() {
-                    return Err(codes.parser.error(ErrorKind::FuncCodeLengthMismatch {
-                        num_funcs: func_indices.len(),
-                        num_codes: codes.count as usize,
-                    }));
-                }
-                for (code, typeidx) in codes.zip(func_indices.into_iter()) {
-                    let code = code?;
-                    funcs.push(Func {
-                        start: code.start,
-                        idx: typeidx,
-                        kind: FuncKind::Body {
-                            locals: code.locals,
-                            expr: code.expr,
-                        },
-                    });
-                }
+
+            let codes = inner.parse_vec::<Code>()?;
+            if codes.count != func_indices.len() {
+                return Err(codes.parser.error(ErrorKind::FuncCodeLengthMismatch {
+                    num_funcs: func_indices.len(),
+                    num_codes: codes.count as usize,
+                }));
             }
+
+            for (code, typeidx) in codes.zip(func_indices.into_iter()) {
+                let code = code?;
+                funcs.push(Func {
+                    start: code.start,
+                    idx: typeidx,
+                    kind: FuncKind::Body {
+                        locals: code.locals,
+                        expr: code.expr,
+                    },
+                });
+            }
+
             inner.check_section_end(10)?
         } else if !func_indices.is_empty() {
             return Err(parser.error(ErrorKind::FuncCodeLengthMismatch {
