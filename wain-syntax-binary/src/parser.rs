@@ -205,6 +205,21 @@ impl<'s> Parser<'s> {
             }))
         }
     }
+
+    fn push_vec<P: Parse<'s>>(&mut self, section_id: u8, vec: &mut Vec<P>) -> Result<'s, ()> {
+        if self.input.get(0).copied() == Some(section_id) {
+            let mut inner = self.section_parser()?;
+            {
+                let vec_items = inner.parse_vec()?;
+                vec.reserve(vec_items.count);
+                for elem in vec_items {
+                    vec.push(elem?);
+                }
+            }
+            inner.check_section_end(section_id)?;
+        }
+        Ok(())
+    }
 }
 
 pub trait Parse<'source>: Sized {
@@ -294,47 +309,17 @@ impl<'s> Parse<'s> for Module<'s> {
         parser.ignore_custom_sections()?;
 
         // Table section
-        if let [4, ..] = parser.input {
-            let mut inner = parser.section_parser()?;
-            {
-                let vec = inner.parse_vec()?;
-                tables.reserve(vec.count);
-                for table in vec {
-                    tables.push(table?);
-                }
-            }
-            inner.check_section_end(4)?;
-        }
+        parser.push_vec(4, &mut tables)?;
 
         parser.ignore_custom_sections()?;
 
         // Memory section
-        if let [5, ..] = parser.input {
-            let mut inner = parser.section_parser()?;
-            {
-                let vec = inner.parse_vec()?;
-                memories.reserve(vec.count);
-                for memory in vec {
-                    memories.push(memory?);
-                }
-            }
-            inner.check_section_end(5)?;
-        }
+        parser.push_vec(5, &mut memories)?;
 
         parser.ignore_custom_sections()?;
 
         // Global section
-        if let [6, ..] = parser.input {
-            let mut inner = parser.section_parser()?;
-            {
-                let vec = inner.parse_vec()?;
-                globals.reserve(vec.count);
-                for global in vec {
-                    globals.push(global?);
-                }
-            }
-            inner.check_section_end(6)?;
-        }
+        parser.push_vec(6, &mut globals)?;
 
         parser.ignore_custom_sections()?;
 
