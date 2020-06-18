@@ -63,5 +63,6 @@ mod parser_benches {
         primes,
         quicksort,
         sqrt,
+        y_combinator,
     );
 }

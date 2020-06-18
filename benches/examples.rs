@@ -73,4 +73,5 @@ mod example_benches {
     bench_example!(quicksort, "quicksort.wasm");
     bench_example!(mt19937, "mt19937.wasm");
     bench_example!(n_queens, "n_queens.wasm");
+    bench_example!(y_combinator, "y_combinator.wasm");
 }
