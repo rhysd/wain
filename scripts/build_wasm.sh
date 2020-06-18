@@ -5,14 +5,22 @@ set -e
 export PATH=/usr/local/opt/llvm/bin:$PATH
 
 _build_c_file() {
-    local src base opts
+    local src base opts clang flags
     src="$1"
     base="${src%.*}"
     opts=("${@:2}")
 
+    if [[ "$src" == *.cpp ]]; then
+        clang="clang++"
+        flags="-std=c++17"
+    else
+        clang="clang"
+        flags=""
+    fi
+
     set -x
 
-    clang -nostdlib --target=wasm32 -Wl,--allow-undefined "${src}" -o "${base}.wasm" "${opts[@]}"
+    "$clang" -nostdlib --target=wasm32 -Wl,--allow-undefined "${flags}" "${src}" -o "${base}.wasm" "${opts[@]}"
     wasm2wat "${base}.wasm" > "${base}.wat"
 
     { set +x; } 2>/dev/null
