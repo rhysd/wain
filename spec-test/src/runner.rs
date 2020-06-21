@@ -233,21 +233,21 @@ impl<W: Write> Runner<W> {
                 Summary::new(1, 0, 0)
             }
         } else {
-            match Parser::new(&source).parse::<wast::Root<'_>>() {
+            match Parser::new(&source).parse::<wast::Script<'_>>() {
                 Err(err) => {
                     self.report(1, 1, err);
                     Summary::new(0, 1, 0)
                 }
-                Ok(root) if SKIPPED.contains(&file) => {
-                    // All directives are skipped for this file
-                    Summary::new(1, 0, root.directives.len() as u32)
+                Ok(script) if SKIPPED.contains(&file) => {
+                    // All commands are skipped for this file
+                    Summary::new(1, 0, script.commands.len() as u32)
                 }
-                Ok(root) => {
+                Ok(script) => {
                     let mut tester = Tester {
                         sum: Summary::new(1, 0, 0),
                         errs: vec![],
                         source: &source,
-                        root: &root,
+                        script: &script,
                     };
                     tester.test(&self.crasher);
                     let num_errs = tester.errs.len();
@@ -301,8 +301,8 @@ impl<'m, 's> Instances<'m, 's> {
         Ok(machine)
     }
 
-    fn push_with_idx(&mut self, directive_idx: usize) -> Result<'s, ()> {
-        let (module, pos) = self.idx_to_mod.get(&directive_idx).unwrap();
+    fn push_with_idx(&mut self, cmd_idx: usize) -> Result<'s, ()> {
+        let (module, pos) = self.idx_to_mod.get(&cmd_idx).unwrap();
         self.push(module, *pos)
     }
 
@@ -354,7 +354,7 @@ struct Tester<'a> {
     sum: Summary,
     errs: Vec<Error<'a>>,
     source: &'a str,
-    root: &'a wast::Root<'a>,
+    script: &'a wast::Script<'a>,
 }
 
 impl<'a> Tester<'a> {
@@ -404,8 +404,8 @@ impl<'a> Tester<'a> {
 
     fn parse_embedded_modules(&mut self) -> IndexToModule<'a> {
         let mut mods = HashMap::new();
-        for (idx, directive) in self.root.directives.iter().enumerate() {
-            if let wast::Directive::EmbeddedModule(e) = directive {
+        for (idx, cmd) in self.script.commands.iter().enumerate() {
+            if let wast::Command::EmbeddedModule(e) = cmd {
                 if let Some(m) = self.check(self.parse_embedded_module(e)) {
                     mods.insert(idx, m);
                 }
@@ -421,30 +421,30 @@ impl<'a> Tester<'a> {
         // Give up assertions check when some module cannot be parsed because some target modules
         // for assertion don't exist
         if self.sum.failed > 0 {
-            let num_directives = self.root.directives.len() as u32;
+            let num_cmds = self.script.commands.len() as u32;
             let num_modules = idx_to_mod.len() as u32;
-            let skipped = num_directives - num_modules - self.sum.failed;
+            let skipped = num_cmds - num_modules - self.sum.failed;
             self.sum.total += skipped;
             self.sum.skipped += skipped;
             return;
         }
 
         let mut instances = Instances::new(&idx_to_mod, self.source);
-        for (idx, directive) in self.root.directives.iter().enumerate() {
-            let result = self.test_directive(idx, directive, &mut instances, crasher);
+        for (idx, cmd) in self.script.commands.iter().enumerate() {
+            let result = self.test_command(idx, cmd, &mut instances, crasher);
             self.check(result);
         }
     }
 
-    fn test_directive<'m>(
+    fn test_command<'m>(
         &self,
         idx: usize,
-        directive: &'a wast::Directive<'a>,
+        command: &'a wast::Command<'a>,
         instances: &mut Instances<'m, 'a>,
         crasher: &CrashTester,
     ) -> Result<'a, ()> {
-        use wast::Directive::*;
-        match directive {
+        use wast::Command::*;
+        match command {
             InlineModule(root) => instances.push(&root.module, root.module.start),
             EmbeddedModule(_) => instances.push_with_idx(idx),
             AssertReturn(wast::AssertReturn::Invoke {

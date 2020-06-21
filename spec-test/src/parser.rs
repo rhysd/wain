@@ -610,7 +610,7 @@ impl<'s> Parse<'s> for AssertExhaustion<'s> {
     }
 }
 
-impl<'s> Parse<'s> for Directive<'s> {
+impl<'s> Parse<'s> for Command<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let (t1, t2) = parser.peek()?;
 
@@ -623,20 +623,20 @@ impl<'s> Parse<'s> for Directive<'s> {
         }
 
         match t2 {
-            Some(Token::Keyword("assert_return")) => Ok(Directive::AssertReturn(parser.parse()?)),
-            Some(Token::Keyword("assert_trap")) => Ok(Directive::AssertTrap(parser.parse()?)),
+            Some(Token::Keyword("assert_return")) => Ok(Command::AssertReturn(parser.parse()?)),
+            Some(Token::Keyword("assert_trap")) => Ok(Command::AssertTrap(parser.parse()?)),
             Some(Token::Keyword("assert_malformed")) => {
-                Ok(Directive::AssertMalformed(parser.parse()?))
+                Ok(Command::AssertMalformed(parser.parse()?))
             }
-            Some(Token::Keyword("assert_invalid")) => Ok(Directive::AssertInvalid(parser.parse()?)),
+            Some(Token::Keyword("assert_invalid")) => Ok(Command::AssertInvalid(parser.parse()?)),
             Some(Token::Keyword("assert_unlinkable")) => {
-                Ok(Directive::AssertUnlinkable(parser.parse()?))
+                Ok(Command::AssertUnlinkable(parser.parse()?))
             }
             Some(Token::Keyword("assert_exhaustion")) => {
-                Ok(Directive::AssertExhaustion(parser.parse()?))
+                Ok(Command::AssertExhaustion(parser.parse()?))
             }
-            Some(Token::Keyword("register")) => Ok(Directive::Register(parser.parse()?)),
-            Some(Token::Keyword("invoke")) => Ok(Directive::Invoke(parser.parse()?)),
+            Some(Token::Keyword("register")) => Ok(Command::Register(parser.parse()?)),
+            Some(Token::Keyword("invoke")) => Ok(Command::Invoke(parser.parse()?)),
             Some(Token::Keyword("module")) => {
                 // `parser.parse::<EmbeddedModule>()` eats tokens. When reaching 'Err(err) => { ... }'
                 // clause, `parser`'s lexer is no longer available. To parse from start, remember the
@@ -645,7 +645,7 @@ impl<'s> Parse<'s> for Directive<'s> {
                 let prev_lexer = parser.clone_lexer();
 
                 match parser.parse::<EmbeddedModule>() {
-                    Ok(module) => Ok(Directive::EmbeddedModule(module)),
+                    Ok(module) => Ok(Command::EmbeddedModule(module)),
                     Err(err) => {
                         parser.ignored_error = Some(err);
                         // Here parser.lexer already ate some tokens. To parser from
@@ -653,7 +653,7 @@ impl<'s> Parse<'s> for Directive<'s> {
                         let parsed = wat_parser.parse()?; // text -> wat
                         let root = wat2wasm(parsed, wat_parser.source())?; // wat -> ast
                         parser.replace_lexer(wat_parser.into_lexer());
-                        Ok(Directive::InlineModule(root))
+                        Ok(Command::InlineModule(root))
                     }
                 }
             }
@@ -665,14 +665,14 @@ impl<'s> Parse<'s> for Directive<'s> {
     }
 }
 
-impl<'s> Parse<'s> for Root<'s> {
+impl<'s> Parse<'s> for Script<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        let mut directives = vec![];
+        let mut commands = vec![];
         while !parser.is_done()? {
-            directives.push(parser.parse()?);
+            commands.push(parser.parse()?);
         }
-        let start = directives.get(0).map(Directive::start_pos).unwrap_or(0);
-        Ok(Root { start, directives })
+        let start = commands.get(0).map(Command::start_pos).unwrap_or(0);
+        Ok(Script { start, commands })
     }
 }
 
@@ -1116,8 +1116,8 @@ mod tests {
     }
 
     #[test]
-    fn directive() {
-        let d: Directive = Parser::new(
+    fn command() {
+        let d: Command = Parser::new(
             r#"
             (module
               (func (export "br") (block (br 0)))
@@ -1128,14 +1128,14 @@ mod tests {
         )
         .parse()
         .unwrap();
-        assert!(matches!(d, Directive::InlineModule(_)));
+        assert!(matches!(d, Command::InlineModule(_)));
 
-        let d: Directive = Parser::new(r#"(assert_return (invoke "br"))"#)
+        let d: Command = Parser::new(r#"(assert_return (invoke "br"))"#)
             .parse()
             .unwrap();
-        assert!(matches!(d, Directive::AssertReturn(_)));
+        assert!(matches!(d, Command::AssertReturn(_)));
 
-        let d: Directive = Parser::new(
+        let d: Command = Parser::new(
             r#"
             (assert_invalid
               (module (memory 0) (func (drop (i32.load8_s align=2 (i32.const 0)))))
@@ -1145,9 +1145,9 @@ mod tests {
         )
         .parse()
         .unwrap();
-        assert!(matches!(d, Directive::AssertInvalid(_)));
+        assert!(matches!(d, Command::AssertInvalid(_)));
 
-        let d: Directive = Parser::new(
+        let d: Command = Parser::new(
             r#"
             (module binary "\00asm\01\00\00\00")
             (assert_return (invoke "br"))
@@ -1157,18 +1157,18 @@ mod tests {
         .unwrap();
         assert!(matches!(
             d,
-            Directive::EmbeddedModule(EmbeddedModule {
+            Command::EmbeddedModule(EmbeddedModule {
                 src: EmbeddedSrc::Binary(_),
                 ..
             })
         ));
 
-        let d: Directive = Parser::new(r#"(module quote "(memory $foo 1)" "(memory $foo 1)")"#)
+        let d: Command = Parser::new(r#"(module quote "(memory $foo 1)" "(memory $foo 1)")"#)
             .parse()
             .unwrap();
         assert!(matches!(
             d,
-            Directive::EmbeddedModule(EmbeddedModule {
+            Command::EmbeddedModule(EmbeddedModule {
                 src: EmbeddedSrc::Quote(_),
                 ..
             })
@@ -1176,8 +1176,8 @@ mod tests {
     }
 
     #[test]
-    fn root() {
-        let root: Root = Parser::new(
+    fn script() {
+        let script: Script = Parser::new(
             r#"
             (module
               (func (export "br") (block (br 0)))
@@ -1204,20 +1204,20 @@ mod tests {
         .parse()
         .unwrap();
 
-        assert_eq!(root.directives.len(), 11);
+        assert_eq!(script.commands.len(), 11);
 
-        let d = root.directives;
-        assert!(matches!(d[0], Directive::InlineModule(_)));
-        assert!(matches!(d[1], Directive::AssertReturn(_)));
-        assert!(matches!(d[2], Directive::AssertReturn(_)));
-        assert!(matches!(d[3], Directive::AssertReturn(_)));
-        assert!(matches!(d[4], Directive::EmbeddedModule(_)));
-        assert!(matches!(d[5], Directive::EmbeddedModule(_)));
-        assert!(matches!(d[6], Directive::InlineModule(_)));
-        assert!(matches!(d[7], Directive::AssertReturn(_)));
-        assert!(matches!(d[8], Directive::AssertReturn(_)));
-        assert!(matches!(d[9], Directive::AssertReturn(_)));
-        assert!(matches!(d[10], Directive::AssertReturn(_)));
+        let c = script.commands;
+        assert!(matches!(c[0], Command::InlineModule(_)));
+        assert!(matches!(c[1], Command::AssertReturn(_)));
+        assert!(matches!(c[2], Command::AssertReturn(_)));
+        assert!(matches!(c[3], Command::AssertReturn(_)));
+        assert!(matches!(c[4], Command::EmbeddedModule(_)));
+        assert!(matches!(c[5], Command::EmbeddedModule(_)));
+        assert!(matches!(c[6], Command::InlineModule(_)));
+        assert!(matches!(c[7], Command::AssertReturn(_)));
+        assert!(matches!(c[8], Command::AssertReturn(_)));
+        assert!(matches!(c[9], Command::AssertReturn(_)));
+        assert!(matches!(c[10], Command::AssertReturn(_)));
     }
 
     #[test]
@@ -1247,11 +1247,9 @@ mod tests {
                 }
 
                 let content = fs::read_to_string(&path).unwrap();
-                match Parser::new(&content).parse::<Root>() {
+                match Parser::new(&content).parse::<Script>() {
                     Err(err) => panic!("parse error at {:?} ({}): {}", path, count, err),
-                    Ok(root) => {
-                        assert!(root.directives.len() > 0);
-                    }
+                    Ok(script) => assert!(!script.commands.is_empty()),
                 }
                 count += 1;
             }

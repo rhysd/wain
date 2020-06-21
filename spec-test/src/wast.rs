@@ -70,14 +70,14 @@ impl Const {
     }
 }
 
-pub struct Root<'source> {
+pub struct Script<'source> {
     pub start: usize,
-    pub directives: Vec<Directive<'source>>,
+    pub commands: Vec<Command<'source>>,
 }
 
 // Allow AssertUnlinkable variant makes this enum large since this code is used only in tests
 #[allow(clippy::large_enum_variant)]
-pub enum Directive<'source> {
+pub enum Command<'source> {
     AssertReturn(AssertReturn<'source>),
     AssertTrap(AssertTrap<'source>),
     AssertMalformed(AssertMalformed),
@@ -89,20 +89,20 @@ pub enum Directive<'source> {
     EmbeddedModule(EmbeddedModule),
     InlineModule(ast::Root<'source, TextSource<'source>>),
 }
-impl<'s> Directive<'s> {
+impl<'s> Command<'s> {
     pub fn start_pos(&self) -> usize {
         match self {
-            Directive::AssertReturn(AssertReturn::Invoke { start, .. }) => *start,
-            Directive::AssertReturn(AssertReturn::Global { start, .. }) => *start,
-            Directive::AssertTrap(a) => a.start,
-            Directive::AssertMalformed(a) => a.start,
-            Directive::AssertInvalid(a) => a.start,
-            Directive::AssertUnlinkable(a) => a.start,
-            Directive::AssertExhaustion(a) => a.start,
-            Directive::Register(r) => r.start,
-            Directive::Invoke(i) => i.start,
-            Directive::EmbeddedModule(m) => m.start,
-            Directive::InlineModule(r) => r.module.start,
+            Command::AssertReturn(AssertReturn::Invoke { start, .. }) => *start,
+            Command::AssertReturn(AssertReturn::Global { start, .. }) => *start,
+            Command::AssertTrap(a) => a.start,
+            Command::AssertMalformed(a) => a.start,
+            Command::AssertInvalid(a) => a.start,
+            Command::AssertUnlinkable(a) => a.start,
+            Command::AssertExhaustion(a) => a.start,
+            Command::Register(r) => r.start,
+            Command::Invoke(i) => i.start,
+            Command::EmbeddedModule(m) => m.start,
+            Command::InlineModule(r) => r.module.start,
         }
     }
 }

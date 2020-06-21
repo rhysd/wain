@@ -198,7 +198,7 @@ impl<'s> fmt::Display for Error<'s> {
             ErrorKind::Run(kind) => {
                 use RunKind::*;
                 match kind {
-                    NotImplementedYet => write!(f, "this directive is not implemented yet")?,
+                    NotImplementedYet => write!(f, "this command is not implemented yet")?,
                     ParseQuoteFailure(err) => write!(f, "cannot parse quoted module: {}", err)?,
                     ParseBinaryFailure(err) => write!(
                         f,
