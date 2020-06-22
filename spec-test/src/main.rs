@@ -101,7 +101,9 @@ fn main() -> io::Result<()> {
         Target::Dir(dir) => runner.run_dir(dir)?,
         Target::File(path, file) => runner.run_file(path, file)?.success(),
     };
-    if !success {
+    if success {
+        println!("🎊");
+    } else {
         exit(1);
     }
 
