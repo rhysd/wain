@@ -1,7 +1,7 @@
 use std::env;
 use std::io;
 use std::process;
-use wain_exec::{DefaultImporter, Machine, Value};
+use wain_exec::{DefaultImporter, Runtime, Value};
 use wain_syntax_text::parser::Parser;
 use wain_syntax_text::wat2wasm::wat2wasm;
 
@@ -75,15 +75,15 @@ fn main() {
     // Don't validate the tree since validation has been done in spec test
 
     let importer = DefaultImporter::with_stdio(Discard, Discard);
-    let mut machine = match Machine::instantiate(&ast.module, importer) {
-        Ok(m) => m,
+    let mut runtime = match Runtime::instantiate(&ast.module, importer) {
+        Ok(rt) => rt,
         Err(err) => panic!(
-            "cannot instantiate machine '{}' at offset {}: {}",
+            "cannot instantiate module '{}' at offset {}: {}",
             source, offset, err
         ),
     };
 
-    match machine.invoke(name, &invoke_args) {
+    match runtime.invoke(name, &invoke_args) {
         Ok(Some(ret)) => println!("returned: {}", ret),
         Ok(None) => println!("returned nothing"),
         Err(err) => {

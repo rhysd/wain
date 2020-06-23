@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time;
 use wain_ast as ast;
-use wain_exec::{DefaultImporter, Machine, Value};
+use wain_exec::{DefaultImporter, Runtime, Value};
 use wain_syntax_binary as binary;
 use wain_syntax_text as wat;
 use wain_validate::validate;
@@ -272,11 +272,11 @@ impl<W: Write> Runner<W> {
     }
 }
 
-type MachineForTest<'m, 's> = Machine<'m, 's, DefaultImporter<Discard, Discard>>;
+type TestRuntime<'m, 's> = Runtime<'m, 's, DefaultImporter<Discard, Discard>>;
 type IndexToModule<'s> = HashMap<usize, (ast::Module<'s>, usize)>;
 
 struct Instances<'mods, 'src: 'mods> {
-    machines: Vec<(MachineForTest<'mods, 'src>, usize)>,
+    runtimes: Vec<(TestRuntime<'mods, 'src>, usize)>,
     idx_to_mod: &'mods IndexToModule<'src>,
     source: &'src str,
 }
@@ -284,21 +284,17 @@ struct Instances<'mods, 'src: 'mods> {
 impl<'m, 's> Instances<'m, 's> {
     fn new(idx_to_mod: &'m IndexToModule<'s>, source: &'s str) -> Self {
         Instances {
-            machines: vec![],
+            runtimes: vec![],
             idx_to_mod,
             source,
         }
     }
 
-    fn new_machine(
-        &self,
-        m: &'m ast::Module<'s>,
-        pos: usize,
-    ) -> Result<'s, MachineForTest<'m, 's>> {
+    fn new_runtime(&self, m: &'m ast::Module<'s>, pos: usize) -> Result<'s, TestRuntime<'m, 's>> {
         let importer = DefaultImporter::with_stdio(Discard, Discard);
-        let machine = Machine::instantiate(m, importer)
+        let runtime = Runtime::instantiate(m, importer)
             .map_err(|err| Error::run_error(RunKind::Trapped(*err), self.source, pos))?;
-        Ok(machine)
+        Ok(runtime)
     }
 
     fn push_with_idx(&mut self, cmd_idx: usize) -> Result<'s, ()> {
@@ -307,8 +303,8 @@ impl<'m, 's> Instances<'m, 's> {
     }
 
     fn push(&mut self, module: &'m ast::Module<'s>, pos: usize) -> Result<'s, ()> {
-        let machine = self.new_machine(module, pos)?;
-        self.machines.push((machine, pos));
+        let runtime = self.new_runtime(module, pos)?;
+        self.runtimes.push((runtime, pos));
         Ok(())
     }
 
@@ -316,14 +312,14 @@ impl<'m, 's> Instances<'m, 's> {
         &mut self,
         id: Option<&'s str>,
         pos: usize,
-    ) -> Result<'s, (&mut MachineForTest<'m, 's>, usize)> {
+    ) -> Result<'s, (&mut TestRuntime<'m, 's>, usize)> {
         let searched = if let Some(id) = id {
-            self.machines
+            self.runtimes
                 .iter_mut()
                 .rev()
                 .find(|(m, _)| m.module().id == Some(id))
         } else {
-            self.machines.last_mut()
+            self.runtimes.last_mut()
         };
 
         // Note: ok_or_else is not available due to nested borrow of `self`
@@ -339,10 +335,10 @@ impl<'m, 's> Instances<'m, 's> {
     }
 
     fn invoke(&mut self, invoke: &wast::Invoke<'s>) -> Result<'s, Option<Value>> {
-        let (machine, mod_pos) = self.find(invoke.id, invoke.start)?;
+        let (runtime, mod_pos) = self.find(invoke.id, invoke.start)?;
 
         let args: Box<[Value]> = invoke.args.iter().map(|c| c.to_value().unwrap()).collect();
-        let ret = machine
+        let ret = runtime
             .invoke(&invoke.name, &args)
             .map_err(|err| Error::run_error(RunKind::Trapped(*err), self.source, mod_pos))?;
 
@@ -469,8 +465,8 @@ impl<'a> Tester<'a> {
                 get,
                 expected,
             }) => {
-                let (machine, _) = instances.find(get.id, *start)?;
-                if let Some(actual) = machine.get_global(&get.name) {
+                let (runtime, _) = instances.find(get.id, *start)?;
+                if let Some(actual) = runtime.get_global(&get.name) {
                     if expected.matches(&actual) {
                         Ok(())
                     } else {
@@ -524,7 +520,7 @@ impl<'a> Tester<'a> {
             }) => {
                 validate(root)?;
                 let importer = DefaultImporter::with_stdio(Discard, Discard);
-                match Machine::instantiate(&root.module, importer) {
+                match Runtime::instantiate(&root.module, importer) {
                     Ok(_) => Err(Error::run_error(
                         RunKind::InvokeTrapExpected {
                             ret: None,

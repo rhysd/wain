@@ -154,7 +154,7 @@ Or invoke specific exported function with arguments
 ```rust
 // ...(snip)
 
-use wain_exec::{machine, DefaultImporter, Value};
+use wain_exec::{Runtime, DefaultImporter, Value};
 use std::io;
 
 // Create default importer to call external function supported by default
@@ -162,8 +162,8 @@ let stdin = io::stdin();
 let stdout = io::stdout();
 let importer = DefaultImporter::with_stdio(stdin.lock(), stdout.lock());
 
-// Make abstract machine instance
-let mut machine = match Machine::instantiate(&tree.module, importer) {
+// Make abstract machine runtime. It instantiates a module
+let mut runtime = match Runtime::instantiate(&tree.module, importer) {
     Ok(m) => m,
     Err(err) => {
         eprintln!("could not instantiate module: {}", err);
@@ -172,7 +172,7 @@ let mut machine = match Machine::instantiate(&tree.module, importer) {
 };
 
 // Let's say `int add(int, int)` is exported
-match machine.invoke("add", &[Value::I32(10), Value::I32(32)]) {
+match runtime.invoke("add", &[Value::I32(10), Value::I32(32)]) {
     Ok(ret) => {
         // `ret` is type of `Option<Value>` where it contains `Some` value when the invoked
         // function returned a value. Otherwise it's `None` value.
@@ -198,7 +198,7 @@ functions from Rust side.
 ```rust
 extern crate wain_exec;
 extern crate wain_ast;
-use wain_exec::{Machine, Stack, Memory, Importer, ImportInvokeError, ImportInvalidError}
+use wain_exec::{Runtime, Stack, Memory, Importer, ImportInvokeError, ImportInvalidError}
 use wain_ast::ValType;
 
 struct YourOwnImporter {
@@ -225,8 +225,8 @@ impl Importer for YourOwnImporter {
 
 let ast = ...; // Parse abstract syntax tree and validate it
 
-let mut machine = Machine::instantiate(&ast.module, YourOwnImporter{ /* ... */ }).unwrap();
-let result = machine.invoke("do_something", &[]);
+let mut runtime = Runtime::instantiate(&ast.module, YourOwnImporter{ /* ... */ }).unwrap();
+let result = runtime.invoke("do_something", &[]);
 ```
 
 To know the usage of APIs, working examples are available at [examples/api/](./examples/api).

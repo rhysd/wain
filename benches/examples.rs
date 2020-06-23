@@ -9,7 +9,7 @@ mod example_benches {
     use std::fs;
     use std::io::{self, Read, Write};
     use test::Bencher;
-    use wain_exec::{DefaultImporter, Machine};
+    use wain_exec::{DefaultImporter, Runtime};
     use wain_syntax_binary::parse;
     use wain_validate::validate;
 
@@ -53,8 +53,8 @@ mod example_benches {
                     let ast = unwrap(parse(&source));
                     unwrap(validate(&ast));
                     let importer = DefaultImporter::with_stdio(Discard, Discard);
-                    let mut machine = unwrap(Machine::instantiate(&ast.module, importer));
-                    unwrap(machine.invoke("_start", &[]));
+                    let mut runtime = unwrap(Runtime::instantiate(&ast.module, importer));
+                    unwrap(runtime.invoke("_start", &[]));
                 });
             }
         };

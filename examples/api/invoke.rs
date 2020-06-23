@@ -4,7 +4,7 @@ extern crate wain_validate;
 
 use std::io;
 use std::process::exit;
-use wain_exec::{DefaultImporter, Machine, Value};
+use wain_exec::{DefaultImporter, Runtime, Value};
 use wain_syntax_text::parse;
 use wain_validate::validate;
 
@@ -67,9 +67,9 @@ fn main() {
     let stdout = io::stdout();
     let importer = DefaultImporter::with_stdio(stdin.lock(), stdout.lock());
 
-    // Make abstract machine instance
-    let mut machine = match Machine::instantiate(&tree.module, importer) {
-        Ok(m) => m,
+    // Make abstract machine runtime. This instantiates Wasm module
+    let mut runtime = match Runtime::instantiate(&tree.module, importer) {
+        Ok(rt) => rt,
         Err(err) => {
             eprintln!("could not instantiate module: {}", err);
             exit(1);
@@ -79,7 +79,7 @@ fn main() {
     // `int add(int, int)` is exported as `(func (param i32) (result i32))`.
     // Let's invoke add(10, 32). `Value` is an enum to represent arbitrary value of Wasm. Wasm has
     // i32, i64, f32, f64 basic types.
-    match machine.invoke("add", &[Value::I32(10), Value::I32(32)]) {
+    match runtime.invoke("add", &[Value::I32(10), Value::I32(32)]) {
         Ok(ret) => {
             // `ret` is type of `Option<Value>` where it contains `Some` value when the invoked
             // function returned a value. Otherwise it's `None` value.
