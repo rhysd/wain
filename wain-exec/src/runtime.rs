@@ -6,6 +6,7 @@ use crate::stack::{CallFrame, Stack, StackAccess};
 use crate::table::Table;
 use crate::trap::{Result, Trap, TrapReason};
 use crate::value::{Float, LittleEndian, Value};
+use std::mem;
 use wain_ast as ast;
 use wain_ast::AsValType;
 
@@ -65,6 +66,8 @@ pub struct Runtime<'module, 'source, I: Importer> {
     module: ModuleInstance<'module, 'source>,
     stack: Stack,
     importer: I,
+    // Call frame param types and local types as slices. The slices' lifetimes were derived from module
+    frame: CallFrame<'module>,
 }
 
 impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
@@ -137,7 +140,8 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
         // 6.4 allocate memory
         let mut memory = Memory::allocate(&module.memories)?;
 
-        // 7. and 8. push empty frame (unnecessary for now)
+        // 7. and 8. push empty frame
+        let frame = CallFrame::default();
         let stack = Stack::default();
 
         // 9. add element segments to table
@@ -161,6 +165,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             },
             stack,
             importer,
+            frame,
         };
 
         // 15. If the start function is not empty, invoke it
@@ -193,6 +198,16 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
                 let ty = self.module.ast.globals[idx as usize].ty;
                 self.module.globals.get_any(idx, ty)
             })
+    }
+
+    fn push_frame(&mut self, new_frame: CallFrame<'m>) -> CallFrame<'m> {
+        mem::replace(&mut self.frame, new_frame)
+    }
+
+    fn pop_frame(&mut self, prev_frame: CallFrame<'m>) {
+        self.stack
+            .restore(self.frame.base_addr, self.frame.base_idx);
+        self.frame = prev_frame;
     }
 
     // Returns if it has return value on stack or not
@@ -241,13 +256,12 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             ast::FuncKind::Body { locals, expr } => (locals, expr),
         };
 
-        // Push call frame
-        let frame = CallFrame::new(&self.stack, &fty.params, locals);
+        let prev_frame = self.push_frame(CallFrame::new(&self.stack, &fty.params, locals));
 
         self.stack.extend_zero_values(&locals);
 
         for insn in body.iter() {
-            match insn.execute(self, &frame)? {
+            match insn.execute(self)? {
                 ExecState::Continue => {}
                 // When using br or br_if outside control instructions, it unwinds execution in
                 // the function body. Label with empty continuation is put before invoking the
@@ -258,12 +272,12 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
         }
 
         if fty.results.is_empty() {
-            self.stack.restore(frame.base_addr, frame.base_idx); // Pop call frame
+            self.pop_frame(prev_frame);
             Ok(false)
         } else {
             // Push 1st result value since number of result type is 1 or 0 for MVP
             let v: Value = self.stack.pop();
-            self.stack.restore(frame.base_addr, frame.base_idx); // Pop call frame
+            self.pop_frame(prev_frame);
             self.stack.push(v); // push result value
             Ok(true)
         }
@@ -432,16 +446,16 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
     }
 }
 
-trait Execute<'f, 'm, 's, I: Importer> {
-    fn execute(&self, runtime: &mut Runtime<'m, 's, I>, frame: &CallFrame<'f>) -> ExecResult;
+trait Execute<'m, 's, I: Importer> {
+    fn execute(&self, runtime: &mut Runtime<'m, 's, I>) -> ExecResult;
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html#blocks
-impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for Vec<ast::Instruction> {
-    fn execute(&self, runtime: &mut Runtime<'m, 's, I>, frame: &CallFrame<'f>) -> ExecResult {
+impl<'m, 's, I: Importer> Execute<'m, 's, I> for Vec<ast::Instruction> {
+    fn execute(&self, runtime: &mut Runtime<'m, 's, I>) -> ExecResult {
         // Run instruction sequence as block
         for insn in self.iter() {
-            match insn.execute(runtime, frame)? {
+            match insn.execute(runtime)? {
                 ExecState::Continue => {}
                 state => return Ok(state), // Stop executing this block on return or break
             }
@@ -451,9 +465,9 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for Vec<ast::Instruction> {
 }
 
 // https://webassembly.github.io/spec/core/exec/instructions.html
-impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
+impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
     #[allow(clippy::cognitive_complexity)]
-    fn execute(&self, runtime: &mut Runtime<'m, 's, I>, frame: &CallFrame<'f>) -> ExecResult {
+    fn execute(&self, runtime: &mut Runtime<'m, 's, I>) -> ExecResult {
         use ast::InsnKind::*;
         #[allow(clippy::float_cmp)]
         match &self.kind {
@@ -461,7 +475,7 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-block
             Block { ty, body } => {
                 let label = runtime.stack.push_label(*ty);
-                match body.execute(runtime, frame)? {
+                match body.execute(runtime)? {
                     ExecState::Continue => {}
                     ExecState::Ret => return Ok(ExecState::Ret),
                     ExecState::Breaking(0) => {}
@@ -474,7 +488,7 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
                 // Note: Difference between block and loop is the position on breaking. When reaching
                 // to the end of instruction sequence, loop instruction ends execution of subsequence.
                 let label = runtime.stack.push_label(*ty);
-                match body.execute(runtime, frame)? {
+                match body.execute(runtime)? {
                     ExecState::Continue => {
                         runtime.stack.pop_label(label);
                         break;
@@ -493,7 +507,7 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
                 let cond: i32 = runtime.stack.pop();
                 let label = runtime.stack.push_label(*ty);
                 let insns = if cond != 0 { then_body } else { else_body };
-                match insns.execute(runtime, frame)? {
+                match insns.execute(runtime)? {
                     ExecState::Continue => {}
                     ExecState::Ret => return Ok(ExecState::Ret),
                     ExecState::Breaking(0) => {}
@@ -578,8 +592,8 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             // Variable instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-get
             LocalGet(localidx) => {
-                let addr = frame.local_addr(*localidx);
-                match frame.local_type(*localidx) {
+                let addr = runtime.frame.local_addr(*localidx);
+                match runtime.frame.local_type(*localidx) {
                     ast::ValType::I32 => runtime.stack.push(runtime.stack.read::<i32>(addr)),
                     ast::ValType::I64 => runtime.stack.push(runtime.stack.read::<i64>(addr)),
                     ast::ValType::F32 => runtime.stack.push(runtime.stack.read::<f32>(addr)),
@@ -588,14 +602,14 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-set
             LocalSet(localidx) => {
-                let addr = frame.local_addr(*localidx);
+                let addr = runtime.frame.local_addr(*localidx);
                 let val = runtime.stack.pop();
                 runtime.stack.write_any(addr, val);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-tee
             LocalTee(localidx) => {
                 // Like local.set, but it does not change stack
-                let addr = frame.local_addr(*localidx);
+                let addr = runtime.frame.local_addr(*localidx);
                 let val = runtime.stack.top();
                 runtime.stack.write_any(addr, val);
             }

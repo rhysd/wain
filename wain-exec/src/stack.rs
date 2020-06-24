@@ -221,6 +221,7 @@ impl Stack {
 // Activations of function frames
 // This class is outside Machine because it has shorter lifetime. It only lives while the current
 // function is being invoked
+#[derive(Default)]
 pub struct CallFrame<'func> {
     pub base_addr: usize,
     pub base_idx: usize,
