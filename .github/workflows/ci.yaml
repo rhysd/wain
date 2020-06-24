@@ -76,3 +76,7 @@ jobs:
       - run: cargo run examples/quicksort.wat
       - run: cargo run examples/sqrt.wasm
       - run: cargo run examples/sqrt.wat
+      - run: cargo run examples/y_combinator.wasm
+      - run: cargo run examples/y_combinator.wat
+      - run: cargo run examples/fib.wasm
+      - run: cargo run examples/fib.wat

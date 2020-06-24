@@ -49,5 +49,6 @@ mod validation_benches {
         quicksort,
         sqrt,
         y_combinator,
+        fib,
     );
 }

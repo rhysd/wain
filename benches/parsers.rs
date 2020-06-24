@@ -64,5 +64,6 @@ mod parser_benches {
         quicksort,
         sqrt,
         y_combinator,
+        fib,
     );
 }
