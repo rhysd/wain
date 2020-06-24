@@ -51,14 +51,19 @@ enum ExecState {
 
 type ExecResult = Result<ExecState>;
 
+// https://webassembly.github.io/spec/core/exec/runtime.html#module-instances
+pub struct ModuleInstance<'module, 'source> {
+    ast: &'module ast::Module<'source>,
+    table: Table,   // Only one table is allowed for MVP
+    memory: Memory, // Only one memory is allowed for MVP
+    globals: Globals,
+}
+
 // State of abtract machine to run wasm code. This struct contains both store and stack
 // https://webassembly.github.io/spec/core/exec/runtime.html
 pub struct Runtime<'module, 'source, I: Importer> {
-    module: &'module ast::Module<'source>,
-    table: Table, // Only one table is allowed for MVP
+    module: ModuleInstance<'module, 'source>,
     stack: Stack,
-    memory: Memory, // Only one memory is allowed for MVP
-    globals: Globals,
     importer: I,
 }
 
@@ -148,16 +153,18 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
         // 11. and 12. pop frame (unnecessary for now)
 
         let mut runtime = Self {
-            module,
-            table,
+            module: ModuleInstance {
+                ast: module,
+                table,
+                memory,
+                globals,
+            },
             stack,
-            memory,
-            globals,
             importer,
         };
 
         // 15. If the start function is not empty, invoke it
-        if let Some(start) = &runtime.module.entrypoint {
+        if let Some(start) = &runtime.module.ast.entrypoint {
             // Execute entrypoint
             runtime.invoke_by_funcidx(start.idx)?;
         }
@@ -166,15 +173,16 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
     }
 
     pub fn module(&self) -> &'m ast::Module<'s> {
-        &self.module
+        &self.module.ast
     }
 
     pub fn memory(&self) -> &Memory {
-        &self.memory
+        &self.module.memory
     }
 
     pub fn get_global(&self, name: &str) -> Option<Value> {
         self.module
+            .ast
             .exports
             .iter()
             .find_map(|e| match e.kind {
@@ -182,8 +190,8 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
                 _ => None,
             })
             .map(|idx| {
-                let ty = self.module.globals[idx as usize].ty;
-                self.globals.get_any(idx, ty)
+                let ty = self.module.ast.globals[idx as usize].ty;
+                self.module.globals.get_any(idx, ty)
             })
     }
 
@@ -197,7 +205,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
         if import.mod_name.0 == "env" {
             match self
                 .importer
-                .call(&import.name.0, &mut self.stack, &mut self.memory)
+                .call(&import.name.0, &mut self.stack, &mut self.module.memory)
             {
                 Ok(()) => return Ok(has_ret),
                 Err(ImportInvokeError::Fatal { message }) => {
@@ -222,8 +230,8 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
     // https://webassembly.github.io/spec/core/exec/instructions.html#function-calls
     // Returns if it has return value on stack or not
     fn invoke_by_funcidx(&mut self, funcidx: u32) -> Result<bool> {
-        let func = &self.module.funcs[funcidx as usize];
-        let fty = &self.module.types[func.idx as usize];
+        let func = &self.module.ast.funcs[funcidx as usize];
+        let fty = &self.module.ast.types[func.idx as usize];
 
         // Call this function with params
         let (locals, body) = match &func.kind {
@@ -294,8 +302,9 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
         }
 
         let name = name.as_ref();
-        let (funcidx, start) = find_func_to_invoke(name, &self.module.exports)?;
-        let arg_types = &self.module.types[self.module.funcs[funcidx as usize].idx as usize].params;
+        let (funcidx, start) = find_func_to_invoke(name, &self.module.ast.exports)?;
+        let arg_types =
+            &self.module.ast.types[self.module.ast.funcs[funcidx as usize].idx as usize].params;
 
         // Check parameter types
         if args
@@ -332,12 +341,12 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
 
     fn load<V: LittleEndian>(&mut self, mem: &ast::Mem, at: usize) -> Result<V> {
         let addr = self.mem_addr(mem);
-        Ok(self.memory.load(addr, at)?)
+        Ok(self.module.memory.load(addr, at)?)
     }
 
     fn store<V: LittleEndian>(&mut self, mem: &ast::Mem, v: V, at: usize) -> Result<()> {
         let addr = self.mem_addr(mem);
-        self.memory.store(addr, v, at)?;
+        self.module.memory.store(addr, v, at)?;
         Ok(())
     }
 
@@ -527,11 +536,11 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-call-indirect
             CallIndirect(typeidx) => {
-                let expected = &runtime.module.types[*typeidx as usize];
+                let expected = &runtime.module.ast.types[*typeidx as usize];
                 let elemidx: i32 = runtime.stack.pop();
-                let funcidx = runtime.table.at(elemidx as usize, self.start)?;
-                let func = &runtime.module.funcs[funcidx as usize];
-                let actual = &runtime.module.types[func.idx as usize];
+                let funcidx = runtime.module.table.at(elemidx as usize, self.start)?;
+                let func = &runtime.module.ast.funcs[funcidx as usize];
+                let actual = &runtime.module.ast.types[func.idx as usize];
                 if expected.params.iter().ne(actual.params.iter())
                     || expected.results.iter().ne(actual.results.iter())
                 {
@@ -591,14 +600,25 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
                 runtime.stack.write_any(addr, val);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-global-get
-            GlobalGet(globalidx) => match runtime.module.globals[*globalidx as usize].ty {
-                ast::ValType::I32 => runtime.stack.push(runtime.globals.get::<i32>(*globalidx)),
-                ast::ValType::I64 => runtime.stack.push(runtime.globals.get::<i64>(*globalidx)),
-                ast::ValType::F32 => runtime.stack.push(runtime.globals.get::<f32>(*globalidx)),
-                ast::ValType::F64 => runtime.stack.push(runtime.globals.get::<f64>(*globalidx)),
+            GlobalGet(globalidx) => match runtime.module.ast.globals[*globalidx as usize].ty {
+                ast::ValType::I32 => runtime
+                    .stack
+                    .push(runtime.module.globals.get::<i32>(*globalidx)),
+                ast::ValType::I64 => runtime
+                    .stack
+                    .push(runtime.module.globals.get::<i64>(*globalidx)),
+                ast::ValType::F32 => runtime
+                    .stack
+                    .push(runtime.module.globals.get::<f32>(*globalidx)),
+                ast::ValType::F64 => runtime
+                    .stack
+                    .push(runtime.module.globals.get::<f64>(*globalidx)),
             },
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-global-set
-            GlobalSet(globalidx) => runtime.globals.set_any(*globalidx, runtime.stack.top()),
+            GlobalSet(globalidx) => runtime
+                .module
+                .globals
+                .set_any(*globalidx, runtime.stack.top()),
             // Memory instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#and
             I32Load(mem) => {
@@ -695,11 +715,11 @@ impl<'f, 'm, 's, I: Importer> Execute<'f, 'm, 's, I> for ast::Instruction {
                 runtime.store(mem, v as i32, self.start)?;
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-memory-size
-            MemorySize => runtime.stack.push(runtime.memory.size() as i32),
+            MemorySize => runtime.stack.push(runtime.module.memory.size() as i32),
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-memory-grow
             MemoryGrow => {
                 let pages: i32 = runtime.stack.pop();
-                let prev_pages = runtime.memory.grow(pages as u32);
+                let prev_pages = runtime.module.memory.grow(pages as u32);
                 runtime.stack.push(prev_pages);
             }
             // Numeric instructions
