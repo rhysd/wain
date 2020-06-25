@@ -75,4 +75,5 @@ mod example_benches {
     bench_example!(n_queens, "n_queens.wasm");
     bench_example!(y_combinator, "y_combinator.wasm");
     bench_example!(fib, "fib.wasm");
+    bench_example!(boyer_moore, "boyer_moore.wasm");
 }

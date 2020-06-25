@@ -80,3 +80,5 @@ jobs:
       - run: cargo run examples/y_combinator.wat
       - run: cargo run examples/fib.wasm
       - run: cargo run examples/fib.wat
+      - run: cargo run examples/boyer_moore.wasm
+      - run: cargo run examples/boyer_moore.wat

@@ -50,5 +50,6 @@ mod validation_benches {
         sqrt,
         y_combinator,
         fib,
+        boyer_moore,
     );
 }
