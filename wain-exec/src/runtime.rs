@@ -261,7 +261,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
 
         self.stack.extend_zero_values(&locals);
 
-        for insn in body.iter() {
+        for insn in body {
             match insn.execute(self)? {
                 ExecState::Continue => {}
                 // When using br or br_if outside control instructions, it unwinds execution in
@@ -455,7 +455,7 @@ trait Execute<'m, 's, I: Importer> {
 impl<'m, 's, I: Importer> Execute<'m, 's, I> for Vec<ast::Instruction> {
     fn execute(&self, runtime: &mut Runtime<'m, 's, I>) -> ExecResult {
         // Run instruction sequence as block
-        for insn in self.iter() {
+        for insn in self {
             match insn.execute(runtime)? {
                 ExecState::Continue => {}
                 state => return Ok(state), // Stop executing this block on return or break
@@ -556,9 +556,7 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                 let funcidx = runtime.module.table.at(elemidx as usize, self.start)?;
                 let func = &runtime.module.ast.funcs[funcidx as usize];
                 let actual = &runtime.module.ast.types[func.idx as usize];
-                if expected.params.iter().ne(actual.params.iter())
-                    || expected.results.iter().ne(actual.results.iter())
-                {
+                if expected.params != actual.params || expected.results != actual.results {
                     return Err(Trap::new(
                         TrapReason::FuncSignatureMismatch {
                             import: None,
