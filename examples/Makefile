@@ -1,3 +1,6 @@
+# Do not remove .wasm files
+.PRECIOUS: %.wasm
+
 CC = clang
 CXX = clang++
 WASM2WAT ?= wasm2wat
@@ -15,4 +18,8 @@ export PATH := /usr/local/opt/llvm/bin:$(PATH)
 
 .PHONY: all
 all:
-	make *.wat hello/*.wat
+	make $(patsubst %.c,%.wat,$(wildcard *.c hello/*.c)) $(patsubst %.cpp,%.wat,$(wildcard *.cpp))
+
+.PHONY: clean
+clean:
+	rm -f *.wat hello/*.wat *.wasm hello/*.wasm
