@@ -7,22 +7,37 @@ use std::marker::PhantomData;
 use std::str;
 use wain_ast::*;
 
-fn section_name(id: u8) -> &'static str {
-    // https://webassembly.github.io/spec/core/binary/modules.html#sections
-    match id {
-        0 => "custom section",
-        1 => "type section",
-        2 => "import section",
-        3 => "function section",
-        4 => "table section",
-        5 => "memory section",
-        6 => "global section",
-        7 => "export section",
-        8 => "start section",
-        9 => "element section",
-        10 => "code section",
-        11 => "data section",
-        _ => unreachable!(),
+mod section_id {
+    pub const CUSTOM: u8 = 0;
+    pub const TYPE: u8 = 1;
+    pub const IMPORT: u8 = 2;
+    pub const FUNCTION: u8 = 3;
+    pub const TABLE: u8 = 4;
+    pub const MEMORY: u8 = 5;
+    pub const GLOBAL: u8 = 6;
+    pub const EXPORT: u8 = 7;
+    pub const START: u8 = 8;
+    pub const ELEMENT: u8 = 9;
+    pub const CODE: u8 = 10;
+    pub const DATA: u8 = 11;
+
+    pub fn to_name(id: u8) -> &'static str {
+        // https://webassembly.github.io/spec/core/binary/modules.html#sections
+        match id {
+            self::CUSTOM => "custom section",
+            self::TYPE => "type section",
+            self::IMPORT => "import section",
+            self::FUNCTION => "function section",
+            self::TABLE => "table section",
+            self::MEMORY => "memory section",
+            self::GLOBAL => "global section",
+            self::EXPORT => "export section",
+            self::START => "start section",
+            self::ELEMENT => "element section",
+            self::CODE => "code section",
+            self::DATA => "data section",
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -159,7 +174,7 @@ impl<'s> Parser<'s> {
     }
 
     fn section_parser(&mut self) -> Result<'s, Parser<'s>> {
-        let section = section_name(self.input[0]);
+        let section = section_id::to_name(self.input[0]);
         self.eat(1); // Eat section ID
         let size = self.parse_int::<u32>()? as usize;
         let parser = self.sub_parser(size as usize, section)?;
@@ -170,7 +185,7 @@ impl<'s> Parser<'s> {
     // Note: Custom section is a pair of name and bytes payload. Currently custom section is simply
     // ignored since it is not necessary to execute wasm binary.
     fn ignore_custom_sections(&mut self) -> Result<'s, ()> {
-        while let [0, ..] = self.input {
+        while let [section_id::CUSTOM, ..] = self.input {
             let mut inner = self.section_parser()?;
             let _: Name = inner.parse()?;
         }
@@ -200,7 +215,7 @@ impl<'s> Parser<'s> {
             Ok(())
         } else {
             Err(self.error(ErrorKind::MalformedSectionSize {
-                name: section_name(section_id),
+                name: section_id::to_name(section_id),
                 remaining_bytes: self.input.len(),
             }))
         }
@@ -245,7 +260,10 @@ impl<'s> Parse<'s> for Root<'s, BinarySource<'s>> {
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-module
 impl<'s> Parse<'s> for Module<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        fn parse_section<'s, P: Parse<'s>>(parser: &mut Parser<'s>, id: u8) -> Result<'s, Vec<P>> {
+        fn parse_section_into_vec<'s, P: Parse<'s>>(
+            parser: &mut Parser<'s>,
+            id: u8,
+        ) -> Result<'s, Vec<P>> {
             if parser.input.starts_with(&[id]) {
                 let mut inner = parser.section_parser()?;
                 let vec = inner.parse_vec()?.into_vec();
@@ -259,7 +277,7 @@ impl<'s> Parse<'s> for Module<'s> {
         let start = parser.current_pos();
 
         match parser.input {
-            [0x00, 0x61, 0x73, 0x6d, ..] => parser.eat(4),
+            [0x00, 0x61, 0x73, 0x6d, ..] => parser.eat(4), // b"\0asm"
             _ => return Err(parser.error(ErrorKind::WasmMagicNotFound)),
         }
 
@@ -275,7 +293,7 @@ impl<'s> Parse<'s> for Module<'s> {
         parser.ignore_custom_sections()?;
 
         // Type section
-        let types = parse_section(parser, 1)?;
+        let types = parse_section_into_vec(parser, section_id::TYPE)?;
 
         parser.ignore_custom_sections()?;
 
@@ -285,7 +303,7 @@ impl<'s> Parse<'s> for Module<'s> {
         let mut globals = vec![];
 
         // Import section
-        if let [2, ..] = parser.input {
+        if let [section_id::IMPORT, ..] = parser.input {
             let mut inner = parser.section_parser()?;
             for desc in inner.parse_vec()? {
                 match desc? {
@@ -295,7 +313,7 @@ impl<'s> Parse<'s> for Module<'s> {
                     ImportDesc::Global(g) => globals.push(g),
                 }
             }
-            inner.check_section_end(2)?;
+            inner.check_section_end(section_id::IMPORT)?;
         }
 
         parser.ignore_custom_sections()?;
@@ -303,35 +321,35 @@ impl<'s> Parse<'s> for Module<'s> {
         // Function section
         // https://webassembly.github.io/spec/core/binary/modules.html#binary-funcsec
         // Only type indices are stored in function section. Locals and bodies are stored in code section
-        let func_indices: Vec<u32> = parse_section(parser, 3)?;
+        let func_indices: Vec<u32> = parse_section_into_vec(parser, section_id::FUNCTION)?;
         funcs.reserve(func_indices.len());
 
         parser.ignore_custom_sections()?;
 
         // Table section
-        parser.push_vec_items(4, &mut tables)?;
+        parser.push_vec_items(section_id::TABLE, &mut tables)?;
 
         parser.ignore_custom_sections()?;
 
         // Memory section
-        parser.push_vec_items(5, &mut memories)?;
+        parser.push_vec_items(section_id::MEMORY, &mut memories)?;
 
         parser.ignore_custom_sections()?;
 
         // Global section
-        parser.push_vec_items(6, &mut globals)?;
+        parser.push_vec_items(section_id::GLOBAL, &mut globals)?;
 
         parser.ignore_custom_sections()?;
 
-        let exports = parse_section(parser, 7)?;
+        let exports = parse_section_into_vec(parser, section_id::EXPORT)?;
 
         parser.ignore_custom_sections()?;
 
         // Start function section
-        let entrypoint = if let [8, ..] = parser.input {
+        let entrypoint = if let [section_id::START, ..] = parser.input {
             let mut inner = parser.section_parser()?;
             let start = inner.parse()?;
-            inner.check_section_end(8)?;
+            inner.check_section_end(section_id::START)?;
             Some(start)
         } else {
             None
@@ -340,12 +358,12 @@ impl<'s> Parse<'s> for Module<'s> {
         parser.ignore_custom_sections()?;
 
         // Element segments section
-        let elems = parse_section(parser, 9)?;
+        let elems = parse_section_into_vec(parser, section_id::ELEMENT)?;
 
         parser.ignore_custom_sections()?;
 
         // Code section
-        if let [10, ..] = parser.input {
+        if let [section_id::CODE, ..] = parser.input {
             let mut inner = parser.section_parser()?;
 
             let codes = inner.parse_vec::<Code>()?;
@@ -368,7 +386,7 @@ impl<'s> Parse<'s> for Module<'s> {
                 });
             }
 
-            inner.check_section_end(10)?
+            inner.check_section_end(section_id::CODE)?
         } else if !func_indices.is_empty() {
             return Err(parser.error(ErrorKind::FuncCodeLengthMismatch {
                 num_funcs: func_indices.len(),
@@ -378,7 +396,7 @@ impl<'s> Parse<'s> for Module<'s> {
 
         parser.ignore_custom_sections()?;
 
-        let data = parse_section(parser, 11)?;
+        let data = parse_section_into_vec(parser, section_id::DATA)?;
 
         parser.ignore_custom_sections()?;
 

@@ -66,7 +66,8 @@ pub struct Runtime<'module, 'source, I: Importer> {
     module: ModuleInstance<'module, 'source>,
     stack: Stack,
     importer: I,
-    // Call frame param types and local types as slices. The slices' lifetimes were derived from module
+    // Call frame has param types and local types as slices. The slices' lifetimes were derived
+    // from module.
     frame: CallFrame<'module>,
 }
 
