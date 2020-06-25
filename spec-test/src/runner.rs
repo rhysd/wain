@@ -1,5 +1,6 @@
 use crate::crash::CrashTester;
 use crate::error::{Error, ErrorKind, Result, RunKind};
+use crate::importer::SpecTestImporter;
 use crate::parser::Parser;
 use crate::wast;
 use std::collections::HashMap;
@@ -9,7 +10,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time;
 use wain_ast as ast;
-use wain_exec::{DefaultImporter, Runtime, Value};
+use wain_exec::{Runtime, Value};
 use wain_syntax_binary as binary;
 use wain_syntax_text as wat;
 use wain_validate::validate;
@@ -272,7 +273,7 @@ impl<W: Write> Runner<W> {
     }
 }
 
-type TestRuntime<'m, 's> = Runtime<'m, 's, DefaultImporter<Discard, Discard>>;
+type TestRuntime<'m, 's> = Runtime<'m, 's, SpecTestImporter>;
 type IndexToModule<'s> = HashMap<usize, (ast::Module<'s>, usize)>;
 
 struct Instances<'mods, 'src: 'mods> {
@@ -291,8 +292,7 @@ impl<'m, 's> Instances<'m, 's> {
     }
 
     fn new_runtime(&self, m: &'m ast::Module<'s>, pos: usize) -> Result<'s, TestRuntime<'m, 's>> {
-        let importer = DefaultImporter::with_stdio(Discard, Discard);
-        let runtime = Runtime::instantiate(m, importer)
+        let runtime = Runtime::instantiate(m, SpecTestImporter)
             .map_err(|err| Error::run_error(RunKind::Trapped(*err), self.source, pos))?;
         Ok(runtime)
     }
@@ -519,8 +519,7 @@ impl<'a> Tester<'a> {
                 pred: wast::TrapPredicate::Module(root),
             }) => {
                 validate(root)?;
-                let importer = DefaultImporter::with_stdio(Discard, Discard);
-                match Runtime::instantiate(&root.module, importer) {
+                match Runtime::instantiate(&root.module, SpecTestImporter) {
                     Ok(_) => Err(Error::run_error(
                         RunKind::InvokeTrapExpected {
                             ret: None,

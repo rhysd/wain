@@ -2,6 +2,7 @@
 
 mod crash;
 mod error;
+mod importer;
 mod parser;
 mod runner;
 mod wast;

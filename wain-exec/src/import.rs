@@ -16,6 +16,7 @@ pub enum ImportInvokeError {
 }
 
 pub trait Importer {
+    const MODULE_NAME: &'static str = "env";
     fn validate(
         &self,
         name: &str,

@@ -97,32 +97,32 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
                 ast::FuncKind::Body { .. } => break, // All imports precedes other definitions
                 ast::FuncKind::Import(i) => {
                     let mod_name = &i.mod_name.0;
-                    if mod_name == "env" {
-                        let fty = &module.types[func.idx as usize];
-                        let name = &i.name.0;
-                        match importer.validate(name, &fty.params, fty.results.get(0).copied()) {
-                            Some(ImportInvalidError::NotFound) => {
-                                return Err(unknown_import(i, func.start));
-                            }
-                            Some(ImportInvalidError::SignatureMismatch {
-                                expected_params,
-                                expected_ret,
-                            }) => {
-                                return Err(Trap::new(
-                                    TrapReason::FuncSignatureMismatch {
-                                        import: Some((mod_name.to_string(), name.to_string())),
-                                        expected_params: expected_params.iter().copied().collect(),
-                                        expected_results: expected_ret.into_iter().collect(),
-                                        actual_params: fty.params.iter().copied().collect(),
-                                        actual_results: fty.results.clone().into_boxed_slice(),
-                                    },
-                                    func.start,
-                                ))
-                            }
-                            None => { /* do nothing */ }
-                        }
-                    } else {
+                    if mod_name != I::MODULE_NAME {
                         return Err(unknown_import(i, func.start));
+                    }
+
+                    let fty = &module.types[func.idx as usize];
+                    let name = &i.name.0;
+                    match importer.validate(name, &fty.params, fty.results.get(0).copied()) {
+                        Some(ImportInvalidError::NotFound) => {
+                            return Err(unknown_import(i, func.start));
+                        }
+                        Some(ImportInvalidError::SignatureMismatch {
+                            expected_params,
+                            expected_ret,
+                        }) => {
+                            return Err(Trap::new(
+                                TrapReason::FuncSignatureMismatch {
+                                    import: Some((mod_name.to_string(), name.to_string())),
+                                    expected_params: expected_params.iter().copied().collect(),
+                                    expected_results: expected_ret.into_iter().collect(),
+                                    actual_params: fty.params.iter().copied().collect(),
+                                    actual_results: fty.results.clone().into_boxed_slice(),
+                                },
+                                func.start,
+                            ))
+                        }
+                        None => { /* do nothing */ }
                     }
                 }
             }
@@ -218,7 +218,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
         has_ret: bool,
         pos: usize,
     ) -> Result<bool> {
-        if import.mod_name.0 == "env" {
+        if import.mod_name.0 == I::MODULE_NAME {
             match self
                 .importer
                 .call(&import.name.0, &mut self.stack, &mut self.module.memory)
