@@ -125,6 +125,7 @@ impl<R: Read, W: Write> Importer for DefaultImporter<R, W> {
             "putchar" => check_func_signature(params, ret, &[I32], Some(I32)),
             "getchar" => check_func_signature(params, ret, &[], Some(I32)),
             "memcpy" => check_func_signature(params, ret, &[I32, I32, I32], Some(I32)),
+            "abort" => check_func_signature(params, ret, &[], None),
             _ => Some(ImportInvalidError::NotFound),
         }
     }
@@ -144,6 +145,9 @@ impl<R: Read, W: Write> Importer for DefaultImporter<R, W> {
                 self.getchar(stack);
                 Ok(())
             }
+            "abort" => Err(ImportInvokeError::Fatal {
+                message: "aborted".to_string(),
+            }),
             "memcpy" => self.memcpy(stack, memory),
             _ => unreachable!("fatal: invalid import function '{}'", name),
         }

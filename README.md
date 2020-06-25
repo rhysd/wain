@@ -191,6 +191,7 @@ By default, only following C functions are supported in `env` module as external
 - `int putchar(int)` (in wasm `(func (param i32) (result i32))`)
 - `int getchar(void)` (in wasm `(func (param) (result i32))`)
 - `void *memcpy(void *, void *, size_t)` (in wasm `(func (param i32 i32 i32) (result i32))`)
+- `void abort(void)` (in wasm `(func (param) (result))`)
 
 But you can implement your own struct which implements `wain_exec::Importer` for defining external
 functions from Rust side.
