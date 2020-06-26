@@ -15,7 +15,7 @@ mod table;
 mod value;
 
 pub use import::{
-    check_func_signature, DefaultImporter, ImportInvalidError, ImportInvokeError, Importer,
+    check_func_signature, DefaultImporter, ImportFatalError, ImportFuncError, Importer,
 };
 pub use memory::Memory;
 pub use runtime::Runtime;

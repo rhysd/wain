@@ -1,6 +1,6 @@
 use crate::cast;
 use crate::globals::Globals;
-use crate::import::{ImportInvalidError, ImportInvokeError, Importer};
+use crate::import::{ImportFatalError, ImportFuncError, Importer};
 use crate::memory::Memory;
 use crate::stack::{CallFrame, Stack, StackAccess};
 use crate::table::Table;
@@ -103,11 +103,11 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
 
                     let fty = &module.types[func.idx as usize];
                     let name = &i.name.0;
-                    match importer.validate(name, &fty.params, fty.results.get(0).copied()) {
-                        Some(ImportInvalidError::NotFound) => {
+                    match importer.validate_func(name, &fty.params, fty.results.get(0).copied()) {
+                        Some(ImportFuncError::NotFound) => {
                             return Err(unknown_import(i, func.start));
                         }
-                        Some(ImportInvalidError::SignatureMismatch {
+                        Some(ImportFuncError::SignatureMismatch {
                             expected_params,
                             expected_ret,
                         }) => {
@@ -224,7 +224,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
                 .call(&import.name.0, &mut self.stack, &mut self.module.memory)
             {
                 Ok(()) => return Ok(has_ret),
-                Err(ImportInvokeError::Fatal { message }) => {
+                Err(ImportFatalError { message }) => {
                     return Err(Trap::new(
                         TrapReason::ImportFuncCallFail {
                             mod_name: import.mod_name.0.to_string(),
