@@ -117,6 +117,10 @@ impl Summary {
     pub fn success(&self) -> bool {
         self.failed == 0
     }
+
+    pub fn failures(&self) -> u32 {
+        self.failed
+    }
 }
 
 // Test runner for one .wast file
@@ -174,7 +178,7 @@ impl<W: Write> Runner<W> {
         Ok(())
     }
 
-    pub fn run_dir(&mut self, dir: &Path) -> io::Result<bool> {
+    pub fn run_dir(&mut self, dir: &Path) -> io::Result<Summary> {
         let mut total = Summary::default();
         let mut num_files = 0;
         let mut summaries = vec![];
@@ -214,7 +218,7 @@ impl<W: Write> Runner<W> {
         total.println(&mut self.out);
         self.out.write_all(color::RESET).unwrap();
         self.save_summaries(&mut summaries, &total)?;
-        Ok(total.failed == 0)
+        Ok(total)
     }
 
     pub fn run_file(&mut self, path: &Path, file: &str) -> io::Result<Summary> {

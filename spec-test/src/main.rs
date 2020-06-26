@@ -34,6 +34,7 @@ struct Options {
     fast_fail: bool,
     write: Option<PathBuf>,
     target: Target,
+    allowed_failures: Option<u32>,
 }
 
 fn parse_options() -> Result<Options, &'static str> {
@@ -46,6 +47,7 @@ fn parse_options() -> Result<Options, &'static str> {
             p.push("wasm-testsuite");
             Target::Dir(p)
         },
+        allowed_failures: None,
     };
 
     let mut args = env::args().skip(1);
@@ -63,6 +65,17 @@ fn parse_options() -> Result<Options, &'static str> {
                     opts.write = Some(PathBuf::from(path));
                 } else {
                     return Err("-w or --write-summary must be followed by file path argument");
+                }
+            }
+            "--allowed-failures" => {
+                if let Some(arg) = args.next() {
+                    if let Ok(n) = arg.parse() {
+                        opts.allowed_failures = Some(n);
+                    } else {
+                        return Err("--allowed-failures must be followed by uint argument");
+                    }
+                } else {
+                    return Err("--allowed-failures must be followed by uint argument");
                 }
             }
             _ => {
@@ -98,11 +111,20 @@ fn main() -> io::Result<()> {
 
     let stdout = io::stdout();
     let mut runner = Runner::new(stdout.lock(), opts.fast_fail, opts.write);
-    let success = match &opts.target {
+    let summary = match &opts.target {
         Target::Dir(dir) => runner.run_dir(dir)?,
-        Target::File(path, file) => runner.run_file(path, file)?.success(),
+        Target::File(path, file) => runner.run_file(path, file)?,
     };
-    if success {
+    if let Some(allowed) = opts.allowed_failures {
+        let actual = summary.failures();
+        if allowed < actual {
+            eprintln!(
+                "Expected {} or fewer failures but actually got {} failures",
+                allowed, actual
+            );
+            exit(1);
+        }
+    } else if summary.success() {
         println!("🎊");
     } else {
         exit(1);

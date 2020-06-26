@@ -82,3 +82,23 @@ jobs:
       - run: cargo run examples/fib.wat
       - run: cargo run examples/boyer_moore.wasm
       - run: cargo run examples/boyer_moore.wat
+  spec-tests:
+    name: spec tests
+    # ubuntu-latest is not available because crash-tester does not work when so many arguments
+    # are passed via command line arguments
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - name: Install Rust toolchain
+        run: |
+          rustup set profile minimal
+          rustup update stable
+          rustup default stable
+          rustup show
+          cargo --version
+      - name: Run spec tests
+        run: |
+          cd spec-test
+          cargo run --release -- --allowed-failures 179
