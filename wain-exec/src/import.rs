@@ -3,7 +3,7 @@ use crate::stack::Stack;
 use std::io::{Read, Write};
 use wain_ast::ValType;
 
-pub enum ImportFuncError {
+pub enum ImportInvalidError {
     NotFound,
     SignatureMismatch {
         expected_params: &'static [ValType],
@@ -11,30 +11,24 @@ pub enum ImportFuncError {
     },
 }
 
-pub struct ImportFatalError {
-    pub message: String,
+pub enum ImportInvokeError {
+    Fatal { message: String },
 }
 
 pub trait Importer {
     const MODULE_NAME: &'static str = "env";
-
-    fn validate_func(
+    fn validate(
         &self,
-        _name: &str,
-        _params: &[ValType],
-        _ret: Option<ValType>,
-    ) -> Option<ImportFuncError> {
-        Some(ImportFuncError::NotFound)
-    }
-
+        name: &str,
+        params: &[ValType],
+        ret: Option<ValType>,
+    ) -> Option<ImportInvalidError>;
     fn call(
         &mut self,
-        _name: &str,
-        _stack: &mut Stack,
-        _memory: &mut Memory,
-    ) -> Result<(), ImportFatalError> {
-        unreachable!()
-    }
+        name: &str,
+        stack: &mut Stack,
+        memory: &mut Memory,
+    ) -> Result<(), ImportInvokeError>;
 }
 
 pub fn check_func_signature(
@@ -42,11 +36,11 @@ pub fn check_func_signature(
     actual_ret: Option<ValType>,
     expected_params: &'static [ValType],
     expected_ret: Option<ValType>,
-) -> Option<ImportFuncError> {
+) -> Option<ImportInvalidError> {
     if actual_params.eq(expected_params) && actual_ret == expected_ret {
         return None;
     }
-    Some(ImportFuncError::SignatureMismatch {
+    Some(ImportInvalidError::SignatureMismatch {
         expected_params,
         expected_ret,
     })
@@ -90,7 +84,7 @@ impl<R: Read, W: Write> DefaultImporter<R, W> {
     }
 
     // (func (param i32 i32 i32) (result i32))
-    fn memcpy(&mut self, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportFatalError> {
+    fn memcpy(&mut self, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportInvokeError> {
         // memcpy(void *dest, void *src, size_t n)
         let size = stack.pop::<i32>() as usize;
         let src_start = stack.pop::<i32>() as usize;
@@ -106,7 +100,7 @@ impl<R: Read, W: Write> DefaultImporter<R, W> {
             let (src, dest) = memory.data_mut().split_at_mut(dest_start);
             (&mut dest[..size], &mut src[src_start..src_end])
         } else {
-            return Err(ImportFatalError {
+            return Err(ImportInvokeError::Fatal {
                 message: format!(
                     "range overwrap on memcpy: src={}..{} and dest={}..{}",
                     src_start, src_end, dest_start, dest_end
@@ -121,19 +115,19 @@ impl<R: Read, W: Write> DefaultImporter<R, W> {
 }
 
 impl<R: Read, W: Write> Importer for DefaultImporter<R, W> {
-    fn validate_func(
+    fn validate(
         &self,
         name: &str,
         params: &[ValType],
         ret: Option<ValType>,
-    ) -> Option<ImportFuncError> {
+    ) -> Option<ImportInvalidError> {
         use ValType::*;
         match name {
             "putchar" => check_func_signature(params, ret, &[I32], Some(I32)),
             "getchar" => check_func_signature(params, ret, &[], Some(I32)),
             "memcpy" => check_func_signature(params, ret, &[I32, I32, I32], Some(I32)),
             "abort" => check_func_signature(params, ret, &[], None),
-            _ => Some(ImportFuncError::NotFound),
+            _ => Some(ImportInvalidError::NotFound),
         }
     }
 
@@ -142,7 +136,7 @@ impl<R: Read, W: Write> Importer for DefaultImporter<R, W> {
         name: &str,
         stack: &mut Stack,
         memory: &mut Memory,
-    ) -> Result<(), ImportFatalError> {
+    ) -> Result<(), ImportInvokeError> {
         match name {
             "putchar" => {
                 self.putchar(stack);
@@ -152,7 +146,7 @@ impl<R: Read, W: Write> Importer for DefaultImporter<R, W> {
                 self.getchar(stack);
                 Ok(())
             }
-            "abort" => Err(ImportFatalError {
+            "abort" => Err(ImportInvokeError::Fatal {
                 message: "aborted".to_string(),
             }),
             "memcpy" => self.memcpy(stack, memory),

@@ -199,7 +199,7 @@ functions from Rust side.
 ```rust
 extern crate wain_exec;
 extern crate wain_ast;
-use wain_exec::{Runtime, Stack, Memory, Importer, ImportFatalError, ImportFuncError}
+use wain_exec::{Runtime, Stack, Memory, Importer, ImportInvokeError, ImportInvalidError}
 use wain_ast::ValType;
 
 struct YourOwnImporter {
@@ -207,19 +207,19 @@ struct YourOwnImporter {
 }
 
 impl Importer for YourOwnImporter {
-    fn validate(&self, name: &str, params: &[ValType], ret: Option<ValType>) -> Option<ImportFuncError> {
+    fn validate(&self, name: &str, params: &[ValType], ret: Option<ValType>) -> Option<ImportInvalidError> {
         // `name` is a name of function to validate. `params` and `ret` are the function's signature.
-        // Return ImportFuncError::NotFound when the name is unknown.
-        // Return ImportFuncError::SignatureMismatch when signature does not match.
+        // Return ImportInvalidError::NotFound when the name is unknown.
+        // Return ImportInvalidError::SignatureMismatch when signature does not match.
         // wain_exec::check_func_signature() utility is would be useful for the check.
     }
-    fn call(&mut self, name: &str, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportFatalError> {
+    fn call(&mut self, name: &str, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportInvokeError> {
         // Implement your own function call. `name` is a name of function and you have full access
         // to stack and linear memory. Pop values from stack for getting arguments and push value to
         // set return value.
         // Note: Consistency between imported function signature and implementation of this method
         // is your responsibility.
-        // On invocation failure, return ImportFatalError. It is trapped by interpreter and it
+        // On invocation failure, return ImportInvokeError::Fatal. It is trapped by interpreter and it
         // stops execution immediately.
     };
 }

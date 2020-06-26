@@ -1,5 +1,7 @@
 use wain_ast::ValType;
-use wain_exec::{check_func_signature, ImportFatalError, ImportFuncError, Importer, Memory, Stack};
+use wain_exec::{
+    check_func_signature, ImportInvalidError, ImportInvokeError, Importer, Memory, Stack,
+};
 
 pub struct SpecTestImporter;
 
@@ -10,12 +12,12 @@ pub struct SpecTestImporter;
 impl Importer for SpecTestImporter {
     const MODULE_NAME: &'static str = "spectest";
 
-    fn validate_func(
+    fn validate(
         &self,
         name: &str,
         params: &[ValType],
         ret: Option<ValType>,
-    ) -> Option<ImportFuncError> {
+    ) -> Option<ImportInvalidError> {
         use ValType::*;
         match name {
             "print" => check_func_signature(params, ret, &[], None),
@@ -28,7 +30,7 @@ impl Importer for SpecTestImporter {
             // - "global_i32", "global_f32", "global_f64" external globals
             // - "table" external table
             // - "memory" external memory
-            _ => Some(ImportFuncError::NotFound),
+            _ => Some(ImportInvalidError::NotFound),
         }
     }
 
@@ -37,7 +39,7 @@ impl Importer for SpecTestImporter {
         name: &str,
         stack: &mut Stack,
         _: &mut Memory,
-    ) -> Result<(), ImportFatalError> {
+    ) -> Result<(), ImportInvokeError> {
         match name {
             "print" => Ok(()),
             "print_i32" => {
@@ -66,7 +68,7 @@ impl Importer for SpecTestImporter {
             // - "global_i32", "global_f32", "global_f64" external globals
             // - "table" external table
             // - "memory" external memory
-            _ => Err(ImportFatalError {
+            _ => Err(ImportInvokeError::Fatal {
                 message: format!("not found: {}", name),
             }),
         }
