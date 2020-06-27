@@ -114,10 +114,10 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
                             return Err(Trap::new(
                                 TrapReason::FuncSignatureMismatch {
                                     import: Some((mod_name.to_string(), name.to_string())),
-                                    expected_params: expected_params.iter().copied().collect(),
+                                    expected_params: expected_params.to_vec(),
                                     expected_results: expected_ret.into_iter().collect(),
-                                    actual_params: fty.params.iter().copied().collect(),
-                                    actual_results: fty.results.clone().into_boxed_slice(),
+                                    actual_params: fty.params.to_vec(),
+                                    actual_results: fty.results.clone(),
                                 },
                                 func.start,
                             ))
@@ -330,8 +330,8 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             return Err(Trap::new(
                 TrapReason::InvokeInvalidArgs {
                     name: name.to_string(),
-                    args: args.iter().cloned().collect(),
-                    arg_types: arg_types.iter().copied().collect(),
+                    args: args.to_vec(),
+                    arg_types: arg_types.to_vec(),
                 },
                 start,
             ));
@@ -560,10 +560,10 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                     return Err(Trap::new(
                         TrapReason::FuncSignatureMismatch {
                             import: None,
-                            expected_params: expected.params.clone().into_boxed_slice(),
-                            expected_results: expected.results.clone().into_boxed_slice(),
-                            actual_params: actual.params.clone().into_boxed_slice(),
-                            actual_results: actual.results.clone().into_boxed_slice(),
+                            expected_params: expected.params.clone(),
+                            expected_results: expected.results.clone(),
+                            actual_params: actual.params.clone(),
+                            actual_results: actual.results.clone(),
                         },
                         self.start,
                     ));

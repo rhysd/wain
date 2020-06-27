@@ -225,7 +225,7 @@ impl Stack {
 pub struct CallFrame<'func> {
     pub base_addr: usize,
     pub base_idx: usize,
-    local_addrs: Box<[usize]>, // Calculate local addresses in advance for random access
+    local_addrs: Vec<usize>, // Calculate local addresses in advance for random access
     params: &'func [ValType],
     locals: &'func [ValType],
 }
@@ -252,7 +252,7 @@ impl<'f> CallFrame<'f> {
         Self {
             base_addr,
             base_idx,
-            local_addrs: addrs.into_boxed_slice(),
+            local_addrs: addrs,
             params,
             locals,
         }
