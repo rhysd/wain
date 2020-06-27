@@ -1,5 +1,6 @@
 use std::env;
 use std::io;
+use std::io::BufRead;
 use std::process;
 use wain_exec::{DefaultImporter, Runtime, Value};
 use wain_syntax_text::parser::Parser;
@@ -41,20 +42,18 @@ fn main() {
 
     let invoke_args = {
         let mut vals = vec![];
-        let mut a = &args[3..];
-        while !a.is_empty() {
-            let (ty, val) = (&a[0], &a[1]);
-            let val = match ty.as_str() {
+        for line in io::stdin().lock().lines() {
+            let line = line.unwrap();
+            let mut it = line.split(' ');
+            let (ty, val) = (it.next().unwrap(), it.next().unwrap());
+            let val = match ty {
                 "i32" => Value::I32(val.parse().unwrap()),
                 "i64" => Value::I64(val.parse().unwrap()),
                 "f32" => Value::F32(val.parse().unwrap()),
                 "f64" => Value::F64(val.parse().unwrap()),
                 unknown => panic!("unknown type {}", unknown),
             };
-
             vals.push(val);
-
-            a = &a[2..];
         }
         vals
     };
