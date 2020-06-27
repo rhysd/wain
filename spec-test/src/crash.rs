@@ -1,7 +1,8 @@
 use crate::error::{Error, Result, RunKind};
 use crate::wast;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use wain_exec::Value;
 
 pub struct CrashTester {
@@ -42,29 +43,36 @@ impl CrashTester {
         args: &[wast::Const],
     ) -> Result<'s, String> {
         let mut cmd = Command::new(&self.bin_path);
-        cmd.arg(source);
+        cmd.arg(source).arg(mod_offset.to_string()).arg(name);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-        let mut cmd_args = vec![];
-        cmd_args.push(mod_offset.to_string());
-        cmd_args.push(name.to_owned());
+        let mut child = cmd.spawn().unwrap();
 
+        // Input stdin. One argument per line
+        //
+        //   i32 42
+        //   f32 3.14
+        //   ...
+        let stdin = child.stdin.as_mut().unwrap();
         for arg in args {
-            let (ty, v) = match arg.to_value().unwrap() {
-                Value::I32(i) => ("i32", i.to_string()),
-                Value::I64(i) => ("i64", i.to_string()),
-                Value::F32(f) => ("f32", f.to_string()),
-                Value::F64(f) => ("f64", f.to_string()),
-            };
-            cmd_args.push(ty.to_owned());
-            cmd_args.push(v);
+            match arg.to_value().unwrap() {
+                Value::I32(i) => writeln!(stdin, "i32 {}", i),
+                Value::I64(i) => writeln!(stdin, "i64 {}", i),
+                Value::F32(f) => writeln!(stdin, "f32 {}", f),
+                Value::F64(f) => writeln!(stdin, "f64 {}", f),
+            }
+            .unwrap();
         }
+        stdin.flush().unwrap();
 
-        let out = cmd.args(&cmd_args).output().unwrap();
+        let out = child.wait_with_output().unwrap();
         if out.status.success() {
             return Err(Error::run_error(
                 RunKind::DidNotCrash {
                     bin: self.bin_path.clone(),
-                    args: cmd_args.into_boxed_slice(),
+                    args: args.iter().map(|a| format!("{:?}", a)).collect(),
                     stdout: String::from_utf8_lossy(&out.stdout).to_string(),
                 },
                 source,
