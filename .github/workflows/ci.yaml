@@ -84,9 +84,11 @@ jobs:
       - run: cargo run examples/boyer_moore.wat
   spec-tests:
     name: spec tests
-    # ubuntu-latest is not available because crash-tester does not work when so many arguments
-    # are passed via command line arguments
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
         with:
