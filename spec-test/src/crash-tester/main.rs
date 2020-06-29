@@ -1,6 +1,6 @@
 use std::env;
 use std::io;
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::process;
 use wain_exec::{DefaultImporter, Runtime, Value};
 use wain_syntax_text::parser::Parser;
@@ -42,32 +42,30 @@ fn main() {
 
     let (invoke_args, source) = {
         let mut vals = vec![];
-        let stdin = io::stdin();
-        let mut lines = stdin.lock().lines();
-        while let Some(line) = lines.next() {
-            let line = line.unwrap();
-            if line.is_empty() {
-                // End of arguments part
-                break;
-            }
+        let mut stdin = io::stdin();
+        {
+            for line in stdin.lock().lines() {
+                let line = line.unwrap();
+                if line.is_empty() {
+                    // End of arguments part
+                    break;
+                }
 
-            let mut it = line.split(' ');
-            let (ty, val) = (it.next().unwrap(), it.next().unwrap());
-            let val = match ty {
-                "i32" => Value::I32(val.parse().unwrap()),
-                "i64" => Value::I64(val.parse().unwrap()),
-                "f32" => Value::F32(val.parse().unwrap()),
-                "f64" => Value::F64(val.parse().unwrap()),
-                unknown => panic!("unknown type {}", unknown),
-            };
-            vals.push(val);
+                let mut it = line.split(' ');
+                let (ty, val) = (it.next().unwrap(), it.next().unwrap());
+                let val = match ty {
+                    "i32" => Value::I32(val.parse().unwrap()),
+                    "i64" => Value::I64(val.parse().unwrap()),
+                    "f32" => Value::F32(val.parse().unwrap()),
+                    "f64" => Value::F64(val.parse().unwrap()),
+                    unknown => panic!("unknown type {}", unknown),
+                };
+                vals.push(val);
+            }
         }
 
         let mut source = String::new();
-        for line in lines {
-            source.push_str(&line.unwrap());
-            source.push('\n');
-        }
+        stdin.read_to_string(&mut source).unwrap();
 
         (vals, source)
     };

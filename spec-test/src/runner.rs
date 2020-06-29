@@ -610,7 +610,8 @@ impl<'a> Tester<'a> {
                     crasher.test_crash(self.source, mod_pos, &invoke.name, &invoke.args)?;
                 match expected.as_str() {
                     "call stack exhausted"
-                        if stderr.contains("fatal runtime error: stack overflow") =>
+                        if stderr.contains("fatal runtime error: stack overflow")
+                            || stderr.contains("has overflowed its stack") =>
                     {
                         Ok(())
                     }
