@@ -101,6 +101,8 @@ jobs:
           rustup show
           cargo --version
       - name: Run spec tests
+        env:
+          RUST_BACKTRACE: 1
         run: |
           cd spec-test
           cargo run --release -- --allowed-failures 179
