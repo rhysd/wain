@@ -28,9 +28,14 @@ impl CrashTester {
         p.pop(); // /path/to/wain
         p.push("target"); // /path/to/wain/target
         p.push("debug"); // /path/to/wain/target/debug
+
+        #[cfg(target_os = "windows")]
+        p.push("crash-tester.exe"); // /path/to/wain/target/debug/crash-tester.exe
+
+        #[cfg(not(target_os = "windows"))]
         p.push("crash-tester"); // /path/to/wain/target/debug/crash-tester
 
-        assert!(p.is_file());
+        assert!(p.is_file(), "crash tester path: {:?}", p);
 
         Self { bin_path: p }
     }
