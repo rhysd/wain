@@ -48,14 +48,14 @@ impl CrashTester {
         args: &[wast::Const],
     ) -> Result<'s, String> {
         let mut cmd = Command::new(&self.bin_path);
-        cmd.arg(source).arg(mod_offset.to_string()).arg(name);
+        cmd.arg(mod_offset.to_string()).arg(name);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         let mut child = cmd.spawn().unwrap();
 
-        // Input stdin. One argument per line
+        // Input arguments to stdin. One argument per line
         //
         //   i32 42
         //   f32 3.14
@@ -70,6 +70,11 @@ impl CrashTester {
             }
             .unwrap();
         }
+        //  And ends with empty line.
+        writeln!(stdin).unwrap();
+        // Then input source code to stdin. Command line argument is not available since some test
+        // code is too large for command line argument on Windows
+        stdin.write_all(source.as_bytes()).unwrap();
         stdin.flush().unwrap();
 
         let out = child.wait_with_output().unwrap();

@@ -24,7 +24,9 @@ impl io::Write for Discard {
 }
 
 fn help() {
-    eprintln!("Usage: crash-tester {{source}} {{byte-offset}} {{name}} [{{type}} {{value}}]...");
+    eprintln!(
+        "Usage: crash-tester {{byte-offset}} {{name}} with proper stdin for arguments and source"
+    );
     process::exit(1);
 }
 
@@ -33,17 +35,22 @@ fn main() {
     if args.len() < 2 {
         help();
     }
-    let args = &args[..];
+    let args = args.as_slice();
 
-    let source = &args[0];
-    let offset: usize = args[1].parse().unwrap();
-    let source = &source[offset..];
-    let name = &args[2];
+    let offset: usize = args[0].parse().unwrap();
+    let name = &args[1];
 
-    let invoke_args = {
+    let (invoke_args, source) = {
         let mut vals = vec![];
-        for line in io::stdin().lock().lines() {
+        let stdin = io::stdin();
+        let mut lines = stdin.lock().lines();
+        while let Some(line) = lines.next() {
             let line = line.unwrap();
+            if line.is_empty() {
+                // End of arguments part
+                break;
+            }
+
             let mut it = line.split(' ');
             let (ty, val) = (it.next().unwrap(), it.next().unwrap());
             let val = match ty {
@@ -55,8 +62,16 @@ fn main() {
             };
             vals.push(val);
         }
-        vals
+
+        let mut source = String::new();
+        for line in lines {
+            source.push_str(&line.unwrap());
+            source.push('\n');
+        }
+
+        (vals, source)
     };
+    let source = &source[offset..];
 
     let wat = match Parser::new(source).parse_wat() {
         Ok(root) => root,
