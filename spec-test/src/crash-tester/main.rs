@@ -1,6 +1,6 @@
 use std::env;
 use std::io;
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::process;
 use wain_exec::{DefaultImporter, Runtime, Value};
 use wain_syntax_text::parser::Parser;
@@ -24,7 +24,9 @@ impl io::Write for Discard {
 }
 
 fn help() {
-    eprintln!("Usage: crash-tester {{source}} {{byte-offset}} {{name}} [{{type}} {{value}}]...");
+    eprintln!(
+        "Usage: crash-tester {{byte-offset}} {{name}} with proper stdin for arguments and source"
+    );
     process::exit(1);
 }
 
@@ -33,30 +35,41 @@ fn main() {
     if args.len() < 2 {
         help();
     }
-    let args = &args[..];
+    let args = args.as_slice();
 
-    let source = &args[0];
-    let offset: usize = args[1].parse().unwrap();
-    let source = &source[offset..];
-    let name = &args[2];
+    let offset: usize = args[0].parse().unwrap();
+    let name = &args[1];
 
-    let invoke_args = {
+    let (invoke_args, source) = {
         let mut vals = vec![];
-        for line in io::stdin().lock().lines() {
-            let line = line.unwrap();
-            let mut it = line.split(' ');
-            let (ty, val) = (it.next().unwrap(), it.next().unwrap());
-            let val = match ty {
-                "i32" => Value::I32(val.parse().unwrap()),
-                "i64" => Value::I64(val.parse().unwrap()),
-                "f32" => Value::F32(val.parse().unwrap()),
-                "f64" => Value::F64(val.parse().unwrap()),
-                unknown => panic!("unknown type {}", unknown),
-            };
-            vals.push(val);
+        let mut stdin = io::stdin();
+        {
+            for line in stdin.lock().lines() {
+                let line = line.unwrap();
+                if line.is_empty() {
+                    // End of arguments part
+                    break;
+                }
+
+                let mut it = line.split(' ');
+                let (ty, val) = (it.next().unwrap(), it.next().unwrap());
+                let val = match ty {
+                    "i32" => Value::I32(val.parse().unwrap()),
+                    "i64" => Value::I64(val.parse().unwrap()),
+                    "f32" => Value::F32(val.parse().unwrap()),
+                    "f64" => Value::F64(val.parse().unwrap()),
+                    unknown => panic!("unknown type {}", unknown),
+                };
+                vals.push(val);
+            }
         }
-        vals
+
+        let mut source = String::new();
+        stdin.read_to_string(&mut source).unwrap();
+
+        (vals, source)
     };
+    let source = &source[offset..];
 
     let wat = match Parser::new(source).parse_wat() {
         Ok(root) => root,

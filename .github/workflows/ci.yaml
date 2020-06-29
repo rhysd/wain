@@ -86,7 +86,7 @@ jobs:
     name: spec tests
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
@@ -101,6 +101,8 @@ jobs:
           rustup show
           cargo --version
       - name: Run spec tests
+        env:
+          RUST_BACKTRACE: 1
         run: |
           cd spec-test
           cargo run --release -- --allowed-failures 179
