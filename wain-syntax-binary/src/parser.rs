@@ -1183,7 +1183,7 @@ mod tests {
     }
 
     test_parse_error!(
-        regresssion_issue_29,
+        regression_issue_29,
         ErrorKind::VersionMismatch(_),
         b"\x00\x61\x73\x6d\x01\x31\x39\x00\x61\x73\x6d\x01\x31\x39\x35\x01" // .asm.19.asm.195.
     );

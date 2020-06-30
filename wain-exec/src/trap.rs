@@ -221,7 +221,7 @@ impl fmt::Display for Trap {
                 JoinWritable(arg_types, " "),
             )?,
             RemZeroDivisor => f.write_str("attempt to calculate reminder with zero divisor")?,
-            DivByZeroOrOverflow => f.write_str("integer overflow or attempt to devide integer by zero")?,
+            DivByZeroOrOverflow => f.write_str("integer overflow or attempt to divide integer by zero")?,
             ValueOutOfRange {
                 src_val,
                 dest_type,
