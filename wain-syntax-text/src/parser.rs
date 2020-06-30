@@ -1787,11 +1787,8 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                 let u = parse_u32_str(self.parser, digits, base, offset)?;
                 if sign == Sign::Plus {
                     InsnKind::I32Const(u as i32)
-                } else if u == i32::MAX as u32 + 1 {
-                    // u as i32 causes overflow
-                    InsnKind::I32Const(i32::MIN)
-                } else if u <= i32::MAX as u32 {
-                    InsnKind::I32Const(-(u as i32))
+                } else if u <= i32::MAX as u32 + 1 {
+                    InsnKind::I32Const(u.wrapping_neg() as i32)
                 } else {
                     return self
                         .parser
@@ -1805,11 +1802,8 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                 let u = parse_u64_str(self.parser, digits, base, offset)?;
                 if sign == Sign::Plus {
                     InsnKind::I64Const(u as i64)
-                } else if u == i64::MAX as u64 + 1 {
-                    // u as i64 causes overflow
-                    InsnKind::I64Const(i64::MIN)
-                } else if u <= i64::MAX as u64 {
-                    InsnKind::I64Const(-(u as i64))
+                } else if u <= i64::MAX as u64 + 1 {
+                    InsnKind::I64Const(u.wrapping_neg() as i64)
                 } else {
                     return self
                         .parser

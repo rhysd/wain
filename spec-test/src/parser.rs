@@ -248,8 +248,7 @@ impl<'s> Parse<'s> for Const {
 
                     match parsed {
                         Ok(u) if sign == Sign::Plus => Ok(u as $int),
-                        Ok(u) if u == <$int>::MAX as $uint + 1 => Ok(<$int>::MIN), // u as $int causes overflow
-                        Ok(u) if u <= <$int>::MAX as $uint => Ok(-(u as $int)),
+                        Ok(u) if u <= <$int>::MAX as $uint + 1 => Ok(u.wrapping_neg() as $int),
                         Ok(u) => parser.fail(ParseKind::TooSmallInt {
                             ty: stringify!($int),
                             digits: u as u64,
