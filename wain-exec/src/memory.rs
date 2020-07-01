@@ -102,13 +102,16 @@ impl Memory {
     pub fn grow(&mut self, num_pages: u32) -> i32 {
         // https://webassembly.github.io/spec/core/exec/instructions.html#exec-memory-grow
         let prev = self.size();
-        let next = prev as usize + num_pages as usize;
+        let (next, overflow) = prev.overflowing_add(num_pages);
+        if overflow {
+            return -1;
+        }
         if let Some(max) = self.max {
-            if next > max as usize {
+            if next > max {
                 return -1;
             }
         }
-        let next_len = next * PAGE_SIZE;
+        let next_len = (next as usize) * PAGE_SIZE;
         if next_len > MAX_MEMORY_BYTES {
             // Note: WebAssembly spec does not limit max size of memory when no limit is specified
             // to memory section. However, an address value is u32. When memory size is larger than
