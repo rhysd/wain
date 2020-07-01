@@ -24,10 +24,24 @@ jobs:
         run: cargo test --color always --all
       - name: Build sources
         run: cargo build --color always --all
-      - name: Run hello.wasm for sanity test
-        run: cargo run -- examples/hello/hello.wasm
-      - name: Run hello.wat for sanity test
-        run: cargo run -- examples/hello/hello.wat
+  beta:
+    name: Rust beta channel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust toolchain
+        run: |
+          rustup set profile minimal
+          rustup update beta
+          rustup default beta
+          rustup show
+          cargo --version
+      - name: Run tests
+        env:
+          RUST_BACKTRACE: 1
+        run: cargo test --color always --all
+      - name: Build sources
+        run: cargo build --color always --all
   linter:
     name: clippy and rustfmt
     runs-on: ubuntu-latest
