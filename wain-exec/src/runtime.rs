@@ -350,7 +350,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
     }
 
     fn mem_addr(&mut self, mem: &ast::Mem) -> usize {
-        let addr = self.stack.pop::<i32>() as usize;
+        let addr = self.stack.pop::<i32>() as u32 as usize;
         addr + mem.offset as usize
     }
 

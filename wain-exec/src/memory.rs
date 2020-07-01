@@ -102,7 +102,10 @@ impl Memory {
     pub fn grow(&mut self, num_pages: u32) -> i32 {
         // https://webassembly.github.io/spec/core/exec/instructions.html#exec-memory-grow
         let prev = self.size();
-        let next = prev + num_pages;
+        let (next, overflow) = prev.overflowing_add(num_pages);
+        if overflow {
+            return -1;
+        }
         if let Some(max) = self.max {
             if next > max {
                 return -1;
