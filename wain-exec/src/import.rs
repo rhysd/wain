@@ -86,10 +86,10 @@ impl<R: Read, W: Write> DefaultImporter<R, W> {
     // (func (param i32 i32 i32) (result i32))
     fn memcpy(&mut self, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportInvokeError> {
         // memcpy(void *dest, void *src, size_t n)
-        let size = stack.pop::<i32>() as usize;
-        let src_start = stack.pop::<i32>() as usize;
+        let size = stack.pop::<i32>() as u32 as usize;
+        let src_start = stack.pop::<i32>() as u32 as usize;
         let dest_i32: i32 = stack.pop();
-        let dest_start = dest_i32 as usize;
+        let dest_start = dest_i32 as u32 as usize;
         let src_end = src_start + size;
         let dest_end = dest_start + size;
 
