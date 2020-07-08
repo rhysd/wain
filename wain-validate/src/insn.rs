@@ -387,8 +387,10 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-call
             Call(funcidx) => {
                 let func = ctx.outer.func_from_idx(*funcidx, ctx.current_op, start)?;
-                // func.idx was already validated
-                let fty = &ctx.outer.module.types[func.idx as usize];
+                // func.idx might be invalid when the callee is not validated yet (#39)
+                let fty = ctx
+                    .outer
+                    .type_from_idx(func.idx, "callee at call instruction", start)?;
                 // Pop extracts parameters in reverse order
                 for (i, ty) in fty.params.iter().enumerate().rev() {
                     ctx.pop_op_stack(Type::Known(*ty))
