@@ -52,6 +52,7 @@ dependencies = [
  "wain",
  "wain-syntax-binary",
  "wain-syntax-text",
+ "wain-validate",
 ]
 
 [[package]]
