@@ -211,10 +211,29 @@ impl Stack {
         }
     }
 
-    pub fn extend_zero_values(&mut self, types: &[ValType]) {
-        self.types.extend_from_slice(types);
-        let bytes = types.iter().fold(0, |acc, t| acc + t.bytes());
-        self.bytes.resize(self.bytes.len() + bytes, 0);
+    pub fn create_callframe(&mut self, params: &[ValType], locals: &[ValType]) -> CallFrame {
+        let mut local_addrs = Vec::with_capacity(params.len() + locals.len());
+
+        // Note: Params were already pushed to stack
+        let params_bytes = params.iter().fold(0, |acc, p| acc + p.bytes());
+        let base_addr = self.top_addr() - params_bytes;
+        let base_idx = self.top_idx() - params.len();
+
+        self.types.extend_from_slice(locals);
+
+        let mut addr = base_addr;
+        for p in &self.types[base_idx..] {
+            local_addrs.push(addr);
+            addr += p.bytes();
+        }
+
+        self.bytes.resize(addr, 0);
+
+        CallFrame {
+            base_addr,
+            base_idx,
+            local_addrs,
+        }
     }
 }
 
@@ -222,56 +241,20 @@ impl Stack {
 // This class is outside Machine because it has shorter lifetime. It only lives while the current
 // function is being invoked
 #[derive(Default)]
-pub struct CallFrame<'func> {
+pub struct CallFrame {
     pub base_addr: usize,
     pub base_idx: usize,
     local_addrs: Vec<usize>, // Calculate local addresses in advance for random access
-    params: &'func [ValType],
-    locals: &'func [ValType],
 }
 
-impl<'f> CallFrame<'f> {
-    pub fn new(stack: &Stack, params: &'f [ValType], locals: &'f [ValType]) -> Self {
-        let mut addrs = Vec::with_capacity(params.len() + locals.len());
-
-        // Note: Params were already pushed to stack
-        let params_bytes = params.iter().fold(0, |acc, p| acc + p.bytes());
-        let base_addr = stack.top_addr() - params_bytes;
-        let base_idx = stack.top_idx() - params.len();
-
-        let mut addr = 0;
-        for p in params {
-            addrs.push(base_addr + addr);
-            addr += p.bytes();
-        }
-        for l in locals {
-            addrs.push(base_addr + addr);
-            addr += l.bytes();
-        }
-
-        Self {
-            base_addr,
-            base_idx,
-            local_addrs: addrs,
-            params,
-            locals,
-        }
-    }
-
+impl CallFrame {
     pub fn local_addr(&self, localidx: u32) -> usize {
         self.local_addrs[localidx as usize]
     }
 
-    pub fn local_type(&self, localidx: u32) -> ValType {
+    pub fn local_type(&self, stack: &Stack, localidx: u32) -> ValType {
         let idx = localidx as usize;
-        if idx < self.params.len() {
-            self.params[idx]
-        } else if idx < self.params.len() + self.locals.len() {
-            self.locals[idx - self.params.len()]
-        } else {
-            // Unreachable thanks to validation
-            unreachable!("local type out of bounds")
-        }
+        stack.types[self.base_idx + idx]
     }
 }
 
