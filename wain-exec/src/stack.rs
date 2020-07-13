@@ -211,7 +211,7 @@ impl Stack {
         }
     }
 
-    pub fn create_callframe(&mut self, params: &[ValType], locals: &[ValType]) -> CallFrame {
+    pub fn create_call_frame(&mut self, params: &[ValType], locals: &[ValType]) -> CallFrame {
         let mut local_addrs = Vec::with_capacity(params.len() + locals.len());
 
         // Note: Params were already pushed to stack
