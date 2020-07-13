@@ -90,17 +90,6 @@ impl_le_rw!(i32);
 impl_le_rw!(i64);
 impl_le_rw!(f32);
 impl_le_rw!(f64);
-// unsigned integers for load/store instructions
-impl LittleEndian for u8 {
-    fn read(buf: &[u8], addr: usize) -> Self {
-        buf[addr]
-    }
-    fn write(buf: &mut [u8], addr: usize, v: Self) {
-        buf[addr] = v;
-    }
-}
-impl_le_rw!(u16);
-impl_le_rw!(u32);
 
 // Trait to handle f32 and f64 in the same way
 pub(crate) trait Float: Clone + Copy + PartialEq + PartialOrd {

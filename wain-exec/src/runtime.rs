@@ -655,40 +655,40 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                 runtime.stack.push(v as i32);
             }
             I32Load8U(mem) => {
-                let v: u8 = runtime.load(mem, self.start)?;
-                runtime.stack.push(v as i32);
+                let v: i8 = runtime.load(mem, self.start)?;
+                runtime.stack.push(v as u8 as i32);
             }
             I32Load16S(mem) => {
                 let v: i16 = runtime.load(mem, self.start)?;
                 runtime.stack.push(v as i32);
             }
             I32Load16U(mem) => {
-                let v: u16 = runtime.load(mem, self.start)?;
-                runtime.stack.push(v as i32);
+                let v: i16 = runtime.load(mem, self.start)?;
+                runtime.stack.push(v as u16 as i32);
             }
             I64Load8S(mem) => {
                 let v: i8 = runtime.load(mem, self.start)?;
                 runtime.stack.push(v as i64);
             }
             I64Load8U(mem) => {
-                let v: u8 = runtime.load(mem, self.start)?;
-                runtime.stack.push(v as i64);
+                let v: i8 = runtime.load(mem, self.start)?;
+                runtime.stack.push(v as u8 as i64);
             }
             I64Load16S(mem) => {
                 let v: i16 = runtime.load(mem, self.start)?;
                 runtime.stack.push(v as i64);
             }
             I64Load16U(mem) => {
-                let v: u16 = runtime.load(mem, self.start)?;
-                runtime.stack.push(v as i64);
+                let v: i16 = runtime.load(mem, self.start)?;
+                runtime.stack.push(v as u16 as i64);
             }
             I64Load32S(mem) => {
                 let v: i32 = runtime.load(mem, self.start)?;
                 runtime.stack.push(v as i64);
             }
             I64Load32U(mem) => {
-                let v: u32 = runtime.load(mem, self.start)?;
-                runtime.stack.push(v as i64);
+                let v: i32 = runtime.load(mem, self.start)?;
+                runtime.stack.push(v as u32 as i64);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-storen
             I32Store(mem) => {
