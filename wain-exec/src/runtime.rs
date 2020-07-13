@@ -66,9 +66,7 @@ pub struct Runtime<'module, 'source, I: Importer> {
     module: ModuleInstance<'module, 'source>,
     stack: Stack,
     importer: I,
-    // Call frame has param types and local types as slices. The slices' lifetimes were derived
-    // from module.
-    frame: CallFrame<'module>,
+    frame: CallFrame,
 }
 
 impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
@@ -201,11 +199,11 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             })
     }
 
-    fn push_frame(&mut self, new_frame: CallFrame<'m>) -> CallFrame<'m> {
+    fn push_frame(&mut self, new_frame: CallFrame) -> CallFrame {
         mem::replace(&mut self.frame, new_frame)
     }
 
-    fn pop_frame(&mut self, prev_frame: CallFrame<'m>) {
+    fn pop_frame(&mut self, prev_frame: CallFrame) {
         self.stack
             .restore(self.frame.base_addr, self.frame.base_idx);
         self.frame = prev_frame;
@@ -257,9 +255,8 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             ast::FuncKind::Body { locals, expr } => (locals, expr),
         };
 
-        let prev_frame = self.push_frame(CallFrame::new(&self.stack, &fty.params, locals));
-
-        self.stack.extend_zero_values(&locals);
+        let frame = self.stack.create_call_frame(&fty.params, &locals);
+        let prev_frame = self.push_frame(frame);
 
         for insn in body {
             match insn.execute(self)? {
@@ -592,7 +589,7 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-get
             LocalGet(localidx) => {
                 let addr = runtime.frame.local_addr(*localidx);
-                match runtime.frame.local_type(*localidx) {
+                match runtime.frame.local_type(&runtime.stack, *localidx) {
                     ast::ValType::I32 => runtime.stack.push(runtime.stack.read::<i32>(addr)),
                     ast::ValType::I64 => runtime.stack.push(runtime.stack.read::<i64>(addr)),
                     ast::ValType::F32 => runtime.stack.push(runtime.stack.read::<f32>(addr)),
