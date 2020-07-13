@@ -472,30 +472,28 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             // Control instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-block
             Block { ty, body } => {
-                let label = runtime.stack.push_label(*ty);
+                let label = runtime.stack.push_label();
                 match body.execute(runtime)? {
                     ExecState::Continue => {}
                     ExecState::Ret => return Ok(ExecState::Ret),
-                    ExecState::Breaking(0) => {}
+                    ExecState::Breaking(0) => runtime.stack.pop_label(&label, ty.is_some()),
                     ExecState::Breaking(level) => return Ok(ExecState::Breaking(level - 1)),
                 }
-                runtime.stack.pop_label(label);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-loop
-            Loop { ty, body } => loop {
-                // Note: Difference between block and loop is the position on breaking. When reaching
-                // to the end of instruction sequence, loop instruction ends execution of subsequence.
-                let label = runtime.stack.push_label(*ty);
-                match body.execute(runtime)? {
-                    ExecState::Continue => {
-                        runtime.stack.pop_label(label);
-                        break;
+            Loop { body, .. } => {
+                let label = runtime.stack.push_label();
+                loop {
+                    // Note: Difference between block and loop is the position on breaking. When reaching
+                    // to the end of instruction sequence, loop instruction ends execution of subsequence.
+                    match body.execute(runtime)? {
+                        ExecState::Continue => break,
+                        ExecState::Ret => return Ok(ExecState::Ret),
+                        ExecState::Breaking(0) => runtime.stack.pop_label(&label, false),
+                        ExecState::Breaking(level) => return Ok(ExecState::Breaking(level - 1)),
                     }
-                    ExecState::Ret => return Ok(ExecState::Ret),
-                    ExecState::Breaking(0) => continue,
-                    ExecState::Breaking(level) => return Ok(ExecState::Breaking(level - 1)),
                 }
-            },
+            }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-if
             If {
                 ty,
@@ -503,15 +501,14 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                 else_body,
             } => {
                 let cond: i32 = runtime.stack.pop();
-                let label = runtime.stack.push_label(*ty);
+                let label = runtime.stack.push_label();
                 let insns = if cond != 0 { then_body } else { else_body };
                 match insns.execute(runtime)? {
                     ExecState::Continue => {}
                     ExecState::Ret => return Ok(ExecState::Ret),
-                    ExecState::Breaking(0) => {}
+                    ExecState::Breaking(0) => runtime.stack.pop_label(&label, ty.is_some()),
                     ExecState::Breaking(level) => return Ok(ExecState::Breaking(level - 1)),
                 }
-                runtime.stack.pop_label(label);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-unreachable
             Unreachable => return Err(Trap::new(TrapReason::ReachUnreachable, self.start)),
