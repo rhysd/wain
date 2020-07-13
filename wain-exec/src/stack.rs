@@ -192,17 +192,16 @@ impl Stack {
         self.types.truncate(type_idx);
     }
 
-    pub fn push_label(&self, ty: Option<ValType>) -> Label {
+    pub fn push_label(&self) -> Label {
         Label {
             addr: self.top_addr(),
             type_idx: self.top_idx(),
-            has_result: ty.is_some(),
         }
     }
 
-    pub fn pop_label(&mut self, label: Label) {
+    pub fn pop_label(&mut self, label: &Label, ty: Option<ValType>) {
         // Part of 'br' instruction: https://webassembly.github.io/spec/core/exec/instructions.html#exec-br
-        if label.has_result {
+        if ty.is_some() {
             let v: Value = self.pop();
             self.restore(label.addr, label.type_idx);
             self.push(v);
@@ -278,7 +277,6 @@ impl<'f> CallFrame<'f> {
 pub struct Label {
     addr: usize,
     type_idx: usize,
-    has_result: bool,
 }
 
 #[cfg(test)]
