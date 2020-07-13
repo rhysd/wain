@@ -479,7 +479,7 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                 match body.execute(runtime)? {
                     ExecState::Continue => {}
                     ExecState::Ret => return Ok(ExecState::Ret),
-                    ExecState::Breaking(0) => runtime.stack.pop_label(&label, *ty),
+                    ExecState::Breaking(0) => runtime.stack.pop_label(&label, ty.is_some()),
                     ExecState::Breaking(level) => return Ok(ExecState::Breaking(level - 1)),
                 }
             }
@@ -492,7 +492,7 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                     match body.execute(runtime)? {
                         ExecState::Continue => break,
                         ExecState::Ret => return Ok(ExecState::Ret),
-                        ExecState::Breaking(0) => runtime.stack.pop_label(&label, None),
+                        ExecState::Breaking(0) => runtime.stack.pop_label(&label, false),
                         ExecState::Breaking(level) => return Ok(ExecState::Breaking(level - 1)),
                     }
                 }
@@ -509,7 +509,7 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                 match insns.execute(runtime)? {
                     ExecState::Continue => {}
                     ExecState::Ret => return Ok(ExecState::Ret),
-                    ExecState::Breaking(0) => runtime.stack.pop_label(&label, *ty),
+                    ExecState::Breaking(0) => runtime.stack.pop_label(&label, ty.is_some()),
                     ExecState::Breaking(level) => return Ok(ExecState::Breaking(level - 1)),
                 }
             }

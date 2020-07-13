@@ -199,9 +199,9 @@ impl Stack {
         }
     }
 
-    pub fn pop_label(&mut self, label: &Label, ty: Option<ValType>) {
+    pub fn pop_label(&mut self, label: &Label, has_result: bool) {
         // Part of 'br' instruction: https://webassembly.github.io/spec/core/exec/instructions.html#exec-br
-        if ty.is_some() {
+        if has_result {
             let v: Value = self.pop();
             self.restore(label.addr, label.type_idx);
             self.push(v);
