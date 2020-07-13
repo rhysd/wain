@@ -14,7 +14,7 @@ jobs:
       - name: Install Rust toolchain
         run: |
           rustup set profile minimal
-          rustup update stable
+          rustup toolchain update stable --no-self-update
           rustup default stable
           rustup show
           cargo --version
@@ -32,7 +32,7 @@ jobs:
       - name: Install Rust toolchain
         run: |
           rustup set profile minimal
-          rustup update beta
+          rustup toolchain update beta --no-self-update
           rustup default beta
           rustup show
           cargo --version
@@ -50,7 +50,7 @@ jobs:
       - name: Install tools
         run: |
           rustup set profile minimal
-          rustup update stable
+          rustup toolchain update stable --no-self-update
           rustup default stable
           rustup component add rustfmt clippy
           rustup show
@@ -67,7 +67,7 @@ jobs:
       - name: Install Rust toolchain
         run: |
           rustup set profile minimal
-          rustup update stable
+          rustup toolchain update stable --no-self-update
           rustup default stable
           rustup show
           cargo --version
@@ -110,7 +110,7 @@ jobs:
       - name: Install Rust toolchain
         run: |
           rustup set profile minimal
-          rustup update stable
+          rustup toolchain update stable --no-self-update
           rustup default stable
           rustup show
           cargo --version
