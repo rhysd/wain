@@ -528,7 +528,7 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                 labels,
                 default_label,
             } => {
-                let idx: i32 = runtime.stack.pop();
+                let idx = runtime.stack.pop::<i32>() as u32;
                 let idx = idx as usize;
                 let labelidx = if idx < labels.len() {
                     labels[idx]
@@ -546,7 +546,7 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-call-indirect
             CallIndirect(typeidx) => {
                 let expected = &runtime.module.ast.types[*typeidx as usize];
-                let elemidx: i32 = runtime.stack.pop();
+                let elemidx = runtime.stack.pop::<i32>() as u32;
                 let funcidx = runtime.module.table.at(elemidx as usize, self.start)?;
                 let func = &runtime.module.ast.funcs[funcidx as usize];
                 let actual = &runtime.module.ast.types[func.idx as usize];
