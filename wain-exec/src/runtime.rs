@@ -746,14 +746,14 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             I32Popcnt => runtime.unop(|v: i32| v.count_ones() as i32),
             I64Popcnt => runtime.unop(|v: i64| v.count_ones() as i64),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-iadd
-            I32Add => runtime.binop(|l: i32, r| l.wrapping_add(r)),
-            I64Add => runtime.binop(|l: i64, r| l.wrapping_add(r)),
+            I32Add => runtime.binop(i32::wrapping_add),
+            I64Add => runtime.binop(i64::wrapping_add),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-isub
-            I32Sub => runtime.binop(|l: i32, r| l.wrapping_sub(r)),
-            I64Sub => runtime.binop(|l: i64, r| l.wrapping_sub(r)),
+            I32Sub => runtime.binop(i32::wrapping_sub),
+            I64Sub => runtime.binop(i64::wrapping_sub),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-imul
-            I32Mul => runtime.binop(|l: i32, r| l.wrapping_mul(r)),
-            I64Mul => runtime.binop(|l: i64, r| l.wrapping_mul(r)),
+            I32Mul => runtime.binop(i32::wrapping_mul),
+            I64Mul => runtime.binop(i64::wrapping_mul),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-idiv-s
             // Note: According to i32.wast and i64.wast, integer overflow on idiv_s should be trapped.
             // This is intended behavior: https://github.com/WebAssembly/spec/issues/1185#issuecomment-619412936
@@ -834,20 +834,20 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             I64Rotr => runtime.binop(|l: i64, r| l.rotate_right(r as u32)),
             // Float number operations
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fabs
-            F32Abs => runtime.unop(|f: f32| f.abs()),
-            F64Abs => runtime.unop(|f: f64| f.abs()),
+            F32Abs => runtime.unop(f32::abs),
+            F64Abs => runtime.unop(f64::abs),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fneg
             F32Neg => runtime.unop(|f: f32| -f),
             F64Neg => runtime.unop(|f: f64| -f),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fceil
-            F32Ceil => runtime.unop(|f: f32| f.ceil()),
-            F64Ceil => runtime.unop(|f: f64| f.ceil()),
+            F32Ceil => runtime.unop(f32::ceil),
+            F64Ceil => runtime.unop(f64::ceil),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ffloor
-            F32Floor => runtime.unop(|f: f32| f.floor()),
-            F64Floor => runtime.unop(|f: f64| f.floor()),
+            F32Floor => runtime.unop(f32::floor),
+            F64Floor => runtime.unop(f64::floor),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ftrunc
-            F32Trunc => runtime.unop(|f: f32| f.trunc()),
-            F64Trunc => runtime.unop(|f: f64| f.trunc()),
+            F32Trunc => runtime.unop(f32::trunc),
+            F64Trunc => runtime.unop(f64::trunc),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fnearest
             F32Nearest => runtime.unop(|f: f32| {
                 // f32::round() is not available because behavior when two values are equally near
@@ -870,8 +870,8 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                 }
             }),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fsqrt
-            F32Sqrt => runtime.unop(|f: f32| f.sqrt()),
-            F64Sqrt => runtime.unop(|f: f64| f.sqrt()),
+            F32Sqrt => runtime.unop(f32::sqrt),
+            F64Sqrt => runtime.unop(f64::sqrt),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fadd
             F32Add => runtime.binop(|l: f32, r| l + r),
             F64Add => runtime.binop(|l: f64, r| l + r),
@@ -891,8 +891,8 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             F32Max => runtime.binop(fmax::<f32>),
             F64Max => runtime.binop(fmax::<f64>),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fcopysign
-            F32Copysign => runtime.binop(|l: f32, r| l.copysign(r)),
-            F64Copysign => runtime.binop(|l: f64, r| l.copysign(r)),
+            F32Copysign => runtime.binop(f32::copysign),
+            F64Copysign => runtime.binop(f64::copysign),
             // Integer comparison
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ieqz
             I32Eqz => runtime.testop(|i: i32| i == 0),
