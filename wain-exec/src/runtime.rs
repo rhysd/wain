@@ -467,6 +467,7 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
     #[allow(clippy::cognitive_complexity)]
     fn execute(&self, runtime: &mut Runtime<'m, 's, I>) -> ExecResult {
         use ast::InsnKind::*;
+        use std::ops::*;
         #[allow(clippy::float_cmp)]
         match &self.kind {
             // Control instructions
@@ -809,14 +810,14 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                 }
             })?,
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-iand
-            I32And => runtime.binop(|l: i32, r| l & r),
-            I64And => runtime.binop(|l: i64, r| l & r),
+            I32And => runtime.binop(i32::bitand),
+            I64And => runtime.binop(i64::bitand),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ior
-            I32Or => runtime.binop(|l: i32, r| l | r),
-            I64Or => runtime.binop(|l: i64, r| l | r),
+            I32Or => runtime.binop(i32::bitor),
+            I64Or => runtime.binop(i64::bitor),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ixor
-            I32Xor => runtime.binop(|l: i32, r| l ^ r),
-            I64Xor => runtime.binop(|l: i64, r| l ^ r),
+            I32Xor => runtime.binop(i32::bitxor),
+            I64Xor => runtime.binop(i64::bitxor),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-ishl
             I32Shl => runtime.binop(|l: i32, r| l.wrapping_shl(r as u32)),
             I64Shl => runtime.binop(|l: i64, r| l.wrapping_shl(r as u32)),
@@ -837,8 +838,8 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             F32Abs => runtime.unop(f32::abs),
             F64Abs => runtime.unop(f64::abs),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fneg
-            F32Neg => runtime.unop(|f: f32| -f),
-            F64Neg => runtime.unop(|f: f64| -f),
+            F32Neg => runtime.unop(f32::neg),
+            F64Neg => runtime.unop(f64::neg),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fceil
             F32Ceil => runtime.unop(f32::ceil),
             F64Ceil => runtime.unop(f64::ceil),
@@ -873,17 +874,17 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             F32Sqrt => runtime.unop(f32::sqrt),
             F64Sqrt => runtime.unop(f64::sqrt),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fadd
-            F32Add => runtime.binop(|l: f32, r| l + r),
-            F64Add => runtime.binop(|l: f64, r| l + r),
+            F32Add => runtime.binop(f32::add),
+            F64Add => runtime.binop(f64::add),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fsub
-            F32Sub => runtime.binop(|l: f32, r| l - r),
-            F64Sub => runtime.binop(|l: f64, r| l - r),
+            F32Sub => runtime.binop(f32::sub),
+            F64Sub => runtime.binop(f64::sub),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmul
-            F32Mul => runtime.binop(|l: f32, r| l * r),
-            F64Mul => runtime.binop(|l: f64, r| l * r),
+            F32Mul => runtime.binop(f32::mul),
+            F64Mul => runtime.binop(f64::mul),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fdiv
-            F32Div => runtime.binop(|l: f32, r| l / r),
-            F64Div => runtime.binop(|l: f64, r| l / r),
+            F32Div => runtime.binop(f32::div),
+            F64Div => runtime.binop(f64::div),
             // https://webassembly.github.io/spec/core/exec/numerics.html#op-fmin
             F32Min => runtime.binop(fmin::<f32>),
             F64Min => runtime.binop(fmin::<f64>),
