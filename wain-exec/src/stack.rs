@@ -23,14 +23,14 @@ pub trait StackAccess: Sized {
         v
     }
     fn push(stack: &mut Stack, v: Self);
-    fn top(stack: &mut Stack) -> Self;
+    fn top(stack: &Stack) -> Self;
 }
 
 impl StackAccess for i32 {
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::I32);
     }
-    fn top(stack: &mut Stack) -> Self {
+    fn top(stack: &Stack) -> Self {
         assert_eq!(stack.top_type(), ValType::I32);
         i32::from_le_bytes(stack.top_bytes())
     }
@@ -40,7 +40,7 @@ impl StackAccess for i64 {
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::I64);
     }
-    fn top(stack: &mut Stack) -> Self {
+    fn top(stack: &Stack) -> Self {
         assert_eq!(stack.top_type(), ValType::I64);
         i64::from_le_bytes(stack.top_bytes())
     }
@@ -50,7 +50,7 @@ impl StackAccess for f32 {
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::F32);
     }
-    fn top(stack: &mut Stack) -> Self {
+    fn top(stack: &Stack) -> Self {
         assert_eq!(stack.top_type(), ValType::F32);
         f32::from_le_bytes(stack.top_bytes())
     }
@@ -60,7 +60,7 @@ impl StackAccess for f64 {
     fn push(stack: &mut Stack, v: Self) {
         stack.push_bytes(&v.to_le_bytes(), ValType::F64);
     }
-    fn top(stack: &mut Stack) -> Self {
+    fn top(stack: &Stack) -> Self {
         assert_eq!(stack.top_type(), ValType::F64);
         f64::from_le_bytes(stack.top_bytes())
     }
@@ -83,7 +83,7 @@ impl StackAccess for Value {
             Value::F64(f) => StackAccess::push(stack, f),
         }
     }
-    fn top(stack: &mut Stack) -> Self {
+    fn top(stack: &Stack) -> Self {
         match stack.types[stack.types.len() - 1] {
             ValType::I32 => Value::I32(StackAccess::top(stack)),
             ValType::I64 => Value::I64(StackAccess::top(stack)),
@@ -127,7 +127,7 @@ impl Stack {
         StackAccess::pop(self)
     }
 
-    pub fn top<V: StackAccess>(&mut self) -> V {
+    pub fn top<V: StackAccess>(&self) -> V {
         StackAccess::top(self)
     }
 
