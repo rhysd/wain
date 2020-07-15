@@ -445,7 +445,10 @@ impl<'a> Tester<'a> {
     ) -> Result<'a, ()> {
         use wast::Command::*;
         match command {
-            InlineModule(root) => instances.push(&root.module, root.module.start),
+            InlineModule(root) => {
+                validate(root)?;
+                instances.push(&root.module, root.module.start)
+            }
             EmbeddedModule(_) => instances.push_with_idx(idx),
             AssertReturn(wast::AssertReturn::Invoke {
                 start,
