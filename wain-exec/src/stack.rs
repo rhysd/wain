@@ -201,12 +201,17 @@ impl Stack {
     }
 
     fn restore(&mut self, addr: usize, type_idx: usize, has_result: bool) {
+        let top_addr = self.top_addr();
         if has_result {
-            let v: Value = self.pop();
-            self.bytes.truncate(addr);
-            self.types.truncate(type_idx);
-            self.push(v);
-        } else {
+            let ty = self.top_type();
+            let len = ty.bytes();
+            if top_addr - len != addr {
+                let v: Value = self.pop();
+                self.bytes.truncate(addr);
+                self.types.truncate(type_idx);
+                self.push(v);
+            }
+        } else if top_addr != addr {
             self.bytes.truncate(addr);
             self.types.truncate(type_idx);
         }
