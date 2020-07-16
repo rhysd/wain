@@ -66,7 +66,6 @@ pub struct Runtime<'module, 'source, I: Importer> {
     module: ModuleInstance<'module, 'source>,
     stack: Stack,
     importer: I,
-    frame: CallFrame,
 }
 
 impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
@@ -140,7 +139,6 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
         let mut memory = Memory::allocate(&module.memories)?;
 
         // 7. and 8. push empty frame
-        let frame = CallFrame::default();
         let stack = Stack::default();
 
         // 9. add element segments to table
@@ -164,7 +162,6 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             },
             stack,
             importer,
-            frame,
         };
 
         // 15. If the start function is not empty, invoke it
@@ -200,13 +197,13 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
     }
 
     fn push_frame(&mut self, new_frame: CallFrame) -> CallFrame {
-        mem::replace(&mut self.frame, new_frame)
+        mem::replace(&mut self.stack.frame, new_frame)
     }
 
     fn pop_frame(&mut self, prev_frame: CallFrame) {
         self.stack
-            .restore(self.frame.base_addr, self.frame.base_idx);
-        self.frame = prev_frame;
+            .restore(self.stack.frame.base_addr, self.stack.frame.base_idx);
+        self.stack.frame = prev_frame;
     }
 
     // Returns if it has return value on stack or not
@@ -586,8 +583,8 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             // Variable instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-get
             LocalGet(localidx) => {
-                let addr = runtime.frame.local_addr(*localidx);
-                match runtime.frame.local_type(&runtime.stack, *localidx) {
+                let addr = runtime.stack.frame.local_addr(*localidx);
+                match runtime.stack.frame.local_type(&runtime.stack, *localidx) {
                     ast::ValType::I32 => runtime.stack.push(runtime.stack.read::<i32>(addr)),
                     ast::ValType::I64 => runtime.stack.push(runtime.stack.read::<i64>(addr)),
                     ast::ValType::F32 => runtime.stack.push(runtime.stack.read::<f32>(addr)),
@@ -596,14 +593,14 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-set
             LocalSet(localidx) => {
-                let addr = runtime.frame.local_addr(*localidx);
+                let addr = runtime.stack.frame.local_addr(*localidx);
                 let val = runtime.stack.pop();
                 runtime.stack.write_any(addr, val);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-tee
             LocalTee(localidx) => {
                 // Like local.set, but it does not change stack
-                let addr = runtime.frame.local_addr(*localidx);
+                let addr = runtime.stack.frame.local_addr(*localidx);
                 let val = runtime.stack.top();
                 runtime.stack.write_any(addr, val);
             }
