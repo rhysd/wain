@@ -189,9 +189,16 @@ impl Stack {
         self.types.len()
     }
 
-    fn restore(&mut self, addr: usize, type_idx: usize) {
-        self.bytes.truncate(addr);
-        self.types.truncate(type_idx);
+    fn restore(&mut self, addr: usize, type_idx: usize, has_result: bool) {
+        if has_result {
+            let v: Value = self.pop();
+            self.bytes.truncate(addr);
+            self.types.truncate(type_idx);
+            self.push(v);
+        } else {
+            self.bytes.truncate(addr);
+            self.types.truncate(type_idx);
+        }
     }
 
     pub fn push_label(&self) -> Label {
@@ -203,13 +210,7 @@ impl Stack {
 
     pub fn pop_label(&mut self, label: &Label, has_result: bool) {
         // Part of 'br' instruction: https://webassembly.github.io/spec/core/exec/instructions.html#exec-br
-        if has_result {
-            let v: Value = self.pop();
-            self.restore(label.addr, label.type_idx);
-            self.push(v);
-        } else {
-            self.restore(label.addr, label.type_idx);
-        }
+        self.restore(label.addr, label.type_idx, has_result)
     }
 
     pub fn push_frame(&mut self, params: &[ValType], locals: &[ValType]) -> CallFrame {
@@ -241,13 +242,7 @@ impl Stack {
     }
 
     pub fn pop_frame(&mut self, prev_frame: CallFrame, has_result: bool) {
-        self.pop_label(
-            &Label {
-                addr: self.frame.base_addr,
-                type_idx: self.frame.base_idx,
-            },
-            has_result,
-        );
+        self.restore(self.frame.base_addr, self.frame.base_idx, has_result);
         self.frame = prev_frame;
     }
 
