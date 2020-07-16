@@ -4,6 +4,7 @@ use std::convert::{TryFrom, TryInto};
 use std::f32;
 use std::f64;
 use std::fmt;
+use std::mem;
 use std::mem::size_of;
 use wain_ast::{AsValType, ValType};
 
@@ -14,6 +15,7 @@ use wain_ast::{AsValType, ValType};
 pub struct Stack {
     bytes: Vec<u8>,      // Bytes buffer for actual values
     types: Vec<ValType>, // this stack is necessary to pop arbitrary value
+    pub frame: CallFrame,
 }
 
 pub trait StackAccess: Sized {
@@ -187,7 +189,7 @@ impl Stack {
         self.types.len()
     }
 
-    pub fn restore(&mut self, addr: usize, type_idx: usize) {
+    fn restore(&mut self, addr: usize, type_idx: usize) {
         self.bytes.truncate(addr);
         self.types.truncate(type_idx);
     }
@@ -210,7 +212,7 @@ impl Stack {
         }
     }
 
-    pub fn create_call_frame(&mut self, params: &[ValType], locals: &[ValType]) -> CallFrame {
+    pub fn push_frame(&mut self, params: &[ValType], locals: &[ValType]) -> CallFrame {
         let mut local_addrs = Vec::with_capacity(params.len() + locals.len());
 
         // Note: Params were already pushed to stack
@@ -228,11 +230,34 @@ impl Stack {
 
         self.bytes.resize(addr, 0);
 
-        CallFrame {
-            base_addr,
-            base_idx,
-            local_addrs,
-        }
+        mem::replace(
+            &mut self.frame,
+            CallFrame {
+                base_addr,
+                base_idx,
+                local_addrs,
+            },
+        )
+    }
+
+    pub fn pop_frame(&mut self, prev_frame: CallFrame, has_result: bool) {
+        self.pop_label(
+            &Label {
+                addr: self.frame.base_addr,
+                type_idx: self.frame.base_idx,
+            },
+            has_result,
+        );
+        self.frame = prev_frame;
+    }
+
+    pub fn local_addr(&self, localidx: u32) -> usize {
+        self.frame.local_addrs[localidx as usize]
+    }
+
+    pub fn local_type(&self, localidx: u32) -> ValType {
+        let idx = localidx as usize;
+        self.types[self.frame.base_idx + idx]
     }
 }
 
@@ -241,20 +266,9 @@ impl Stack {
 // function is being invoked
 #[derive(Default)]
 pub struct CallFrame {
-    pub base_addr: usize,
-    pub base_idx: usize,
+    base_addr: usize,
+    base_idx: usize,
     local_addrs: Vec<usize>, // Calculate local addresses in advance for random access
-}
-
-impl CallFrame {
-    pub fn local_addr(&self, localidx: u32) -> usize {
-        self.local_addrs[localidx as usize]
-    }
-
-    pub fn local_type(&self, stack: &Stack, localidx: u32) -> ValType {
-        let idx = localidx as usize;
-        stack.types[self.base_idx + idx]
-    }
 }
 
 pub struct Label {

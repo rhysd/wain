@@ -2,11 +2,10 @@ use crate::cast;
 use crate::globals::Globals;
 use crate::import::{ImportInvalidError, ImportInvokeError, Importer};
 use crate::memory::Memory;
-use crate::stack::{CallFrame, Stack, StackAccess};
+use crate::stack::{Stack, StackAccess};
 use crate::table::Table;
 use crate::trap::{Result, Trap, TrapReason};
 use crate::value::{Float, LittleEndian, Value};
-use std::mem;
 use wain_ast as ast;
 use wain_ast::AsValType;
 
@@ -66,7 +65,6 @@ pub struct Runtime<'module, 'source, I: Importer> {
     module: ModuleInstance<'module, 'source>,
     stack: Stack,
     importer: I,
-    frame: CallFrame,
 }
 
 impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
@@ -140,7 +138,6 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
         let mut memory = Memory::allocate(&module.memories)?;
 
         // 7. and 8. push empty frame
-        let frame = CallFrame::default();
         let stack = Stack::default();
 
         // 9. add element segments to table
@@ -164,7 +161,6 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             },
             stack,
             importer,
-            frame,
         };
 
         // 15. If the start function is not empty, invoke it
@@ -197,16 +193,6 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
                 let ty = self.module.ast.globals[idx as usize].ty;
                 self.module.globals.get_any(idx, ty)
             })
-    }
-
-    fn push_frame(&mut self, new_frame: CallFrame) -> CallFrame {
-        mem::replace(&mut self.frame, new_frame)
-    }
-
-    fn pop_frame(&mut self, prev_frame: CallFrame) {
-        self.stack
-            .restore(self.frame.base_addr, self.frame.base_idx);
-        self.frame = prev_frame;
     }
 
     // Returns if it has return value on stack or not
@@ -255,8 +241,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             ast::FuncKind::Body { locals, expr } => (locals, expr),
         };
 
-        let frame = self.stack.create_call_frame(&fty.params, &locals);
-        let prev_frame = self.push_frame(frame);
+        let prev_frame = self.stack.push_frame(&fty.params, &locals);
 
         for insn in body {
             match insn.execute(self)? {
@@ -269,16 +254,9 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             }
         }
 
-        if fty.results.is_empty() {
-            self.pop_frame(prev_frame);
-            Ok(false)
-        } else {
-            // Push 1st result value since number of result type is 1 or 0 for MVP
-            let v: Value = self.stack.pop();
-            self.pop_frame(prev_frame);
-            self.stack.push(v); // push result value
-            Ok(true)
-        }
+        let has_result = !fty.results.is_empty();
+        self.stack.pop_frame(prev_frame, has_result);
+        Ok(has_result)
     }
 
     // Invoke function by name
@@ -586,8 +564,8 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             // Variable instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-get
             LocalGet(localidx) => {
-                let addr = runtime.frame.local_addr(*localidx);
-                match runtime.frame.local_type(&runtime.stack, *localidx) {
+                let addr = runtime.stack.local_addr(*localidx);
+                match runtime.stack.local_type(*localidx) {
                     ast::ValType::I32 => runtime.stack.push(runtime.stack.read::<i32>(addr)),
                     ast::ValType::I64 => runtime.stack.push(runtime.stack.read::<i64>(addr)),
                     ast::ValType::F32 => runtime.stack.push(runtime.stack.read::<f32>(addr)),
@@ -596,14 +574,14 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-set
             LocalSet(localidx) => {
-                let addr = runtime.frame.local_addr(*localidx);
+                let addr = runtime.stack.local_addr(*localidx);
                 let val = runtime.stack.pop();
                 runtime.stack.write_any(addr, val);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-tee
             LocalTee(localidx) => {
                 // Like local.set, but it does not change stack
-                let addr = runtime.frame.local_addr(*localidx);
+                let addr = runtime.stack.local_addr(*localidx);
                 let val = runtime.stack.top();
                 runtime.stack.write_any(addr, val);
             }
