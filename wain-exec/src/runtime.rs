@@ -564,13 +564,7 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             // Variable instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-get
             LocalGet(localidx) => {
-                let addr = runtime.stack.local_addr(*localidx);
-                match runtime.stack.local_type(*localidx) {
-                    ast::ValType::I32 => runtime.stack.push(runtime.stack.read::<i32>(addr)),
-                    ast::ValType::I64 => runtime.stack.push(runtime.stack.read::<i64>(addr)),
-                    ast::ValType::F32 => runtime.stack.push(runtime.stack.read::<f32>(addr)),
-                    ast::ValType::F64 => runtime.stack.push(runtime.stack.read::<f64>(addr)),
-                }
+                runtime.stack.read_local(*localidx);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-set
             LocalSet(localidx) => {

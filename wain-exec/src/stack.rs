@@ -182,6 +182,16 @@ impl Stack {
         }
     }
 
+    pub fn read_local(&mut self, localidx: u32) {
+        let addr = self.local_addr(localidx);
+        match self.local_type(localidx) {
+            ValType::I32 => self.push(self.read::<i32>(addr)),
+            ValType::I64 => self.push(self.read::<i64>(addr)),
+            ValType::F32 => self.push(self.read::<f32>(addr)),
+            ValType::F64 => self.push(self.read::<f64>(addr)),
+        }
+    }
+
     fn top_addr(&self) -> usize {
         self.bytes.len()
     }
