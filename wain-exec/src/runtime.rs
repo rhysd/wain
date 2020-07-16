@@ -574,14 +574,13 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-set
             LocalSet(localidx) => {
-                let val = runtime.stack.pop();
-                runtime.stack.write_local(*localidx, val);
+                runtime.stack.write_local(*localidx);
+                let _val: Value = runtime.stack.pop();
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-tee
             LocalTee(localidx) => {
                 // Like local.set, but it does not change stack
-                let val = runtime.stack.top();
-                runtime.stack.write_local(*localidx, val);
+                runtime.stack.write_local(*localidx);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-global-get
             GlobalGet(globalidx) => match runtime.module.ast.globals[*globalidx as usize].ty {
