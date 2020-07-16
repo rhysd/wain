@@ -241,8 +241,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             ast::FuncKind::Body { locals, expr } => (locals, expr),
         };
 
-        let frame = self.stack.create_call_frame(&fty.params, &locals);
-        let prev_frame = self.stack.push_frame(frame);
+        let prev_frame = self.stack.push_frame(&fty.params, &locals);
 
         for insn in body {
             match insn.execute(self)? {

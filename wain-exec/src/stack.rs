@@ -212,7 +212,7 @@ impl Stack {
         }
     }
 
-    pub fn create_call_frame(&mut self, params: &[ValType], locals: &[ValType]) -> CallFrame {
+    pub fn push_frame(&mut self, params: &[ValType], locals: &[ValType]) -> CallFrame {
         let mut local_addrs = Vec::with_capacity(params.len() + locals.len());
 
         // Note: Params were already pushed to stack
@@ -230,15 +230,14 @@ impl Stack {
 
         self.bytes.resize(addr, 0);
 
-        CallFrame {
-            base_addr,
-            base_idx,
-            local_addrs,
-        }
-    }
-
-    pub fn push_frame(&mut self, new_frame: CallFrame) -> CallFrame {
-        mem::replace(&mut self.frame, new_frame)
+        mem::replace(
+            &mut self.frame,
+            CallFrame {
+                base_addr,
+                base_idx,
+                local_addrs,
+            },
+        )
     }
 
     pub fn pop_frame(&mut self, prev_frame: CallFrame) {
