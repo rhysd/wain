@@ -245,6 +245,15 @@ impl Stack {
         self.restore(self.frame.base_addr, self.frame.base_idx);
         self.frame = prev_frame;
     }
+
+    pub fn local_addr(&self, localidx: u32) -> usize {
+        self.frame.local_addrs[localidx as usize]
+    }
+
+    pub fn local_type(&self, localidx: u32) -> ValType {
+        let idx = localidx as usize;
+        self.types[self.frame.base_idx + idx]
+    }
 }
 
 // Activations of function frames
@@ -255,17 +264,6 @@ pub struct CallFrame {
     base_addr: usize,
     base_idx: usize,
     local_addrs: Vec<usize>, // Calculate local addresses in advance for random access
-}
-
-impl CallFrame {
-    pub fn local_addr(&self, localidx: u32) -> usize {
-        self.local_addrs[localidx as usize]
-    }
-
-    pub fn local_type(&self, stack: &Stack, localidx: u32) -> ValType {
-        let idx = localidx as usize;
-        stack.types[self.base_idx + idx]
-    }
 }
 
 pub struct Label {

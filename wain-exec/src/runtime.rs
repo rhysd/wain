@@ -572,8 +572,8 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             // Variable instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-get
             LocalGet(localidx) => {
-                let addr = runtime.stack.frame.local_addr(*localidx);
-                match runtime.stack.frame.local_type(&runtime.stack, *localidx) {
+                let addr = runtime.stack.local_addr(*localidx);
+                match runtime.stack.local_type(*localidx) {
                     ast::ValType::I32 => runtime.stack.push(runtime.stack.read::<i32>(addr)),
                     ast::ValType::I64 => runtime.stack.push(runtime.stack.read::<i64>(addr)),
                     ast::ValType::F32 => runtime.stack.push(runtime.stack.read::<f32>(addr)),
@@ -582,14 +582,14 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-set
             LocalSet(localidx) => {
-                let addr = runtime.stack.frame.local_addr(*localidx);
+                let addr = runtime.stack.local_addr(*localidx);
                 let val = runtime.stack.pop();
                 runtime.stack.write_any(addr, val);
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-local-tee
             LocalTee(localidx) => {
                 // Like local.set, but it does not change stack
-                let addr = runtime.stack.frame.local_addr(*localidx);
+                let addr = runtime.stack.local_addr(*localidx);
                 let val = runtime.stack.top();
                 runtime.stack.write_any(addr, val);
             }
