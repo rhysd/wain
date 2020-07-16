@@ -254,16 +254,9 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             }
         }
 
-        if fty.results.is_empty() {
-            self.stack.pop_frame(prev_frame);
-            Ok(false)
-        } else {
-            // Push 1st result value since number of result type is 1 or 0 for MVP
-            let v: Value = self.stack.pop();
-            self.stack.pop_frame(prev_frame);
-            self.stack.push(v); // push result value
-            Ok(true)
-        }
+        let has_result = !fty.results.is_empty();
+        self.stack.pop_frame(prev_frame, has_result);
+        Ok(has_result)
     }
 
     // Invoke function by name

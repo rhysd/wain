@@ -240,8 +240,14 @@ impl Stack {
         )
     }
 
-    pub fn pop_frame(&mut self, prev_frame: CallFrame) {
-        self.restore(self.frame.base_addr, self.frame.base_idx);
+    pub fn pop_frame(&mut self, prev_frame: CallFrame, has_result: bool) {
+        self.pop_label(
+            &Label {
+                addr: self.frame.base_addr,
+                type_idx: self.frame.base_idx,
+            },
+            has_result,
+        );
         self.frame = prev_frame;
     }
 
