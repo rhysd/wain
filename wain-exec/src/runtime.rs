@@ -2,11 +2,10 @@ use crate::cast;
 use crate::globals::Globals;
 use crate::import::{ImportInvalidError, ImportInvokeError, Importer};
 use crate::memory::Memory;
-use crate::stack::{CallFrame, Stack, StackAccess};
+use crate::stack::{Stack, StackAccess};
 use crate::table::Table;
 use crate::trap::{Result, Trap, TrapReason};
 use crate::value::{Float, LittleEndian, Value};
-use std::mem;
 use wain_ast as ast;
 use wain_ast::AsValType;
 
@@ -196,16 +195,6 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             })
     }
 
-    fn push_frame(&mut self, new_frame: CallFrame) -> CallFrame {
-        mem::replace(&mut self.stack.frame, new_frame)
-    }
-
-    fn pop_frame(&mut self, prev_frame: CallFrame) {
-        self.stack
-            .restore(self.stack.frame.base_addr, self.stack.frame.base_idx);
-        self.stack.frame = prev_frame;
-    }
-
     // Returns if it has return value on stack or not
     fn invoke_import(
         &mut self,
@@ -253,7 +242,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
         };
 
         let frame = self.stack.create_call_frame(&fty.params, &locals);
-        let prev_frame = self.push_frame(frame);
+        let prev_frame = self.stack.push_frame(frame);
 
         for insn in body {
             match insn.execute(self)? {
@@ -267,12 +256,12 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
         }
 
         if fty.results.is_empty() {
-            self.pop_frame(prev_frame);
+            self.stack.pop_frame(prev_frame);
             Ok(false)
         } else {
             // Push 1st result value since number of result type is 1 or 0 for MVP
             let v: Value = self.stack.pop();
-            self.pop_frame(prev_frame);
+            self.stack.pop_frame(prev_frame);
             self.stack.push(v); // push result value
             Ok(true)
         }

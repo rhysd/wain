@@ -4,6 +4,7 @@ use std::convert::{TryFrom, TryInto};
 use std::f32;
 use std::f64;
 use std::fmt;
+use std::mem;
 use std::mem::size_of;
 use wain_ast::{AsValType, ValType};
 
@@ -188,7 +189,7 @@ impl Stack {
         self.types.len()
     }
 
-    pub fn restore(&mut self, addr: usize, type_idx: usize) {
+    fn restore(&mut self, addr: usize, type_idx: usize) {
         self.bytes.truncate(addr);
         self.types.truncate(type_idx);
     }
@@ -235,6 +236,15 @@ impl Stack {
             local_addrs,
         }
     }
+
+    pub fn push_frame(&mut self, new_frame: CallFrame) -> CallFrame {
+        mem::replace(&mut self.frame, new_frame)
+    }
+
+    pub fn pop_frame(&mut self, prev_frame: CallFrame) {
+        self.restore(self.frame.base_addr, self.frame.base_idx);
+        self.frame = prev_frame;
+    }
 }
 
 // Activations of function frames
@@ -242,8 +252,8 @@ impl Stack {
 // function is being invoked
 #[derive(Default)]
 pub struct CallFrame {
-    pub base_addr: usize,
-    pub base_idx: usize,
+    base_addr: usize,
+    base_idx: usize,
     local_addrs: Vec<usize>, // Calculate local addresses in advance for random access
 }
 
