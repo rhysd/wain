@@ -172,7 +172,7 @@ impl Stack {
         LittleEndian::read(&self.bytes, addr)
     }
 
-    pub fn write_any(&mut self, localidx: u32, v: Value) {
+    pub fn write_local(&mut self, localidx: u32, v: Value) {
         let addr = self.local_addr(localidx);
         match v {
             Value::I32(i) => self.write(addr, i),
