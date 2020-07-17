@@ -164,20 +164,31 @@ impl Stack {
         self.write_top_type(V::VAL_TYPE);
     }
 
-    pub fn write<V: LittleEndian>(&mut self, addr: usize, v: V) {
+    fn write<V: LittleEndian>(&mut self, addr: usize, v: V) {
         LittleEndian::write(&mut self.bytes, addr, v);
     }
 
-    pub fn read<V: LittleEndian>(&self, addr: usize) -> V {
+    fn read<V: LittleEndian>(&self, addr: usize) -> V {
         LittleEndian::read(&self.bytes, addr)
     }
 
-    pub fn write_any(&mut self, addr: usize, v: Value) {
-        match v {
+    pub fn write_local(&mut self, localidx: u32) {
+        let addr = self.local_addr(localidx);
+        match self.top() {
             Value::I32(i) => self.write(addr, i),
             Value::I64(i) => self.write(addr, i),
             Value::F32(f) => self.write(addr, f),
             Value::F64(f) => self.write(addr, f),
+        }
+    }
+
+    pub fn read_local(&mut self, localidx: u32) {
+        let addr = self.local_addr(localidx);
+        match self.local_type(localidx) {
+            ValType::I32 => self.push(self.read::<i32>(addr)),
+            ValType::I64 => self.push(self.read::<i64>(addr)),
+            ValType::F32 => self.push(self.read::<f32>(addr)),
+            ValType::F64 => self.push(self.read::<f64>(addr)),
         }
     }
 
@@ -246,11 +257,11 @@ impl Stack {
         self.frame = prev_frame;
     }
 
-    pub fn local_addr(&self, localidx: u32) -> usize {
+    fn local_addr(&self, localidx: u32) -> usize {
         self.frame.local_addrs[localidx as usize]
     }
 
-    pub fn local_type(&self, localidx: u32) -> ValType {
+    fn local_type(&self, localidx: u32) -> ValType {
         let idx = localidx as usize;
         self.types[self.frame.base_idx + idx]
     }
