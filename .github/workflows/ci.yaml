@@ -17,7 +17,8 @@ jobs:
           rustup toolchain update stable --no-self-update
           rustup default stable
           rustup show
-          cargo --version
+          rustc --version --verbose
+          cargo --version --verbose
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
@@ -35,7 +36,8 @@ jobs:
           rustup toolchain update beta --no-self-update
           rustup default beta
           rustup show
-          cargo --version
+          rustc --version --verbose
+          cargo --version --verbose
       - name: Run tests
         env:
           RUST_BACKTRACE: 1
@@ -70,7 +72,8 @@ jobs:
           rustup toolchain update stable --no-self-update
           rustup default stable
           rustup show
-          cargo --version
+          rustc --version --verbose
+          cargo --version --verbose
       - run: cargo run --example execute
       - run: cargo run --example wat
       - run: cargo run --example invoke
@@ -113,7 +116,8 @@ jobs:
           rustup toolchain update stable --no-self-update
           rustup default stable
           rustup show
-          cargo --version
+          rustc --version --verbose
+          cargo --version --verbose
       - name: Run spec tests
         env:
           RUST_BACKTRACE: 1
