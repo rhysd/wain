@@ -6,8 +6,8 @@ use std::mem;
 use std::mem::size_of;
 use wain_ast::{AsValType, ValType};
 
-// Vec<Value> consumes too much space since its element size is always 64bits.
-// To use space more efficiently, here use u32 for storing values as bytes.
+// Vec<Value> consumes too much space since its element size is always 16bytes.
+// To use space more efficiently, here use u8 for storing values as bytes.
 
 #[derive(Default)]
 pub struct Stack {
