@@ -1,8 +1,6 @@
 use crate::value::{LittleEndian, Value};
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
-use std::f32;
-use std::f64;
 use std::fmt;
 use std::mem;
 use std::mem::size_of;
