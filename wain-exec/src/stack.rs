@@ -68,7 +68,7 @@ impl StackAccess for f64 {
 
 impl StackAccess for Value {
     fn pop(stack: &mut Stack) -> Self {
-        match stack.types[stack.types.len() - 1] {
+        match stack.types[stack.top_idx() - 1] {
             ValType::I32 => Value::I32(StackAccess::pop(stack)),
             ValType::I64 => Value::I64(StackAccess::pop(stack)),
             ValType::F32 => Value::F32(StackAccess::pop(stack)),
@@ -84,7 +84,7 @@ impl StackAccess for Value {
         }
     }
     fn top(stack: &Stack) -> Self {
-        match stack.types[stack.types.len() - 1] {
+        match stack.types[stack.top_idx() - 1] {
             ValType::I32 => Value::I32(StackAccess::top(stack)),
             ValType::I64 => Value::I64(StackAccess::top(stack)),
             ValType::F32 => Value::F32(StackAccess::top(stack)),
@@ -97,7 +97,7 @@ impl Stack {
     // Note: Here I don't use std::slice::from_raw since its unsafe
 
     fn top_type(&self) -> ValType {
-        self.types[self.types.len() - 1]
+        self.types[self.top_idx() - 1]
     }
 
     fn push_bytes(&mut self, bytes: &[u8], ty: ValType) {
@@ -137,7 +137,7 @@ impl Stack {
     }
 
     pub fn write_top_type(&mut self, t: ValType) {
-        let len = self.types.len() - 1;
+        let len = self.top_idx() - 1;
         self.types[len] = t;
     }
 
