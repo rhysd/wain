@@ -13,7 +13,7 @@ use wain_ast::{AsValType, ValType};
 pub struct Stack {
     bytes: Vec<u8>,      // Bytes buffer for actual values
     types: Vec<ValType>, // this stack is necessary to pop arbitrary value
-    pub frame: CallFrame,
+    frame: CallFrame,
 }
 
 pub trait StackAccess: Sized {
