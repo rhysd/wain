@@ -172,11 +172,11 @@ impl Stack {
 
     pub fn write_local(&mut self, localidx: u32) {
         let addr = self.local_addr(localidx);
-        match self.top() {
-            Value::I32(i) => self.write(addr, i),
-            Value::I64(i) => self.write(addr, i),
-            Value::F32(f) => self.write(addr, f),
-            Value::F64(f) => self.write(addr, f),
+        match self.local_type(localidx) {
+            ValType::I32 => self.write(addr, self.top::<i32>()),
+            ValType::I64 => self.write(addr, self.top::<i64>()),
+            ValType::F32 => self.write(addr, self.top::<f32>()),
+            ValType::F64 => self.write(addr, self.top::<f64>()),
         }
     }
 
