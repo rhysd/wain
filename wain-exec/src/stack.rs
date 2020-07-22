@@ -114,13 +114,13 @@ impl Stack {
         T: TryFrom<&'a [u8]>,
         T::Error: fmt::Debug,
     {
-        let len = self.bytes.len() - size_of::<T>();
+        let len = self.top_addr() - size_of::<T>();
         self.bytes[len..].try_into().expect("top bytes")
     }
 
     fn erase_top(&mut self, len: usize) {
         self.types.pop();
-        self.bytes.truncate(self.bytes.len() - len);
+        self.bytes.truncate(self.top_addr() - len);
     }
 
     pub fn pop<V: StackAccess>(&mut self) -> V {
@@ -132,7 +132,7 @@ impl Stack {
     }
 
     pub fn write_top_bytes<V: LittleEndian>(&mut self, v: V) {
-        let addr = self.bytes.len() - size_of::<V>();
+        let addr = self.top_addr() - size_of::<V>();
         LittleEndian::write(&mut self.bytes, addr, v);
     }
 
@@ -150,11 +150,11 @@ impl Stack {
         match size_of::<T>().cmp(&size_of::<V>()) {
             Ordering::Equal => {}
             Ordering::Greater => {
-                let len = self.bytes.len() - (size_of::<T>() - size_of::<V>());
+                let len = self.top_addr() - (size_of::<T>() - size_of::<V>());
                 self.bytes.truncate(len);
             }
             Ordering::Less => {
-                let len = self.bytes.len() + (size_of::<V>() - size_of::<T>());
+                let len = self.top_addr() + (size_of::<V>() - size_of::<T>());
                 self.bytes.resize(len, 0);
             }
         }
