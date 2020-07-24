@@ -564,30 +564,25 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-cvtop
             // [t1] -> [t2]
             I32WrapI64 => ctx.validate_convert(ValType::I64, ValType::I32)?,
-            I32TruncF32S => ctx.validate_convert(ValType::F32, ValType::I32)?,
-            I32TruncF32U => ctx.validate_convert(ValType::F32, ValType::I32)?,
-            I32TruncF64S => ctx.validate_convert(ValType::F64, ValType::I32)?,
-            I32TruncF64U => ctx.validate_convert(ValType::F64, ValType::I32)?,
-            I64ExtendI32S => ctx.validate_convert(ValType::I32, ValType::I64)?,
-            I64ExtendI32U => ctx.validate_convert(ValType::I32, ValType::I64)?,
-            I64TruncF32S => ctx.validate_convert(ValType::F32, ValType::I64)?,
-            I64TruncF32U => ctx.validate_convert(ValType::F32, ValType::I64)?,
-            I64TruncF64S => ctx.validate_convert(ValType::F64, ValType::I64)?,
-            I64TruncF64U => ctx.validate_convert(ValType::F64, ValType::I64)?,
-            F32ConvertI32S => ctx.validate_convert(ValType::I32, ValType::F32)?,
-            F32ConvertI32U => ctx.validate_convert(ValType::I32, ValType::F32)?,
-            F32ConvertI64S => ctx.validate_convert(ValType::I64, ValType::F32)?,
-            F32ConvertI64U => ctx.validate_convert(ValType::I64, ValType::F32)?,
+            I32TruncF32S | I32TruncF32U | I32ReinterpretF32 => {
+                ctx.validate_convert(ValType::F32, ValType::I32)?
+            }
+            I32TruncF64S | I32TruncF64U => ctx.validate_convert(ValType::F64, ValType::I32)?,
+            I64ExtendI32S | I64ExtendI32U => ctx.validate_convert(ValType::I32, ValType::I64)?,
+            I64TruncF32S | I64TruncF32U => ctx.validate_convert(ValType::F32, ValType::I64)?,
+            I64TruncF64S | I64TruncF64U | I64ReinterpretF64 => {
+                ctx.validate_convert(ValType::F64, ValType::I64)?
+            }
+            F32ConvertI32S | F32ConvertI32U | F32ReinterpretI32 => {
+                ctx.validate_convert(ValType::I32, ValType::F32)?
+            }
+            F32ConvertI64S | F32ConvertI64U => ctx.validate_convert(ValType::I64, ValType::F32)?,
             F32DemoteF64 => ctx.validate_convert(ValType::F64, ValType::F32)?,
-            F64ConvertI32S => ctx.validate_convert(ValType::I32, ValType::F64)?,
-            F64ConvertI32U => ctx.validate_convert(ValType::I32, ValType::F64)?,
-            F64ConvertI64S => ctx.validate_convert(ValType::I64, ValType::F64)?,
-            F64ConvertI64U => ctx.validate_convert(ValType::I64, ValType::F64)?,
+            F64ConvertI32S | F64ConvertI32U => ctx.validate_convert(ValType::I32, ValType::F64)?,
+            F64ConvertI64S | F64ConvertI64U | F64ReinterpretI64 => {
+                ctx.validate_convert(ValType::I64, ValType::F64)?
+            }
             F64PromoteF32 => ctx.validate_convert(ValType::F32, ValType::F64)?,
-            I32ReinterpretF32 => ctx.validate_convert(ValType::F32, ValType::I32)?,
-            I64ReinterpretF64 => ctx.validate_convert(ValType::F64, ValType::I64)?,
-            F32ReinterpretI32 => ctx.validate_convert(ValType::I32, ValType::F32)?,
-            F64ReinterpretI64 => ctx.validate_convert(ValType::I64, ValType::F64)?,
         }
         Ok(())
     }
