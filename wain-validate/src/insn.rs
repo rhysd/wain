@@ -393,9 +393,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                     ctx.pop_op_stack(*ty)
                         .map_err(|e| e.update_msg(format!("{} parameter at call", Ordinal(i))))?;
                 }
-                for ty in fty.results.iter() {
-                    ctx.op_stack.push(*ty);
-                }
+                ctx.op_stack.extend(fty.results.iter());
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-call-indirect
             CallIndirect(typeidx) => {
@@ -409,9 +407,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                         e.update_msg(format!("{} parameter at call.indirect", Ordinal(i)))
                     })?;
                 }
-                for ty in fty.results.iter() {
-                    ctx.op_stack.push(*ty);
-                }
+                ctx.op_stack.extend(fty.results.iter());
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-drop
             Drop => ctx.drop_op_stack()?,
