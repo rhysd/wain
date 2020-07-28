@@ -68,7 +68,7 @@ impl StackAccess for f64 {
 
 impl StackAccess for Value {
     fn pop(stack: &mut Stack) -> Self {
-        match stack.types[stack.top_idx() - 1] {
+        match stack.types[stack.len() - 1] {
             ValType::I32 => Value::I32(StackAccess::pop(stack)),
             ValType::I64 => Value::I64(StackAccess::pop(stack)),
             ValType::F32 => Value::F32(StackAccess::pop(stack)),
@@ -84,7 +84,7 @@ impl StackAccess for Value {
         }
     }
     fn top(stack: &Stack) -> Self {
-        match stack.types[stack.top_idx() - 1] {
+        match stack.types[stack.len() - 1] {
             ValType::I32 => Value::I32(StackAccess::top(stack)),
             ValType::I64 => Value::I64(StackAccess::top(stack)),
             ValType::F32 => Value::F32(StackAccess::top(stack)),
@@ -97,7 +97,7 @@ impl Stack {
     // Note: Here I don't use std::slice::from_raw since its unsafe
 
     fn top_type(&self) -> ValType {
-        self.types[self.top_idx() - 1]
+        self.types[self.len() - 1]
     }
 
     fn push_bytes(&mut self, bytes: &[u8], ty: ValType) {
@@ -137,8 +137,8 @@ impl Stack {
     }
 
     pub fn write_top_type(&mut self, t: ValType) {
-        let len = self.top_idx() - 1;
-        self.types[len] = t;
+        let idx = self.len() - 1;
+        self.types[idx] = t;
     }
 
     pub fn write_top<T: StackAccess, V: LittleEndian + AsValType>(&mut self, v: V) {
@@ -194,7 +194,8 @@ impl Stack {
         self.bytes.len()
     }
 
-    fn top_idx(&self) -> usize {
+    // len() returns number of values pushed on this stack
+    fn len(&self) -> usize {
         self.types.len()
     }
 
@@ -213,7 +214,7 @@ impl Stack {
     pub fn push_label(&self) -> Label {
         Label {
             addr: self.top_addr(),
-            type_idx: self.top_idx(),
+            type_idx: self.len(),
         }
     }
 
@@ -228,7 +229,7 @@ impl Stack {
         // Note: Params were already pushed to stack
         let params_bytes = params.iter().fold(0, |acc, p| acc + p.bytes());
         let base_addr = self.top_addr() - params_bytes;
-        let base_idx = self.top_idx() - params.len();
+        let base_idx = self.len() - params.len();
 
         self.types.extend_from_slice(locals);
 
