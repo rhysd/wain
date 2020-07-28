@@ -1,21 +1,19 @@
 use crate::value::{LittleEndian, Value};
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
-use std::f32;
-use std::f64;
 use std::fmt;
 use std::mem;
 use std::mem::size_of;
 use wain_ast::{AsValType, ValType};
 
-// Vec<Value> consumes too much space since its element size is always 64bits.
-// To use space more efficiently, here use u32 for storing values as bytes.
+// Vec<Value> consumes too much space since its element size is always 16bytes.
+// To use space more efficiently, here use u8 for storing values as bytes.
 
 #[derive(Default)]
 pub struct Stack {
     bytes: Vec<u8>,      // Bytes buffer for actual values
     types: Vec<ValType>, // this stack is necessary to pop arbitrary value
-    pub frame: CallFrame,
+    frame: CallFrame,
 }
 
 pub trait StackAccess: Sized {
@@ -70,7 +68,7 @@ impl StackAccess for f64 {
 
 impl StackAccess for Value {
     fn pop(stack: &mut Stack) -> Self {
-        match stack.types[stack.types.len() - 1] {
+        match stack.types[stack.top_idx() - 1] {
             ValType::I32 => Value::I32(StackAccess::pop(stack)),
             ValType::I64 => Value::I64(StackAccess::pop(stack)),
             ValType::F32 => Value::F32(StackAccess::pop(stack)),
@@ -86,7 +84,7 @@ impl StackAccess for Value {
         }
     }
     fn top(stack: &Stack) -> Self {
-        match stack.types[stack.types.len() - 1] {
+        match stack.types[stack.top_idx() - 1] {
             ValType::I32 => Value::I32(StackAccess::top(stack)),
             ValType::I64 => Value::I64(StackAccess::top(stack)),
             ValType::F32 => Value::F32(StackAccess::top(stack)),
@@ -99,7 +97,7 @@ impl Stack {
     // Note: Here I don't use std::slice::from_raw since its unsafe
 
     fn top_type(&self) -> ValType {
-        self.types[self.types.len() - 1]
+        self.types[self.top_idx() - 1]
     }
 
     fn push_bytes(&mut self, bytes: &[u8], ty: ValType) {
@@ -116,13 +114,13 @@ impl Stack {
         T: TryFrom<&'a [u8]>,
         T::Error: fmt::Debug,
     {
-        let len = self.bytes.len() - size_of::<T>();
+        let len = self.top_addr() - size_of::<T>();
         self.bytes[len..].try_into().expect("top bytes")
     }
 
     fn erase_top(&mut self, len: usize) {
         self.types.pop();
-        self.bytes.truncate(self.bytes.len() - len);
+        self.bytes.truncate(self.top_addr() - len);
     }
 
     pub fn pop<V: StackAccess>(&mut self) -> V {
@@ -134,12 +132,12 @@ impl Stack {
     }
 
     pub fn write_top_bytes<V: LittleEndian>(&mut self, v: V) {
-        let addr = self.bytes.len() - size_of::<V>();
+        let addr = self.top_addr() - size_of::<V>();
         LittleEndian::write(&mut self.bytes, addr, v);
     }
 
     pub fn write_top_type(&mut self, t: ValType) {
-        let len = self.types.len() - 1;
+        let len = self.top_idx() - 1;
         self.types[len] = t;
     }
 
@@ -152,11 +150,11 @@ impl Stack {
         match size_of::<T>().cmp(&size_of::<V>()) {
             Ordering::Equal => {}
             Ordering::Greater => {
-                let len = self.bytes.len() - (size_of::<T>() - size_of::<V>());
+                let len = self.top_addr() - (size_of::<T>() - size_of::<V>());
                 self.bytes.truncate(len);
             }
             Ordering::Less => {
-                let len = self.bytes.len() + (size_of::<V>() - size_of::<T>());
+                let len = self.top_addr() + (size_of::<V>() - size_of::<T>());
                 self.bytes.resize(len, 0);
             }
         }
@@ -174,11 +172,11 @@ impl Stack {
 
     pub fn write_local(&mut self, localidx: u32) {
         let addr = self.local_addr(localidx);
-        match self.top() {
-            Value::I32(i) => self.write(addr, i),
-            Value::I64(i) => self.write(addr, i),
-            Value::F32(f) => self.write(addr, f),
-            Value::F64(f) => self.write(addr, f),
+        match self.local_type(localidx) {
+            ValType::I32 => self.write(addr, self.top::<i32>()),
+            ValType::I64 => self.write(addr, self.top::<i64>()),
+            ValType::F32 => self.write(addr, self.top::<f32>()),
+            ValType::F64 => self.write(addr, self.top::<f64>()),
         }
     }
 
