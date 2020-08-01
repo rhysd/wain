@@ -9,7 +9,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "spec-test"
 version = "0.1.0"
 dependencies = [
- "wain-ast 0.2.0",
+ "wain-ast 0.2.1",
  "wain-exec 0.3.0",
  "wain-syntax-binary 0.1.4",
  "wain-syntax-text 0.2.0",
@@ -21,7 +21,7 @@ name = "wain"
 version = "0.1.6"
 dependencies = [
  "cargo-husky 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "wain-ast 0.2.0",
+ "wain-ast 0.2.1",
  "wain-exec 0.3.0",
  "wain-syntax-binary 0.1.4",
  "wain-syntax-text 0.2.0",
@@ -30,13 +30,13 @@ dependencies = [
 
 [[package]]
 name = "wain-ast"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "wain-exec"
 version = "0.3.0"
 dependencies = [
- "wain-ast 0.2.0",
+ "wain-ast 0.2.1",
  "wain-syntax-text 0.2.0",
  "wain-validate 0.1.4",
 ]
@@ -45,21 +45,21 @@ dependencies = [
 name = "wain-syntax-binary"
 version = "0.1.4"
 dependencies = [
- "wain-ast 0.2.0",
+ "wain-ast 0.2.1",
 ]
 
 [[package]]
 name = "wain-syntax-text"
 version = "0.2.0"
 dependencies = [
- "wain-ast 0.2.0",
+ "wain-ast 0.2.1",
 ]
 
 [[package]]
 name = "wain-validate"
 version = "0.1.4"
 dependencies = [
- "wain-ast 0.2.0",
+ "wain-ast 0.2.1",
 ]
 
 [metadata]
