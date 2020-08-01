@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 // Root of the tree
+#[derive(Clone, Debug, PartialEq)]
 pub struct Root<'s, S: source::Source> {
     pub module: Module<'s>,
     pub source: S,
@@ -25,7 +26,7 @@ pub type LocalIdx = u32;
 pub type LabelIdx = u32;
 
 // https://webassembly.github.io/spec/core/syntax/modules.html
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Module<'s> {
     pub start: usize,
     pub id: Option<&'s str>,
@@ -41,13 +42,14 @@ pub struct Module<'s> {
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#syntax-module
+#[derive(Debug, Clone, PartialEq)]
 pub struct Import<'s> {
     pub mod_name: Name<'s>,
     pub name: Name<'s>,
 }
 
 // https://webassembly.github.io/spec/core/syntax/types.html#function-types
-#[derive(Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FuncType {
     pub start: usize,
     pub params: Vec<ValType>,
@@ -62,6 +64,7 @@ pub enum ValType {
     F32,
     F64,
 }
+
 impl ValType {
     pub fn bytes(self: ValType) -> usize {
         match self {
@@ -72,6 +75,7 @@ impl ValType {
         }
     }
 }
+
 impl AsRef<str> for ValType {
     fn as_ref(&self) -> &'_ str {
         match self {
@@ -82,23 +86,29 @@ impl AsRef<str> for ValType {
         }
     }
 }
+
 impl fmt::Display for ValType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_ref())
     }
 }
+
 pub trait AsValType {
     const VAL_TYPE: ValType;
 }
+
 impl AsValType for i32 {
     const VAL_TYPE: ValType = ValType::I32;
 }
+
 impl AsValType for i64 {
     const VAL_TYPE: ValType = ValType::I64;
 }
+
 impl AsValType for f32 {
     const VAL_TYPE: ValType = ValType::F32;
 }
+
 impl AsValType for f64 {
     const VAL_TYPE: ValType = ValType::F64;
 }
@@ -109,32 +119,39 @@ impl AsValType for f64 {
 // In text format, special characters in string literal are escaped. Unescaped string must
 // be allocated in heap. In binary format, it is directly encoded as bytes so borrowing the
 // part of source is enough.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Name<'s>(pub Cow<'s, str>);
 
 // https://webassembly.github.io/spec/core/syntax/types.html#table-types
 // Note: elemtype is currently fixed to 'funcref'
+#[derive(Debug, Clone, PartialEq)]
 pub struct TableType {
     pub limit: Limits,
 }
 
 // https://webassembly.github.io/spec/core/syntax/types.html#limits
+#[derive(Debug, Clone, PartialEq)]
 pub enum Limits {
     Range(u32, u32),
     From(u32),
 }
 
 // https://webassembly.github.io/spec/core/syntax/types.html#memory-types
+#[derive(Debug, Clone, PartialEq)]
 pub struct MemType {
     pub limit: Limits,
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#exports
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExportKind {
     Func(FuncIdx),
     Table(TableIdx),
     Memory(MemIdx),
     Global(GlobalIdx),
 }
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Export<'s> {
     pub start: usize,
     pub name: Name<'s>,
@@ -142,6 +159,7 @@ pub struct Export<'s> {
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#syntax-func
+#[derive(Debug, Clone, PartialEq)]
 pub enum FuncKind<'s> {
     Import(Import<'s>),
     Body {
@@ -149,6 +167,8 @@ pub enum FuncKind<'s> {
         expr: Vec<Instruction>,
     },
 }
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Func<'s> {
     pub start: usize,
     pub idx: TypeIdx,
@@ -156,18 +176,21 @@ pub struct Func<'s> {
 }
 
 // https://webassembly.github.io/spec/core/syntax/instructions.html#instructions
+#[derive(Debug, Clone, PartialEq)]
 pub struct Instruction {
     pub start: usize,
     pub kind: InsnKind,
 }
 
 // https://webassembly.github.io/spec/core/syntax/instructions.html#syntax-memarg
+#[derive(Debug, Clone, PartialEq)]
 pub struct Mem {
     pub align: u32,
     pub offset: u32,
 }
 
 // https://webassembly.github.io/spec/core/syntax/instructions.html#instructions
+#[derive(Debug, Clone, PartialEq)]
 pub enum InsnKind {
     // Control instructions
     // https://webassembly.github.io/spec/core/syntax/instructions.html#control-instructions
@@ -373,6 +396,7 @@ pub enum InsnKind {
     F32ReinterpretI32,
     F64ReinterpretI64,
 }
+
 impl InsnKind {
     pub fn name(&self) -> &'static str {
         use InsnKind::*;
@@ -557,6 +581,7 @@ impl InsnKind {
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#element-segments
+#[derive(Debug, Clone, PartialEq)]
 pub struct ElemSegment {
     pub start: usize,
     pub idx: TableIdx,
@@ -565,6 +590,7 @@ pub struct ElemSegment {
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#tables
+#[derive(Debug, Clone, PartialEq)]
 pub struct Table<'s> {
     pub start: usize,
     pub ty: TableType,
@@ -572,6 +598,7 @@ pub struct Table<'s> {
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#data-segments
+#[derive(Debug, Clone, PartialEq)]
 pub struct DataSegment<'s> {
     pub start: usize,
     pub idx: MemIdx,
@@ -580,6 +607,7 @@ pub struct DataSegment<'s> {
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#memories
+#[derive(Debug, Clone, PartialEq)]
 pub struct Memory<'s> {
     pub start: usize,
     pub ty: MemType,
@@ -588,10 +616,13 @@ pub struct Memory<'s> {
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#globals
 // https://webassembly.github.io/spec/core/syntax/types.html#global-types
+#[derive(Debug, Clone, PartialEq)]
 pub enum GlobalKind<'s> {
     Import(Import<'s>),
     Init(Vec<Instruction>), // expr
 }
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Global<'s> {
     pub start: usize,
     pub mutable: bool,
@@ -600,6 +631,7 @@ pub struct Global<'s> {
 }
 
 // https://webassembly.github.io/spec/core/syntax/modules.html#start-function
+#[derive(Debug, Clone, PartialEq)]
 pub struct StartFunction {
     pub start: usize,
     pub idx: FuncIdx,
