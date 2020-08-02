@@ -18,7 +18,7 @@ struct CtrlFrame {
     offset: usize,
     // Unreachability of current instruction sequence
     unreachable: bool,
-    has_unknown: bool,
+    has_unknown_type: bool,
 }
 
 // https://webassembly.github.io/spec/core/valid/conventions.html#context
@@ -75,7 +75,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
 
     fn ensure_op_stack_top(&mut self, expected: ValType) -> Result<(), S> {
         if self.current_frame_empty()? {
-            self.current_frame.has_unknown = false;
+            self.current_frame.has_unknown_type = false;
             self.op_stack.push(expected);
             return Ok(());
         }
@@ -100,7 +100,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
 
     fn drop_op_stack(&mut self) -> Result<(), S> {
         if self.current_frame_empty()? {
-            self.current_frame.has_unknown = false;
+            self.current_frame.has_unknown_type = false;
         } else {
             self.op_stack.pop();
         }
@@ -109,7 +109,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
 
     fn select_op_stack(&mut self) -> Result<(), S> {
         if self.current_frame_empty()? {
-            self.current_frame.has_unknown = true;
+            self.current_frame.has_unknown_type = true;
             return Ok(());
         }
 
@@ -123,7 +123,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             height: self.op_stack.len(),
             offset,
             unreachable: false,
-            has_unknown: false,
+            has_unknown_type: false,
         };
         mem::replace(&mut self.current_frame, new)
     }
@@ -134,7 +134,12 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             self.pop_op_stack(ty)?;
         }
         let expected = self.current_frame.height;
-        let actual = self.op_stack.len() + (if self.current_frame.has_unknown { 1 } else { 0 });
+        let actual = self.op_stack.len()
+            + (if self.current_frame.has_unknown_type {
+                1
+            } else {
+                0
+            });
         assert!(expected <= actual);
         if expected != actual {
             return self.error(ErrorKind::InvalidStackDepth {
@@ -253,7 +258,7 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
             height: 0,
             offset: start,
             unreachable: false,
-            has_unknown: false,
+            has_unknown_type: false,
         },
         params: &func_ty.params,
         locals,
