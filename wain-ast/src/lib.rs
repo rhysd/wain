@@ -66,18 +66,17 @@ pub enum ValType {
 }
 
 impl ValType {
-    pub fn bytes(self: Self) -> usize {
+    #[must_use]
+    pub fn bytes(self) -> usize {
         match self {
-            Self::I32 => 4,
-            Self::I64 => 8,
-            Self::F32 => 4,
-            Self::F64 => 8,
+            Self::I32 | Self::F32 => 4,
+            Self::I64 | Self::F64 => 8,
         }
     }
 }
 
 impl AsRef<str> for ValType {
-    fn as_ref(&self) -> &'_ str {
+    fn as_ref(&self) -> &str {
         match self {
             Self::I32 => "i32",
             Self::I64 => "i64",
@@ -398,6 +397,7 @@ pub enum InsnKind {
 }
 
 impl InsnKind {
+    #[must_use]
     pub fn name(&self) -> &'static str {
         use InsnKind::*;
         match self {
