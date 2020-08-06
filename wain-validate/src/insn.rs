@@ -15,9 +15,15 @@ use wain_ast::*;
 #[derive(Default)]
 struct CtrlFrame {
     height: usize,
-    offset: usize,
+    source_offset: usize,
     // Unreachability of current instruction sequence
     unreachable: bool,
+    // True when value type at top of stack is unknown. This unknown type value appears when
+    // polymorphic instructions follow unreachable. Since operands of them are polymorphic,
+    // their types are unknown. Currently polymorphic instructions are only `select` and `drop`.
+    // This is different from original algorithm in appendix of Wasm spec, but it's still OK to
+    // manage unknown type value with flag because there is at most 1 unknown type on the operand
+    // stack. (#52)
     has_unknown_type: bool,
 }
 
@@ -64,17 +70,18 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             return Ok(true);
         }
 
-        // When not unreachable and stack hits top of current control frame, this instruction
-        // sequence is invalid if some value should have been pushed on stack
+        // When not unreachable and stack hits bottom of current control frame, this instruction
+        // sequence is invalid because some value should have been pushed on stack
         self.error(ErrorKind::CtrlFrameEmpty {
             op: self.current_op,
-            frame_start: self.current_frame.offset,
+            frame_start: self.current_frame.source_offset,
             idx_in_op_stack: self.current_frame.height,
         })
     }
 
     fn ensure_op_stack_top(&mut self, expected: ValType) -> Result<(), S> {
         if self.current_frame_empty()? {
+            // When type of top value is unknown, replace it with expected type
             self.current_frame.has_unknown_type = false;
             self.op_stack.push(expected);
             return Ok(());
@@ -100,6 +107,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
 
     fn drop_op_stack(&mut self) -> Result<(), S> {
         if self.current_frame_empty()? {
+            // When type of top value is unknown simply unset the flag
             self.current_frame.has_unknown_type = false;
         } else {
             self.op_stack.pop();
@@ -109,19 +117,23 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
 
     fn select_op_stack(&mut self) -> Result<(), S> {
         if self.current_frame_empty()? {
+            // When stack is empty due to unreachable. In the case type of operand is unknown
+            // because 'select' instruction is value-polymorphic. Set unknown flag instead of
+            // pushing to stack
             self.current_frame.has_unknown_type = true;
             return Ok(());
         }
 
         let first = self.op_stack.pop().unwrap();
 
+        // Check the first and second values are the same type
         self.ensure_op_stack_top(first)
     }
 
-    fn push_control_frame(&mut self, offset: usize) -> CtrlFrame {
+    fn push_control_frame(&mut self, source_offset: usize) -> CtrlFrame {
         let new = CtrlFrame {
             height: self.op_stack.len(),
-            offset,
+            source_offset,
             unreachable: false,
             has_unknown_type: false,
         };
@@ -134,12 +146,9 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             self.pop_op_stack(ty)?;
         }
         let expected = self.current_frame.height;
-        let actual = self.op_stack.len()
-            + (if self.current_frame.has_unknown_type {
-                1
-            } else {
-                0
-            });
+        // When unknown flag is set, it means that there is a value of unknown type at top of stack
+        // It adds 1 to length of `op_stack`
+        let actual = self.op_stack.len() + self.current_frame.has_unknown_type as usize;
         assert!(expected <= actual);
         if expected != actual {
             return self.error(ErrorKind::InvalidStackDepth {
@@ -256,7 +265,7 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
         label_stack: vec![ret_ty],
         current_frame: CtrlFrame {
             height: 0,
-            offset: start,
+            source_offset: start,
             unreachable: false,
             has_unknown_type: false,
         },
@@ -398,7 +407,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                     ctx.pop_op_stack(*ty)
                         .map_err(|e| e.update_msg(format!("{} parameter at call", Ordinal(i))))?;
                 }
-                ctx.op_stack.extend(fty.results.iter());
+                ctx.op_stack.extend_from_slice(&fty.results);
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-call-indirect
             CallIndirect(typeidx) => {
@@ -412,15 +421,13 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                         e.update_msg(format!("{} parameter at call.indirect", Ordinal(i)))
                     })?;
                 }
-                ctx.op_stack.extend(fty.results.iter());
+                ctx.op_stack.extend_from_slice(&fty.results);
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-drop
             Drop => ctx.drop_op_stack()?,
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-select
             Select => {
                 ctx.pop_op_stack(ValType::I32)?;
-                // 'select' instruction is value-polymorphic. The value pushed here is
-                // one of the first or second value. The value is checked dynamically
                 ctx.select_op_stack()?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-local-get
