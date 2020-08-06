@@ -8,31 +8,9 @@
 
 use crate::error::{ErrorKind, Ordinal, Result};
 use crate::Context as OuterContext;
-use std::fmt;
 use std::mem;
 use wain_ast::source::Source;
 use wain_ast::*;
-
-#[derive(Copy, Clone)]
-enum Type {
-    Known(ValType),
-    Unknown,
-}
-impl Type {
-    const I32: Type = Type::Known(ValType::I32);
-    const I64: Type = Type::Known(ValType::I64);
-    const F32: Type = Type::Known(ValType::F32);
-    const F64: Type = Type::Known(ValType::F64);
-}
-
-impl fmt::Debug for Type {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Type::Unknown => f.write_str("unknown"),
-            Type::Known(t) => write!(f, "{}", t),
-        }
-    }
-}
 
 #[derive(Default)]
 struct CtrlFrame {
@@ -40,6 +18,7 @@ struct CtrlFrame {
     offset: usize,
     // Unreachability of current instruction sequence
     unreachable: bool,
+    has_unknown_type: bool,
 }
 
 // https://webassembly.github.io/spec/core/valid/conventions.html#context
@@ -48,7 +27,7 @@ struct FuncBodyContext<'outer, 'module: 'outer, 'source: 'module, S: Source> {
     current_offset: usize,
     outer: &'outer OuterContext<'module, 'source, S>,
     // Types on stack to check operands of instructions such as unreachable, br, table_br
-    op_stack: Vec<Type>,
+    op_stack: Vec<ValType>,
     // Index of current control frame
     current_frame: CtrlFrame,
     // Label stack to verify jump instructions. None means no type for the label
@@ -66,9 +45,9 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         self.outer.error(kind, self.current_op, self.current_offset)
     }
 
-    fn ensure_ctrl_frame_not_empty(&self) -> Result<(), S> {
+    fn current_frame_empty(&self) -> Result<bool, S> {
         if self.op_stack.len() > self.current_frame.height {
-            return Ok(());
+            return Ok(false);
         }
 
         if self.current_frame.unreachable {
@@ -82,7 +61,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             //
             // should be invalid. In the case one operand of i32.add is i64. To archive this check,
             // popping operand stack has trick. Unknown type is simply ignored on check.
-            return Ok(());
+            return Ok(true);
         }
 
         // When not unreachable and stack hits top of current control frame, this instruction
@@ -94,33 +73,49 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
         })
     }
 
-    fn ensure_op_stack_top(&mut self, expected: Type) -> Result<Type, S> {
-        self.ensure_ctrl_frame_not_empty()?;
-        if self.op_stack.len() == self.current_frame.height {
-            assert!(self.current_frame.unreachable);
+    fn ensure_op_stack_top(&mut self, expected: ValType) -> Result<(), S> {
+        if self.current_frame_empty()? {
+            self.current_frame.has_unknown_type = false;
             self.op_stack.push(expected);
-            return Ok(expected);
+            return Ok(());
         }
 
         let actual = self.op_stack[self.op_stack.len() - 1];
 
-        // Note: None here means unknown type due to unreachable
-        if let (Type::Known(expected), Type::Known(actual)) = (expected, actual) {
-            if actual != expected {
-                return self.error(ErrorKind::TypeMismatch {
-                    expected: Some(expected),
-                    actual: Some(actual),
-                });
-            }
+        if actual != expected {
+            self.error(ErrorKind::TypeMismatch {
+                expected: Some(expected),
+                actual: Some(actual),
+            })
+        } else {
+            Ok(())
         }
-
-        Ok(actual)
     }
 
-    fn pop_op_stack(&mut self, expected: Type) -> Result<Type, S> {
-        let ty = self.ensure_op_stack_top(expected)?;
+    fn pop_op_stack(&mut self, expected: ValType) -> Result<(), S> {
+        self.ensure_op_stack_top(expected)?;
         self.op_stack.pop();
-        Ok(ty)
+        Ok(())
+    }
+
+    fn drop_op_stack(&mut self) -> Result<(), S> {
+        if self.current_frame_empty()? {
+            self.current_frame.has_unknown_type = false;
+        } else {
+            self.op_stack.pop();
+        }
+        Ok(())
+    }
+
+    fn select_op_stack(&mut self) -> Result<(), S> {
+        if self.current_frame_empty()? {
+            self.current_frame.has_unknown_type = true;
+            return Ok(());
+        }
+
+        let first = self.op_stack.pop().unwrap();
+
+        self.ensure_op_stack_top(first)
     }
 
     fn push_control_frame(&mut self, offset: usize) -> CtrlFrame {
@@ -128,6 +123,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
             height: self.op_stack.len(),
             offset,
             unreachable: false,
+            has_unknown_type: false,
         };
         mem::replace(&mut self.current_frame, new)
     }
@@ -135,10 +131,15 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
     fn pop_control_frame(&mut self, prev: CtrlFrame, ty: Option<ValType>) -> Result<(), S> {
         // control frame top is validated by pop_op_stack
         if let Some(ty) = ty {
-            self.pop_op_stack(Type::Known(ty))?;
+            self.pop_op_stack(ty)?;
         }
         let expected = self.current_frame.height;
-        let actual = self.op_stack.len();
+        let actual = self.op_stack.len()
+            + (if self.current_frame.has_unknown_type {
+                1
+            } else {
+                0
+            });
         assert!(expected <= actual);
         if expected != actual {
             return self.error(ErrorKind::InvalidStackDepth {
@@ -153,7 +154,7 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
 
     fn mark_unreachable(&mut self, stack_top: Option<ValType>) -> Result<(), S> {
         if let Some(ty) = stack_top {
-            self.pop_op_stack(Type::Known(ty))?;
+            self.pop_op_stack(ty)?;
         }
         assert!(self.op_stack.len() >= self.current_frame.height);
         self.op_stack.truncate(self.current_frame.height);
@@ -218,21 +219,21 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
 
     fn validate_load(&mut self, mem: &Mem, bits: u32, ty: ValType) -> Result<(), S> {
         self.validate_memarg(mem, bits)?;
-        self.pop_op_stack(Type::I32)?; // load address
-        self.op_stack.push(Type::Known(ty));
+        self.pop_op_stack(ValType::I32)?; // load address
+        self.op_stack.push(ty);
         Ok(())
     }
 
     fn validate_store(&mut self, mem: &Mem, bits: u32, ty: ValType) -> Result<(), S> {
         self.validate_memarg(mem, bits)?;
-        self.pop_op_stack(Type::Known(ty))?; // value to store
-        self.pop_op_stack(Type::I32)?; // store address
+        self.pop_op_stack(ty)?; // value to store
+        self.pop_op_stack(ValType::I32)?; // store address
         Ok(())
     }
 
     fn validate_convert(&mut self, from: ValType, to: ValType) -> Result<(), S> {
-        self.pop_op_stack(Type::Known(from))?;
-        self.op_stack.push(Type::Known(to));
+        self.pop_op_stack(from)?;
+        self.op_stack.push(to);
         Ok(())
     }
 }
@@ -257,6 +258,7 @@ pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
             height: 0,
             offset: start,
             unreachable: false,
+            has_unknown_type: false,
         },
         params: &func_ty.params,
         locals,
@@ -302,7 +304,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 ctx.pop_label_stack();
                 ctx.pop_control_frame(saved, *ty)?;
                 if let Some(ty) = *ty {
-                    ctx.op_stack.push(Type::Known(ty));
+                    ctx.op_stack.push(ty);
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-loop
@@ -313,7 +315,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 ctx.pop_label_stack();
                 ctx.pop_control_frame(saved, *ty)?;
                 if let Some(ty) = *ty {
-                    ctx.op_stack.push(Type::Known(ty));
+                    ctx.op_stack.push(ty);
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-if
@@ -323,7 +325,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 else_body,
             } => {
                 // Condition
-                ctx.pop_op_stack(Type::I32)?;
+                ctx.pop_op_stack(ValType::I32)?;
                 ctx.label_stack.push(*ty);
 
                 let saved = ctx.push_control_frame(start);
@@ -336,7 +338,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
 
                 ctx.pop_label_stack();
                 if let Some(ty) = *ty {
-                    ctx.op_stack.push(Type::Known(ty));
+                    ctx.op_stack.push(ty);
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-unreachable
@@ -351,9 +353,9 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-if
             BrIf(labelidx) => {
                 // Condition
-                ctx.pop_op_stack(Type::I32)?;
+                ctx.pop_op_stack(ValType::I32)?;
                 if let Some(ty) = ctx.validate_label_idx(*labelidx)? {
-                    ctx.ensure_op_stack_top(Type::Known(ty))?;
+                    ctx.ensure_op_stack_top(ty)?;
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-table
@@ -361,7 +363,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 labels,
                 default_label,
             } => {
-                ctx.pop_op_stack(Type::I32)?;
+                ctx.pop_op_stack(ValType::I32)?;
                 let expected = ctx.validate_label_idx(*default_label)?;
                 for (i, idx) in labels.iter().enumerate() {
                     let actual = ctx.validate_label_idx(*idx)?;
@@ -393,54 +395,47 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                     .type_from_idx(func.idx, "callee at call instruction", start)?;
                 // Pop extracts parameters in reverse order
                 for (i, ty) in fty.params.iter().enumerate().rev() {
-                    ctx.pop_op_stack(Type::Known(*ty))
+                    ctx.pop_op_stack(*ty)
                         .map_err(|e| e.update_msg(format!("{} parameter at call", Ordinal(i))))?;
                 }
-                for ty in fty.results.iter() {
-                    ctx.op_stack.push(Type::Known(*ty));
-                }
+                ctx.op_stack.extend(fty.results.iter());
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-call-indirect
             CallIndirect(typeidx) => {
                 ctx.outer.table_from_idx(0, ctx.current_op, start)?;
                 // Check table index
-                ctx.pop_op_stack(Type::I32)?;
+                ctx.pop_op_stack(ValType::I32)?;
                 let fty = ctx.outer.type_from_idx(*typeidx, ctx.current_op, start)?;
                 // Pop extracts parameters in reverse order
                 for (i, ty) in fty.params.iter().enumerate().rev() {
-                    ctx.pop_op_stack(Type::Known(*ty)).map_err(|e| {
+                    ctx.pop_op_stack(*ty).map_err(|e| {
                         e.update_msg(format!("{} parameter at call.indirect", Ordinal(i)))
                     })?;
                 }
-                for ty in fty.results.iter() {
-                    ctx.op_stack.push(Type::Known(*ty));
-                }
+                ctx.op_stack.extend(fty.results.iter());
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-drop
-            Drop => {
-                ctx.pop_op_stack(Type::Unknown)?;
-            }
+            Drop => ctx.drop_op_stack()?,
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-select
             Select => {
-                ctx.pop_op_stack(Type::I32)?;
-                let ty = ctx.pop_op_stack(Type::Unknown)?;
+                ctx.pop_op_stack(ValType::I32)?;
                 // 'select' instruction is value-polymorphic. The value pushed here is
                 // one of the first or second value. The value is checked dynamically
-                ctx.ensure_op_stack_top(ty)?;
+                ctx.select_op_stack()?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-local-get
             LocalGet(localidx) => {
                 let ty = ctx.validate_local_idx(*localidx)?;
-                ctx.op_stack.push(Type::Known(ty));
+                ctx.op_stack.push(ty);
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-local-set
             LocalSet(localidx) => {
-                let ty = Type::Known(ctx.validate_local_idx(*localidx)?);
+                let ty = ctx.validate_local_idx(*localidx)?;
                 ctx.pop_op_stack(ty)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-local-tee
             LocalTee(localidx) => {
-                let ty = Type::Known(ctx.validate_local_idx(*localidx)?);
+                let ty = ctx.validate_local_idx(*localidx)?;
                 // pop and push the same value
                 ctx.ensure_op_stack_top(ty)?;
             }
@@ -449,17 +444,17 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 let global = ctx
                     .outer
                     .global_from_idx(*globalidx, ctx.current_op, start)?;
-                ctx.op_stack.push(Type::Known(global.ty));
+                ctx.op_stack.push(global.ty);
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-global-set
             GlobalSet(globalidx) => {
                 let global = ctx
                     .outer
                     .global_from_idx(*globalidx, ctx.current_op, start)?;
-                let ty = Type::Known(global.ty);
+                let ty = global.ty;
                 if !global.mutable {
                     return ctx.error(ErrorKind::SetImmutableGlobal {
-                        ty: global.ty,
+                        ty,
                         idx: *globalidx,
                     });
                 }
@@ -497,7 +492,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 if ctx.outer.module.memories.is_empty() {
                     return ctx.error(ErrorKind::MemoryIsNotDefined);
                 }
-                ctx.op_stack.push(Type::I32);
+                ctx.op_stack.push(ValType::I32);
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-memory-grow
             MemoryGrow => {
@@ -505,113 +500,94 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                     return ctx.error(ErrorKind::MemoryIsNotDefined);
                 }
                 // pop i32 and push i32
-                ctx.ensure_op_stack_top(Type::I32)?;
+                ctx.ensure_op_stack_top(ValType::I32)?;
             }
-            I32Const(_) => {
-                ctx.op_stack.push(Type::I32);
-            }
-            I64Const(_) => {
-                ctx.op_stack.push(Type::I64);
-            }
-            F32Const(_) => {
-                ctx.op_stack.push(Type::F32);
-            }
-            F64Const(_) => {
-                ctx.op_stack.push(Type::F64);
-            }
+            I32Const(_) => ctx.op_stack.push(ValType::I32),
+            I64Const(_) => ctx.op_stack.push(ValType::I64),
+            F32Const(_) => ctx.op_stack.push(ValType::F32),
+            F64Const(_) => ctx.op_stack.push(ValType::F64),
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-unop
             // [t] -> [t]
-            I32Clz | I32Ctz | I32Popcnt => {
-                ctx.ensure_op_stack_top(Type::I32)?;
-            }
-            I64Clz | I64Ctz | I64Popcnt => {
-                ctx.ensure_op_stack_top(Type::I64)?;
-            }
+            I32Clz | I32Ctz | I32Popcnt => ctx.ensure_op_stack_top(ValType::I32)?,
+            I64Clz | I64Ctz | I64Popcnt => ctx.ensure_op_stack_top(ValType::I64)?,
             F32Abs | F32Neg | F32Ceil | F32Floor | F32Trunc | F32Nearest | F32Sqrt => {
-                ctx.ensure_op_stack_top(Type::F32)?;
+                ctx.ensure_op_stack_top(ValType::F32)?;
             }
             F64Abs | F64Neg | F64Ceil | F64Floor | F64Trunc | F64Nearest | F64Sqrt => {
-                ctx.ensure_op_stack_top(Type::F64)?;
+                ctx.ensure_op_stack_top(ValType::F64)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-binop
             // [t t] -> [t]
             I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or
             | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr => {
-                ctx.pop_op_stack(Type::I32)?;
-                ctx.ensure_op_stack_top(Type::I32)?;
+                ctx.pop_op_stack(ValType::I32)?;
+                ctx.ensure_op_stack_top(ValType::I32)?;
             }
             I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or
             | I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr => {
-                ctx.pop_op_stack(Type::I64)?;
-                ctx.ensure_op_stack_top(Type::I64)?;
+                ctx.pop_op_stack(ValType::I64)?;
+                ctx.ensure_op_stack_top(ValType::I64)?;
             }
             F32Add | F32Sub | F32Mul | F32Div | F32Min | F32Max | F32Copysign => {
-                ctx.pop_op_stack(Type::F32)?;
-                ctx.ensure_op_stack_top(Type::F32)?;
+                ctx.pop_op_stack(ValType::F32)?;
+                ctx.ensure_op_stack_top(ValType::F32)?;
             }
             F64Add | F64Sub | F64Mul | F64Div | F64Min | F64Max | F64Copysign => {
-                ctx.pop_op_stack(Type::F64)?;
-                ctx.ensure_op_stack_top(Type::F64)?;
+                ctx.pop_op_stack(ValType::F64)?;
+                ctx.ensure_op_stack_top(ValType::F64)?;
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-testop
             // [t] -> [i32]
-            I32Eqz => {
-                ctx.ensure_op_stack_top(Type::I32)?;
-            }
+            I32Eqz => ctx.ensure_op_stack_top(ValType::I32)?,
             I64Eqz => {
-                ctx.pop_op_stack(Type::I64)?;
-                ctx.op_stack.push(Type::I32);
+                ctx.pop_op_stack(ValType::I64)?;
+                ctx.op_stack.push(ValType::I32);
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-relop
             // [t t] -> [i32]
             I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS
             | I32GeU => {
-                ctx.pop_op_stack(Type::I32)?;
-                ctx.ensure_op_stack_top(Type::I32)?;
+                ctx.pop_op_stack(ValType::I32)?;
+                ctx.ensure_op_stack_top(ValType::I32)?;
             }
             I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU | I64GeS
             | I64GeU => {
-                ctx.pop_op_stack(Type::I64)?;
-                ctx.pop_op_stack(Type::I64)?;
-                ctx.op_stack.push(Type::I32);
+                ctx.pop_op_stack(ValType::I64)?;
+                ctx.pop_op_stack(ValType::I64)?;
+                ctx.op_stack.push(ValType::I32);
             }
             F32Eq | F32Ne | F32Lt | F32Gt | F32Le | F32Ge => {
-                ctx.pop_op_stack(Type::F32)?;
-                ctx.pop_op_stack(Type::F32)?;
-                ctx.op_stack.push(Type::I32);
+                ctx.pop_op_stack(ValType::F32)?;
+                ctx.pop_op_stack(ValType::F32)?;
+                ctx.op_stack.push(ValType::I32);
             }
             F64Eq | F64Ne | F64Lt | F64Gt | F64Le | F64Ge => {
-                ctx.pop_op_stack(Type::F64)?;
-                ctx.pop_op_stack(Type::F64)?;
-                ctx.op_stack.push(Type::I32);
+                ctx.pop_op_stack(ValType::F64)?;
+                ctx.pop_op_stack(ValType::F64)?;
+                ctx.op_stack.push(ValType::I32);
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-cvtop
             // [t1] -> [t2]
             I32WrapI64 => ctx.validate_convert(ValType::I64, ValType::I32)?,
-            I32TruncF32S => ctx.validate_convert(ValType::F32, ValType::I32)?,
-            I32TruncF32U => ctx.validate_convert(ValType::F32, ValType::I32)?,
-            I32TruncF64S => ctx.validate_convert(ValType::F64, ValType::I32)?,
-            I32TruncF64U => ctx.validate_convert(ValType::F64, ValType::I32)?,
-            I64ExtendI32S => ctx.validate_convert(ValType::I32, ValType::I64)?,
-            I64ExtendI32U => ctx.validate_convert(ValType::I32, ValType::I64)?,
-            I64TruncF32S => ctx.validate_convert(ValType::F32, ValType::I64)?,
-            I64TruncF32U => ctx.validate_convert(ValType::F32, ValType::I64)?,
-            I64TruncF64S => ctx.validate_convert(ValType::F64, ValType::I64)?,
-            I64TruncF64U => ctx.validate_convert(ValType::F64, ValType::I64)?,
-            F32ConvertI32S => ctx.validate_convert(ValType::I32, ValType::F32)?,
-            F32ConvertI32U => ctx.validate_convert(ValType::I32, ValType::F32)?,
-            F32ConvertI64S => ctx.validate_convert(ValType::I64, ValType::F32)?,
-            F32ConvertI64U => ctx.validate_convert(ValType::I64, ValType::F32)?,
+            I32TruncF32S | I32TruncF32U | I32ReinterpretF32 => {
+                ctx.validate_convert(ValType::F32, ValType::I32)?
+            }
+            I32TruncF64S | I32TruncF64U => ctx.validate_convert(ValType::F64, ValType::I32)?,
+            I64ExtendI32S | I64ExtendI32U => ctx.validate_convert(ValType::I32, ValType::I64)?,
+            I64TruncF32S | I64TruncF32U => ctx.validate_convert(ValType::F32, ValType::I64)?,
+            I64TruncF64S | I64TruncF64U | I64ReinterpretF64 => {
+                ctx.validate_convert(ValType::F64, ValType::I64)?
+            }
+            F32ConvertI32S | F32ConvertI32U | F32ReinterpretI32 => {
+                ctx.validate_convert(ValType::I32, ValType::F32)?
+            }
+            F32ConvertI64S | F32ConvertI64U => ctx.validate_convert(ValType::I64, ValType::F32)?,
             F32DemoteF64 => ctx.validate_convert(ValType::F64, ValType::F32)?,
-            F64ConvertI32S => ctx.validate_convert(ValType::I32, ValType::F64)?,
-            F64ConvertI32U => ctx.validate_convert(ValType::I32, ValType::F64)?,
-            F64ConvertI64S => ctx.validate_convert(ValType::I64, ValType::F64)?,
-            F64ConvertI64U => ctx.validate_convert(ValType::I64, ValType::F64)?,
+            F64ConvertI32S | F64ConvertI32U => ctx.validate_convert(ValType::I32, ValType::F64)?,
+            F64ConvertI64S | F64ConvertI64U | F64ReinterpretI64 => {
+                ctx.validate_convert(ValType::I64, ValType::F64)?
+            }
             F64PromoteF32 => ctx.validate_convert(ValType::F32, ValType::F64)?,
-            I32ReinterpretF32 => ctx.validate_convert(ValType::F32, ValType::I32)?,
-            I64ReinterpretF64 => ctx.validate_convert(ValType::F64, ValType::I64)?,
-            F32ReinterpretI32 => ctx.validate_convert(ValType::I32, ValType::F32)?,
-            F64ReinterpretI64 => ctx.validate_convert(ValType::I64, ValType::F64)?,
         }
         Ok(())
     }
