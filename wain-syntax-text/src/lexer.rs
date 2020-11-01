@@ -332,7 +332,7 @@ impl<'s> Lexer<'s> {
     fn lex_idchars(&mut self) -> LexResult<'s> {
         fn is_idchar(c: char) -> bool {
             // https://webassembly.github.io/spec/core/text/values.html#text-idchar
-            match c {
+            matches!(c,
                 '0'..='9'
                 | 'a'..='z'
                 | 'A'..='Z'
@@ -358,9 +358,8 @@ impl<'s> Lexer<'s> {
                 | '_'
                 | '`'
                 | '|'
-                | '~' => true,
-                _ => false,
-            }
+                | '~'
+            )
         }
 
         let start = self.offset();
@@ -537,10 +536,7 @@ impl<'s> Lexer<'s> {
     fn eat_whitespace(&mut self) -> Result<'s, bool> {
         // https://webassembly.github.io/spec/core/text/lexical.html#white-space
         fn is_ws_char(c: char) -> bool {
-            match c {
-                ' ' | '\t' | '\n' | '\r' => true,
-                _ => false,
-            }
+            matches!(c, ' ' | '\t' | '\n' | '\r')
         }
         Ok(self.eat_char_by(is_ws_char) || self.eat_line_comment() || self.eat_block_comment()?)
     }

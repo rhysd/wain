@@ -451,10 +451,7 @@ pub enum InsnKind<'s> {
 impl<'s> InsnKind<'s> {
     pub fn is_block(&self) -> bool {
         use InsnKind::*;
-        match self {
-            Block { .. } | Loop { .. } | If { .. } => true,
-            _ => false,
-        }
+        matches!(self, Block { .. } | Loop { .. } | If { .. })
     }
 }
 
