@@ -21,7 +21,7 @@ jobs:
           cargo --version --verbose
       - name: Run tests
         env:
-          RUST_BACKTRACE: 1
+          RUST_BACKTRACE: full
         run: cargo test --color always --all
       - name: Build sources
         run: cargo build --color always --all
@@ -40,7 +40,7 @@ jobs:
           cargo --version --verbose
       - name: Run tests
         env:
-          RUST_BACKTRACE: 1
+          RUST_BACKTRACE: full
         run: cargo test --color always --all
       - name: Build sources
         run: cargo build --color always --all
@@ -120,7 +120,7 @@ jobs:
           cargo --version --verbose
       - name: Run spec tests
         env:
-          RUST_BACKTRACE: 1
+          RUST_BACKTRACE: full
         run: |
           cd spec-test
           cargo run --release -- --allowed-failures 179
