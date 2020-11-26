@@ -496,8 +496,8 @@ impl<'s> Parser<'s> {
 
     fn parse_mem_arg(&mut self, default_align: u32) -> Result<'s, Mem> {
         fn base_and_digits(s: &str) -> (NumBase, &'_ str) {
-            if s.starts_with("0x") {
-                (NumBase::Hex, &s[2..])
+            if let Some(hex) = s.strip_prefix("0x") {
+                (NumBase::Hex, hex)
             } else {
                 (NumBase::Dec, s)
             }
