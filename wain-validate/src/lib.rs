@@ -113,7 +113,7 @@ trait Validate<'s, S: Source> {
 
 impl<'s, S: Source, V: Validate<'s, S>> Validate<'s, S> for Vec<V> {
     fn validate<'m>(&self, ctx: &mut Context<'m, 's, S>) -> Result<(), S> {
-        self.iter().map(|n| n.validate(ctx)).collect()
+        self.iter().try_for_each(|n| n.validate(ctx))
     }
 }
 

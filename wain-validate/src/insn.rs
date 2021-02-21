@@ -290,10 +290,7 @@ impl<'s, 'm, 'outer, S: Source, V: ValidateInsnSeq<'outer, 'm, 's, S>>
     ValidateInsnSeq<'outer, 'm, 's, S> for [V]
 {
     fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 's, S>) -> Result<(), S> {
-        self.iter()
-            .map(|insn| insn.validate(ctx))
-            .collect::<Result<_, _>>()?;
-        Ok(())
+        self.iter().try_for_each(|insn| insn.validate(ctx))
     }
 }
 

@@ -161,7 +161,7 @@ trait Adjust<'s>: Sized {
 
 impl<'s, A: Adjust<'s>> Adjust<'s> for Vec<A> {
     fn adjust(&mut self, composer: &mut Composer) -> Result<'s, ()> {
-        self.iter_mut().map(|a| a.adjust(composer)).collect()
+        self.iter_mut().try_for_each(|a| a.adjust(composer))
     }
 }
 
