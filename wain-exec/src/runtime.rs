@@ -77,7 +77,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
     pub fn instantiate(module: &'m ast::Module<'s>, importer: I) -> Result<Self> {
         // TODO: 2., 3., 4. Validate external values before instantiate globals
 
-        fn unknown_import<'s>(import: &ast::Import<'s>, at: usize) -> Box<Trap> {
+        fn unknown_import(import: &ast::Import, at: usize) -> Box<Trap> {
             Trap::new(
                 TrapReason::UnknownImport {
                     mod_name: import.mod_name.0.to_string(),

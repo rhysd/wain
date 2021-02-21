@@ -11,10 +11,10 @@ pub struct Globals {
 
 impl Globals {
     // 5. https://webassembly.github.io/spec/core/exec/modules.html#instantiation
-    pub(crate) fn instantiate<'s>(ast: &[Global<'s>]) -> Result<Self> {
+    pub(crate) fn instantiate(ast: &[Global]) -> Result<Self> {
         let mut offsets = Vec::with_capacity(ast.len());
 
-        fn global_value<'s>(idx: usize, globals: &[Global<'s>]) -> Result<Value> {
+        fn global_value(idx: usize, globals: &[Global]) -> Result<Value> {
             let g = &globals[idx];
             match &g.kind {
                 GlobalKind::Import(i) => {
