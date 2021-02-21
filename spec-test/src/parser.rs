@@ -1043,13 +1043,16 @@ mod tests {
 
         let m = a.wat.module;
         assert_eq!(m.memories.len(), 1);
-        assert!(matches!(&m.memories[0], ast::Memory {
-            ty: ast::MemType {
-                limit: ast::Limits::From(0),
-            },
-            import: None,
-            ..
-        }));
+        assert!(matches!(
+            &m.memories[0],
+            ast::Memory {
+                ty: ast::MemType {
+                    limit: ast::Limits::From(0),
+                },
+                import: None,
+                ..
+            }
+        ));
 
         assert_eq!(m.funcs.len(), 1);
         assert!(matches!(&m.funcs[0], ast::Func {
@@ -1080,13 +1083,16 @@ mod tests {
 
         let m = a.wat.module;
         assert_eq!(m.memories.len(), 1);
-        assert!(matches!(&m.memories[0], ast::Memory {
-            ty: ast::MemType {
-                limit: ast::Limits::From(0),
-            },
-            import: None,
-            ..
-        }));
+        assert!(matches!(
+            &m.memories[0],
+            ast::Memory {
+                ty: ast::MemType {
+                    limit: ast::Limits::From(0),
+                },
+                import: None,
+                ..
+            }
+        ));
 
         assert_eq!(m.data.len(), 1);
         assert!(matches!(&m.data[0], ast::DataSegment {

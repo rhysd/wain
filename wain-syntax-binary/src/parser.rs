@@ -1078,16 +1078,22 @@ mod tests {
             }),
             ..
         } if n1 == "env" && n2 == "putchar"));
-        assert!(matches!(&f[1], Func {
-            idx: 1,
-            kind: FuncKind::Body{..},
-            ..
-        }));
-        assert!(matches!(&f[2], Func {
-            idx: 2,
-            kind: FuncKind::Body{..},
-            ..
-        }));
+        assert!(matches!(
+            &f[1],
+            Func {
+                idx: 1,
+                kind: FuncKind::Body { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &f[2],
+            Func {
+                idx: 2,
+                kind: FuncKind::Body { .. },
+                ..
+            }
+        ));
 
         let e = &root.module.exports;
         assert_eq!(e.len(), 2);
@@ -1106,23 +1112,29 @@ mod tests {
 
         let t = &root.module.tables;
         assert_eq!(t.len(), 1);
-        assert!(matches!(&t[0], Table {
-            ty: TableType {
-                limit: Limits::Range(1, 1),
-            },
-            import: None,
-            ..
-        }));
+        assert!(matches!(
+            &t[0],
+            Table {
+                ty: TableType {
+                    limit: Limits::Range(1, 1),
+                },
+                import: None,
+                ..
+            }
+        ));
 
         let m = &root.module.memories;
         assert_eq!(m.len(), 1);
-        assert!(matches!(&m[0], Memory {
-            ty: MemType {
-                limit: Limits::From(2),
-            },
-            import: None,
-            ..
-        }));
+        assert!(matches!(
+            &m[0],
+            Memory {
+                ty: MemType {
+                    limit: Limits::From(2),
+                },
+                import: None,
+                ..
+            }
+        ));
 
         let d = &root.module.data;
         assert_eq!(d.len(), 1);
@@ -1190,7 +1202,10 @@ mod tests {
 
     test_parse_error!(
         regression_issue_30,
-        ErrorKind::LengthOutOfInput { what: "size of vec elements", .. },
+        ErrorKind::LengthOutOfInput {
+            what: "size of vec elements",
+            ..
+        },
         b"\x00\x61\x73\x6d\x01\x00\x00\x00\x05\x05\xff\xff\xff\x0d\xfb\x81\x05\x00\x00"
     );
 

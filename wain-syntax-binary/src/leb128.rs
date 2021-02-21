@@ -257,24 +257,48 @@ mod tests {
     #[test]
     fn overflow_error() {
         let b = [0xff, 0xff, 0xff, 0xff, 0x10]; // i32 max + 1
-        assert!(matches!(*i32::read_leb128(&b).unwrap_err(), ErrorKind::IntOverflow{..}));
+        assert!(matches!(
+            *i32::read_leb128(&b).unwrap_err(),
+            ErrorKind::IntOverflow { .. }
+        ));
         let b = [0x80, 0x80, 0x80, 0x80, 0x77]; // i32 min - 1
-        assert!(matches!(*i32::read_leb128(&b).unwrap_err(), ErrorKind::IntOverflow{..}));
+        assert!(matches!(
+            *i32::read_leb128(&b).unwrap_err(),
+            ErrorKind::IntOverflow { .. }
+        ));
         let b = [0xff, 0xff, 0xff, 0xff, 0x10]; // u32 max + 1
-        assert!(matches!(*u32::read_leb128(&b).unwrap_err(), ErrorKind::IntOverflow{..}));
+        assert!(matches!(
+            *u32::read_leb128(&b).unwrap_err(),
+            ErrorKind::IntOverflow { .. }
+        ));
         let b = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1]; // i64 max + 1
-        assert!(matches!(*i64::read_leb128(&b).unwrap_err(), ErrorKind::IntOverflow{..}));
+        assert!(matches!(
+            *i64::read_leb128(&b).unwrap_err(),
+            ErrorKind::IntOverflow { .. }
+        ));
         let b = [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x7e]; // i64 min - 1
-        assert!(matches!(*i64::read_leb128(&b).unwrap_err(), ErrorKind::IntOverflow{..}));
+        assert!(matches!(
+            *i64::read_leb128(&b).unwrap_err(),
+            ErrorKind::IntOverflow { .. }
+        ));
         let b = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x2]; // u64 max + 1
-        assert!(matches!(*u64::read_leb128(&b).unwrap_err(), ErrorKind::IntOverflow{..}));
+        assert!(matches!(
+            *u64::read_leb128(&b).unwrap_err(),
+            ErrorKind::IntOverflow { .. }
+        ));
     }
 
     #[test]
     fn unexpected_eof() {
         let b = [0xc0, 0xc4];
-        assert!(matches!(*i32::read_leb128(&b).unwrap_err(), ErrorKind::UnexpectedEof{..}));
+        assert!(matches!(
+            *i32::read_leb128(&b).unwrap_err(),
+            ErrorKind::UnexpectedEof { .. }
+        ));
         let b = [0xff, 0xff, 0xff, 0xff];
-        assert!(matches!(*i64::read_leb128(&b).unwrap_err(), ErrorKind::UnexpectedEof{..}));
+        assert!(matches!(
+            *i64::read_leb128(&b).unwrap_err(),
+            ErrorKind::UnexpectedEof { .. }
+        ));
     }
 }
