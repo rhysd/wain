@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 #![warn(clippy::dbg_macro)]
 #![allow(clippy::cognitive_complexity)]
+#![allow(clippy::manual_range_contains)]
 
 extern crate wain_ast;
 
