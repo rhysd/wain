@@ -37,7 +37,7 @@ This project started for fun and understanding Wasm deeply.
 
 `wain` crate is not published yet. Please clone this repository and build the project by `cargo build`.
 
-Minimum supported Rust version is 1.43.0.
+Minimum supported Rust version is 1.45.0.
 
 ```
 $ cargo install wain
