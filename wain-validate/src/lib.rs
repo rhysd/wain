@@ -102,7 +102,7 @@ impl<'m, 's, S: Source> Context<'m, 's, S> {
     }
 }
 
-pub fn validate<S: Source>(root: &Root<S>) -> Result<(), S> {
+pub fn validate<S: Source>(root: &Root<'_, S>) -> Result<(), S> {
     let mut ctx = Context::new(&root.module, &root.source);
     root.module.validate(&mut ctx)
 }

@@ -71,7 +71,11 @@ pub struct Trap {
 }
 
 impl Trap {
-    pub(crate) fn unknown_import(import: &Import, kind: &'static str, offset: usize) -> Box<Self> {
+    pub(crate) fn unknown_import(
+        import: &Import<'_>,
+        kind: &'static str,
+        offset: usize,
+    ) -> Box<Self> {
         Self::new(
             TrapReason::UnknownImport {
                 mod_name: import.mod_name.0.to_string(),
