@@ -331,7 +331,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
 
     fn load<V: LittleEndian>(&mut self, mem: &ast::Mem, at: usize) -> Result<V> {
         let addr = self.mem_addr(mem);
-        Ok(self.module.memory.load(addr, at)?)
+        self.module.memory.load(addr, at)
     }
 
     fn store<V: LittleEndian>(&mut self, mem: &ast::Mem, v: V, at: usize) -> Result<()> {
