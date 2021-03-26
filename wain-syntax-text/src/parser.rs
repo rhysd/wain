@@ -24,7 +24,7 @@ pub enum ParseErrorKind<'source> {
     },
     UnexpectedKeyword(&'source str),
     InvalidValType(&'source str),
-    MalformedUTF8Encoding,
+    MalformedUtf8Encoding,
     MissingParen {
         paren: char,
         got: Option<Token<'source>>,
@@ -97,7 +97,7 @@ impl<'s> fmt::Display for ParseError<'s> {
                 "value type must be one of 'i32', 'i64', 'f32', 'f64' but got '{}'",
                 ty
             )?,
-            MalformedUTF8Encoding => {
+            MalformedUtf8Encoding => {
                 write!(f, "Name must be valid UTF-8 encoding characters")?
             }
             NumberMustBePositive(base, s) => {
@@ -1213,7 +1213,7 @@ impl<'s> Parse<'s> for Name<'s> {
         if let Some(encoded) = encoded {
             Ok(Name(encoded))
         } else {
-            parser.error(ParseErrorKind::MalformedUTF8Encoding, offset)
+            parser.error(ParseErrorKind::MalformedUtf8Encoding, offset)
         }
     }
 }
@@ -3192,7 +3192,7 @@ mod tests {
         assert_parse!(r#""""#, Name, Name(n) if n.is_empty());
         assert_parse!(r#""\t\n\r\"\'\\\u{3042}\41""#, Name, Name(n) if n == "\t\n\r\"'\\あA");
 
-        assert_error!(r#""\80""#, Name, MalformedUTF8Encoding);
+        assert_error!(r#""\80""#, Name, MalformedUtf8Encoding);
     }
 
     #[test]
