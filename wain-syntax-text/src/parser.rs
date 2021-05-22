@@ -67,9 +67,9 @@ pub struct ParseError<'s> {
 impl<'s> ParseError<'s> {
     fn new(kind: ParseErrorKind<'s>, offset: usize, source: &'s str) -> Box<ParseError<'s>> {
         Box::new(ParseError {
-            source,
-            offset,
             kind,
+            offset,
+            source,
         })
     }
 
@@ -526,7 +526,7 @@ impl<'s> Parser<'s> {
             _ => default_align,
         };
 
-        Ok(Mem { offset, align })
+        Ok(Mem { align, offset })
     }
 
     fn create_inline_typeuse(

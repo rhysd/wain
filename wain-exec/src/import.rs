@@ -59,7 +59,7 @@ impl<R: Read, W: Write> Drop for DefaultImporter<R, W> {
 
 impl<R: Read, W: Write> DefaultImporter<R, W> {
     pub fn with_stdio(stdin: R, stdout: W) -> Self {
-        Self { stdin, stdout }
+        Self { stdout, stdin }
     }
 
     // (func (param i32) (result i32))

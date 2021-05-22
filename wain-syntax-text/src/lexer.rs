@@ -230,10 +230,8 @@ impl<'s> Lexer<'s> {
     fn lex_paren(&mut self) -> Lexed<'s> {
         if let Some(offset) = self.eat_char('(') {
             Some((Token::LParen, offset))
-        } else if let Some(offset) = self.eat_char(')') {
-            Some((Token::RParen, offset))
         } else {
-            None
+            self.eat_char(')').map(|offset| (Token::RParen, offset))
         }
     }
 
