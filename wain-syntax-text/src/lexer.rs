@@ -437,7 +437,7 @@ impl<'s> Lexer<'s> {
             }
 
             let mut prev_char = PrevChar::Digit;
-            while let Some((_, c)) = chars.next() {
+            for (_, c) in &mut chars {
                 prev_char = match c {
                     '.' if saw_dot || prev_char != PrevChar::Digit => return None,
                     '.' => {
@@ -545,7 +545,7 @@ impl<'s> Lexer<'s> {
             return false;
         }
 
-        while let Some((_, c)) = self.chars.next() {
+        for (_, c) in &mut self.chars {
             if c == '\n' {
                 break;
             }

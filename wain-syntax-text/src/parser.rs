@@ -230,7 +230,7 @@ impl<'s> Indices<'s> {
 
     fn move_out(&mut self) -> HashMap<&'s str, u32> {
         self.next_idx = 0; // Clear next index for parsing next module
-        mem::replace(&mut self.indices, HashMap::new())
+        mem::take(&mut self.indices)
     }
 }
 

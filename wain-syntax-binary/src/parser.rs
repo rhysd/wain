@@ -142,7 +142,7 @@ impl<'s> Parser<'s> {
     }
 
     fn parse_int<I: Leb128>(&mut self) -> Result<'s, I> {
-        match I::read_leb128(&self.input) {
+        match I::read_leb128(self.input) {
             Ok((i, len)) => {
                 self.eat(len);
                 Ok(i)

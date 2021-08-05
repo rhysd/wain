@@ -173,7 +173,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
     }
 
     pub fn module(&self) -> &'m ast::Module<'s> {
-        &self.module.ast
+        self.module.ast
     }
 
     pub fn memory(&self) -> &Memory {
@@ -241,7 +241,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
             ast::FuncKind::Body { locals, expr } => (locals, expr),
         };
 
-        let prev_frame = self.stack.push_frame(&fty.params, &locals);
+        let prev_frame = self.stack.push_frame(&fty.params, locals);
 
         for insn in body {
             match insn.execute(self)? {
@@ -551,12 +551,12 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-select
             Select => {
                 let cond: i32 = runtime.stack.pop();
-                if cond != 0 {
-                    // pop val2 -> pop val1 -> push val1 (skip pop/push val1)
-                    let _val2: Value = runtime.stack.pop();
-                } else {
-                    // pop val2 -> pop val1 -> push val2
-                    let val2: Value = runtime.stack.pop();
+                let val2: Value = runtime.stack.pop();
+                // if cond != 0:
+                //     pop val2 -> pop val1 -> push val1 (skip pop/push val1)
+                // else:
+                //     pop val2 -> pop val1 -> push val2
+                if cond == 0 {
                     let _val1: Value = runtime.stack.pop();
                     runtime.stack.push(val2);
                 }

@@ -108,7 +108,7 @@ impl<R: Read, W: Write> DefaultImporter<R, W> {
             });
         };
 
-        dest.copy_from_slice(&src);
+        dest.copy_from_slice(src);
         stack.push(dest_i32);
         Ok(())
     }
