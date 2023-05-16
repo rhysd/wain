@@ -2633,7 +2633,7 @@ mod tests {
             parser
         }};
         ($input:expr, $node:ty, $expect:pat) => {
-            assert_parse!($input, $node, $expect if true);
+            assert_parse!($input, $node, $expect if true)
         };
     }
 
