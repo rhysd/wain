@@ -247,11 +247,11 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
     }
 }
 
-pub(crate) fn validate_func_body<'outer, 'm, 's, S: Source>(
+pub(crate) fn validate_func_body<'outer, S: Source>(
     body: &'outer [Instruction],
     func_ty: &'outer FuncType,
     locals: &'outer [ValType],
-    outer: &'outer OuterContext<'m, 's, S>,
+    outer: &'outer OuterContext<'_, '_, S>,
     start: usize,
 ) -> Result<(), S> {
     // Note: FuncType already validated func_ty has at most one result type
@@ -598,9 +598,9 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
 }
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#constant-expressions
-pub(crate) fn validate_constant<'m, 's, S: Source>(
+pub(crate) fn validate_constant<S: Source>(
     insns: &[Instruction],
-    ctx: &OuterContext<'m, 's, S>,
+    ctx: &OuterContext<'_, '_, S>,
     expr_ty: ValType,
     when: &'static str,
     start: usize,

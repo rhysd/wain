@@ -83,7 +83,7 @@ pub enum ValType {
     F64,
 }
 
-impl<'s> fmt::Display for ValType {
+impl fmt::Display for ValType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             ValType::I32 => "i32",

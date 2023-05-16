@@ -226,7 +226,7 @@ impl<W: Write> Runner<W> {
         writeln!(&mut self.out, "\nStart: {:?}", path).unwrap();
         self.out.write_all(color::RESET).unwrap();
 
-        let source = fs::read_to_string(&path)?;
+        let source = fs::read_to_string(path)?;
         let start_time = time::SystemTime::now();
 
         let sum = if file == "inline-module.wast" {
@@ -258,7 +258,7 @@ impl<W: Write> Runner<W> {
                     let num_errs = tester.errs.len();
                     for (idx, err) in tester.errs.iter_mut().enumerate() {
                         let nth = idx + 1;
-                        err.set_path(&path);
+                        err.set_path(path);
                         self.report(nth, num_errs, err);
                     }
                     tester.sum

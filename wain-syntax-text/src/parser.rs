@@ -3736,7 +3736,7 @@ mod tests {
                     ..
                 },
                 ..
-            } if locals[0].ty == ValType::I32 && locals[0].id == None
+            } if locals[0].ty == ValType::I32 && locals[0].id.is_none()
         );
         assert_parse!(
             r#"(func $f (type 0) (local $l i32))"#,
@@ -4228,7 +4228,7 @@ mod tests {
                     default_label: Index::Num(0)
                 }
             ] if labels
-                    .into_iter()
+                    .iter()
                     .map(|i| match i {
                         Index::Num(n) => *n,
                         Index::Ident(i) => panic!("unexpected index: {}", i),
@@ -4243,7 +4243,7 @@ mod tests {
                     default_label: Index::Ident("$x")
                 }
             ] if labels
-                    .into_iter()
+                    .iter()
                     .map(|i| match i {
                         Index::Num(n) => panic!("unexpected index: {}", n),
                         Index::Ident(i) => *i,

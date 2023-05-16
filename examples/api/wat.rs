@@ -8,7 +8,7 @@ use wain_syntax_text::parse;
 use wain_validate::validate;
 
 // examples/hello/hello.wat
-const HELLO_WORLD: &'static str = r#"
+const HELLO_WORLD: &str = r#"
 (module
   (type (;0;) (func (param i32) (result i32)))
   (type (;1;) (func (param i32)))

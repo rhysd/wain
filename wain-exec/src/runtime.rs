@@ -261,9 +261,9 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
 
     // Invoke function by name
     pub fn invoke(&mut self, name: impl AsRef<str>, args: &[Value]) -> Result<Option<Value>> {
-        fn find_func_to_invoke<'s>(
+        fn find_func_to_invoke(
             name: &str,
-            exports: &[ast::Export<'s>],
+            exports: &[ast::Export<'_>],
         ) -> Result<(u32, usize)> {
             for export in exports {
                 if export.name.0 == name {

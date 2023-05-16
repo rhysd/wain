@@ -8,7 +8,7 @@ pub fn describe_position(f: &mut fmt::Formatter<'_>, source: &str, start: usize)
         let source = &source[start..];
         let end = source
             .find(['\n', '\r'].as_ref())
-            .unwrap_or_else(|| source.len());
+            .unwrap_or(source.len());
         write!(
             f,
             " caused at byte offset {}\n\n ... {}\n     ^\n     starts from here",

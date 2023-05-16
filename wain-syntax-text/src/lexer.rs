@@ -636,7 +636,7 @@ impl<'s> Iterator for Lexer<'s> {
 mod tests {
     use super::*;
 
-    fn lex_all<'s>(s: &'s str) -> Result<'s, Vec<(Token<'s>, usize)>> {
+    fn lex_all(s: &str) -> Result<'_, Vec<(Token<'_>, usize)>> {
         Lexer::new(s).collect()
     }
 

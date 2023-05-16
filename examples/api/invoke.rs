@@ -8,7 +8,7 @@ use wain_exec::{DefaultImporter, Runtime, Value};
 use wain_syntax_text::parse;
 use wain_validate::validate;
 
-const MODULE_ADD: &'static str = r#"
+const MODULE_ADD: &str = r#"
 (module
   (type (;0;) (func (param i32 i32) (result i32)))
   (func $add (type 0) (param i32 i32) (result i32)

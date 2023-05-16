@@ -420,7 +420,7 @@ mod tests {
         }
     }
 
-    fn root<'s>(module: Module<'s>) -> Root<'s, DummySource> {
+    fn root(module: Module<'_>) -> Root<'_, DummySource> {
         Root {
             module,
             source: DummySource,

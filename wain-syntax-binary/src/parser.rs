@@ -130,7 +130,7 @@ impl<'s> Parser<'s> {
     ) -> Box<Error<'s>> {
         let pos = self.current_pos() - 1; // Unget one character for magic
         let kind = ErrorKind::UnexpectedByte {
-            expected: expected.as_ref().iter().copied().collect(),
+            expected: expected.as_ref().to_vec(),
             got,
             what,
         };
@@ -177,7 +177,7 @@ impl<'s> Parser<'s> {
         let section = section_id::to_name(self.input[0]);
         self.eat(1); // Eat section ID
         let size = self.parse_int::<u32>()? as usize;
-        let parser = self.sub_parser(size as usize, section)?;
+        let parser = self.sub_parser(size, section)?;
         self.eat(size);
         Ok(parser)
     }
@@ -370,7 +370,7 @@ impl<'s> Parse<'s> for Module<'s> {
             if codes.count != func_indices.len() {
                 return Err(codes.parser.error(ErrorKind::FuncCodeLengthMismatch {
                     num_funcs: func_indices.len(),
-                    num_codes: codes.count as usize,
+                    num_codes: codes.count,
                 }));
             }
 
@@ -1035,7 +1035,7 @@ mod tests {
     use std::env;
     use std::fs;
 
-    fn unwrap<'s, T>(res: Result<'s, T>) -> T {
+    fn unwrap<T>(res: Result<'_, T>) -> T {
         match res {
             Ok(x) => x,
             Err(e) => panic!("unexpected error: {}", e),

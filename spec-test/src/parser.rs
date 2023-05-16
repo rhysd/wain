@@ -104,7 +104,7 @@ impl<'s> Parser<'s> {
 
     fn error(&mut self, kind: ParseKind<'s>) -> Box<Error<'s>> {
         let mut err = Error::parse_error(kind, self.source, self.current_pos);
-        if let Some(mut ignored) = mem::replace(&mut self.ignored_error, None) {
+        if let Some(mut ignored) = self.ignored_error.take() {
             ignored.prev_error = None; // Do not chain all errors
             err.prev_error = Some(ignored);
         }
@@ -726,7 +726,7 @@ mod tests {
 
     #[test]
     fn constants() {
-        fn p<'a>(s: &'a str) -> Result<'a, Const> {
+        fn p(s: &str) -> Result<'_, Const> {
             Parser::new(s).parse()
         }
 
@@ -799,14 +799,14 @@ mod tests {
         assert_eq!(p("(f32.const 1.23e10)").unwrap(), Const::F32(1.23e10));
         assert_eq!(p("(f32.const 0x12.34)").unwrap(), Const::F32(18.203125));
         assert_eq!(p("(f32.const 0x12.34p2)").unwrap(), Const::F32(72.8125));
-        assert_eq!(p("(f32.const 0x12.34p-2)").unwrap(), Const::F32(4.55078125));
+        assert_eq!(p("(f32.const 0x12.34p-2)").unwrap(), Const::F32(4.550_781_3));
         assert_eq!(p("(f32.const -123.456)").unwrap(), Const::F32(-123.456));
         assert_eq!(p("(f32.const -1.23e10)").unwrap(), Const::F32(-1.23e10));
         assert_eq!(p("(f32.const -0x12.34)").unwrap(), Const::F32(-18.203125));
         assert_eq!(p("(f32.const -0x12.34p2)").unwrap(), Const::F32(-72.8125));
         assert_eq!(
             p("(f32.const -0x12.34p-2)").unwrap(),
-            Const::F32(-4.55078125)
+            Const::F32(-4.550_781_3)
         );
 
         assert_eq!(p("(f64.const 0)").unwrap(), Const::F64(0.0));
