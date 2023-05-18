@@ -1,6 +1,9 @@
 name: CI
 on: [push, pull_request]
 
+env:
+  RUST_BACKTRACE: full
+
 jobs:
   unit-test:
     name: unit tests
@@ -10,18 +13,9 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        run: |
-          rustup set profile minimal
-          rustup toolchain update stable --no-self-update
-          rustup default stable
-          rustup show
-          rustc --version --verbose
-          cargo --version --verbose
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
       - name: Run tests
-        env:
-          RUST_BACKTRACE: full
         run: cargo test --color always --all
       - name: Build sources
         run: cargo build --color always --all
@@ -29,18 +23,9 @@ jobs:
     name: Rust beta channel
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        run: |
-          rustup set profile minimal
-          rustup toolchain update beta --no-self-update
-          rustup default beta
-          rustup show
-          rustc --version --verbose
-          cargo --version --verbose
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@beta
       - name: Run tests
-        env:
-          RUST_BACKTRACE: full
         run: cargo test --color always --all
       - name: Build sources
         run: cargo build --color always --all
@@ -48,32 +33,18 @@ jobs:
     name: clippy and rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Install tools
-        run: |
-          rustup set profile minimal
-          rustup toolchain update stable --no-self-update
-          rustup default stable
-          rustup component add rustfmt clippy
-          rustup show
-          cargo --version
-          cargo fmt --version
-          cargo clippy --version
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - run: cargo fmt -- --color always --check
       - run: cargo clippy --color always --all -- -D warnings
   examples:
     name: examples
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        run: |
-          rustup set profile minimal
-          rustup toolchain update stable --no-self-update
-          rustup default stable
-          rustup show
-          rustc --version --verbose
-          cargo --version --verbose
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
       - run: cargo run --example execute
       - run: cargo run --example wat
       - run: cargo run --example invoke
@@ -107,20 +78,11 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           submodules: true
-      - name: Install Rust toolchain
-        run: |
-          rustup set profile minimal
-          rustup toolchain update stable --no-self-update
-          rustup default stable
-          rustup show
-          rustc --version --verbose
-          cargo --version --verbose
+      - uses: dtolnay/rust-toolchain@stable
       - name: Run spec tests
-        env:
-          RUST_BACKTRACE: full
         run: |
           cd spec-test
           cargo run --release -- --allowed-failures 179
