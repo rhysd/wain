@@ -280,7 +280,7 @@ impl<W: Write> Runner<W> {
 type TestRuntime<'m, 's> = Runtime<'m, 's, SpecTestImporter>;
 type IndexToModule<'s> = HashMap<usize, (ast::Module<'s>, usize)>;
 
-struct Instances<'mods, 'src: 'mods> {
+struct Instances<'mods, 'src> {
     runtimes: Vec<(TestRuntime<'mods, 'src>, usize)>,
     idx_to_mod: &'mods IndexToModule<'src>,
     source: &'src str,

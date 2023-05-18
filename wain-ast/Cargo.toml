@@ -2,7 +2,7 @@
 name = "wain-ast"
 version = "0.2.1"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
-edition = "2018"
+edition = "2021"
 description = "WebAssembly abstract syntax tree definition used by both binary format and text format for wain project"
 license = "MIT"
 homepage = "https://github.com/rhysd/wain/tree/master/wain-ast"

@@ -864,11 +864,11 @@ mod tests {
 
     #[test]
     fn invoke() {
-        let i: Invoke = Parser::new(r#"(invoke "foo")"#).parse().unwrap();
+        let i: Invoke<'_> = Parser::new(r#"(invoke "foo")"#).parse().unwrap();
         assert_eq!(i.name, "foo");
         assert!(i.args.is_empty());
 
-        let i: Invoke = Parser::new(r#"(invoke "foo" (i32.const 123) (f64.const 1.23))"#)
+        let i: Invoke<'_> = Parser::new(r#"(invoke "foo" (i32.const 123) (f64.const 1.23))"#)
             .parse()
             .unwrap();
         assert_eq!(i.name, "foo");
@@ -876,7 +876,7 @@ mod tests {
         assert_eq!(i.args[0], Const::I32(123));
         assert_eq!(i.args[1], Const::F64(1.23));
 
-        let i: Invoke = Parser::new(r#"(invoke $Func "e" (i32.const 42))"#)
+        let i: Invoke<'_> = Parser::new(r#"(invoke $Func "e" (i32.const 42))"#)
             .parse()
             .unwrap();
         assert_eq!(i.id, Some("$Func"));
@@ -887,17 +887,17 @@ mod tests {
 
     #[test]
     fn register() {
-        let r: Register = Parser::new(r#"(register "foo")"#).parse().unwrap();
+        let r: Register<'_> = Parser::new(r#"(register "foo")"#).parse().unwrap();
         assert_eq!(r.name, "foo");
         assert_eq!(r.id, None);
-        let r: Register = Parser::new(r#"(register "foo" $foo)"#).parse().unwrap();
+        let r: Register<'_> = Parser::new(r#"(register "foo" $foo)"#).parse().unwrap();
         assert_eq!(r.name, "foo");
         assert_eq!(r.id, Some("$foo"));
     }
 
     #[test]
     fn assert_return() {
-        let a: AssertReturn = Parser::new(
+        let a: AssertReturn<'_> = Parser::new(
             r#"(assert_return
               (invoke "8u_good1" (i32.const 0))
               (i32.const 97)
@@ -918,7 +918,7 @@ mod tests {
             _ => panic!("expected invoke"),
         }
 
-        let a: AssertReturn = Parser::new(r#"(assert_return (invoke "type-i32"))"#)
+        let a: AssertReturn<'_> = Parser::new(r#"(assert_return (invoke "type-i32"))"#)
             .parse()
             .unwrap();
 
@@ -933,7 +933,7 @@ mod tests {
             _ => panic!("expected invoke"),
         }
 
-        let a: AssertReturn = Parser::new(r#"(assert_return (get "e") (i32.const 42))"#)
+        let a: AssertReturn<'_> = Parser::new(r#"(assert_return (get "e") (i32.const 42))"#)
             .parse()
             .unwrap();
 
@@ -946,9 +946,10 @@ mod tests {
             _ => panic!("expected global"),
         }
 
-        let a: AssertReturn = Parser::new(r#"(assert_return (get $Global "e") (i32.const 42))"#)
-            .parse()
-            .unwrap();
+        let a: AssertReturn<'_> =
+            Parser::new(r#"(assert_return (get $Global "e") (i32.const 42))"#)
+                .parse()
+                .unwrap();
 
         match a {
             AssertReturn::Global { get, expected, .. } => {
@@ -962,7 +963,7 @@ mod tests {
 
     #[test]
     fn assert_trap() {
-        let a: AssertTrap = Parser::new(
+        let a: AssertTrap<'_> = Parser::new(
             r#"(assert_trap (invoke "32_good5" (i32.const 65508)) "out of bounds memory access")"#,
         )
         .parse()
@@ -978,7 +979,7 @@ mod tests {
             _ => panic!("expected invoke"),
         }
 
-        let a: AssertTrap = Parser::new(
+        let a: AssertTrap<'_> = Parser::new(
             r#"
             (assert_trap
               (module $hello
@@ -1033,7 +1034,7 @@ mod tests {
 
     #[test]
     fn assert_invalid() {
-        let a: AssertInvalid = Parser::new(
+        let a: AssertInvalid<'_> = Parser::new(
             r#"(assert_invalid
               (module (memory 0) (func (drop (i32.load8_s align=2 (i32.const 0)))))
               "alignment must not be larger than natural"
@@ -1070,7 +1071,7 @@ mod tests {
 
     #[test]
     fn assert_unlinkable() {
-        let a: AssertUnlinkable = Parser::new(
+        let a: AssertUnlinkable<'_> = Parser::new(
             r#"(assert_unlinkable
               (module
                 (memory 0)
@@ -1108,7 +1109,7 @@ mod tests {
 
     #[test]
     fn assert_exhaustion() {
-        let a: AssertExhaustion = Parser::new(
+        let a: AssertExhaustion<'_> = Parser::new(
             r#"(assert_exhaustion
               (invoke "fac-rec" (i64.const 1073741824))
               "call stack exhausted"
@@ -1125,7 +1126,7 @@ mod tests {
 
     #[test]
     fn command() {
-        let d: Command = Parser::new(
+        let d: Command<'_> = Parser::new(
             r#"
             (module
               (func (export "br") (block (br 0)))
@@ -1138,12 +1139,12 @@ mod tests {
         .unwrap();
         assert!(matches!(d, Command::InlineModule(_)));
 
-        let d: Command = Parser::new(r#"(assert_return (invoke "br"))"#)
+        let d: Command<'_> = Parser::new(r#"(assert_return (invoke "br"))"#)
             .parse()
             .unwrap();
         assert!(matches!(d, Command::AssertReturn(_)));
 
-        let d: Command = Parser::new(
+        let d: Command<'_> = Parser::new(
             r#"
             (assert_invalid
               (module (memory 0) (func (drop (i32.load8_s align=2 (i32.const 0)))))
@@ -1155,7 +1156,7 @@ mod tests {
         .unwrap();
         assert!(matches!(d, Command::AssertInvalid(_)));
 
-        let d: Command = Parser::new(
+        let d: Command<'_> = Parser::new(
             r#"
             (module binary "\00asm\01\00\00\00")
             (assert_return (invoke "br"))
@@ -1171,7 +1172,7 @@ mod tests {
             })
         ));
 
-        let d: Command = Parser::new(r#"(module quote "(memory $foo 1)" "(memory $foo 1)")"#)
+        let d: Command<'_> = Parser::new(r#"(module quote "(memory $foo 1)" "(memory $foo 1)")"#)
             .parse()
             .unwrap();
         assert!(matches!(
@@ -1185,7 +1186,7 @@ mod tests {
 
     #[test]
     fn script() {
-        let script: Script = Parser::new(
+        let script: Script<'_> = Parser::new(
             r#"
             (module
               (func (export "br") (block (br 0)))
@@ -1255,7 +1256,7 @@ mod tests {
                 }
 
                 let content = fs::read_to_string(&path).unwrap();
-                match Parser::new(&content).parse::<Script>() {
+                match Parser::new(&content).parse::<Script<'_>>() {
                     Err(err) => panic!("parse error at {:?} ({}): {}", path, count, err),
                     Ok(script) => assert!(!script.commands.is_empty()),
                 }
