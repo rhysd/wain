@@ -3,7 +3,7 @@ wain
 [![crates.io][crates-io-badge]][crates-io]
 [![CI][ci-badge]][ci]
 
-[wain][proj] is a **W**eb**A**ssembly **IN**terpreter written in Rust from scratch with zero dependencies.
+[wain][proj] is a **W**eb**A**ssembly **IN**terpreter written in Safe Rust from scratch with zero dependencies.
 An implementation of [WebAssembly][wasm-spec].
 
 <img width=438 height=257 src="https://github.com/rhysd/ss/blob/master/wain/main.gif?raw=true" alt="screencast">
@@ -239,6 +239,7 @@ To know the usage of APIs, working examples are available at [examples/api/](./e
 - Wasm features after MVP support (threads, SIMD, multiple return values, ...)
 - Compare benchmarks with other Wasm implementations
 - Self-hosting interpreter. Compile wain into Wasm and run it by itself
+- Upgrade the Wasm implementation from [Wasm v1][wasm-v1] to [Wasm v2][wasm-v2].
 
 
 ## How it works
@@ -321,3 +322,5 @@ function as entrypoint. wain implements both entrypoints (1. is prioritized).
 [wasm-spec-text]: https://webassembly.github.io/spec/core/text/index.html
 [wasm-spec-validation]: https://webassembly.github.io/spec/core/valid/index.html
 [wasm-spec-exec]: https://webassembly.github.io/spec/core/exec/index.html
+[wasm-v1]: https://www.w3.org/TR/2019/REC-wasm-core-1-20191205/
+[wasm-v2]: https://www.w3.org/TR/wasm-core-2/
