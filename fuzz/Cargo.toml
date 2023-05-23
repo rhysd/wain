@@ -15,9 +15,6 @@ wain-syntax-binary = { path = "../wain-syntax-binary" }
 wain-syntax-text = { path = "../wain-syntax-text" }
 wain-validate = { path = "../wain-validate" }
 
-[dependencies.wain]
-path = ".."
-
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
