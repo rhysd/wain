@@ -363,15 +363,7 @@ mod tests {
     #[test]
     fn any_value() {
         let i32_s = [0, 1, -1, i32::MAX, i32::MIN];
-        let i64_s = [
-            0,
-            1,
-            -1,
-            i32::MAX as i64,
-            i32::MIN as i64,
-            i64::MAX,
-            i64::MIN,
-        ];
+        let i64_s = [0, 1, -1, i32::MAX as i64, i32::MIN as i64, i64::MAX, i64::MIN];
         let f32_s = [0.0, 3.14, -1.0, f32::INFINITY, f32::NEG_INFINITY, f32::NAN];
         let f64_s = [0.0, 3.14, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN];
 

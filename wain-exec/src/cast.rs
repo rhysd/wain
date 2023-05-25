@@ -22,11 +22,7 @@ macro_rules! float_to_int {
             //    b) If MIN - 1.0 can not be represented exactly,
             //       then MIN - 1.0 = MIN.  (Because of "round to nearest even" behavior.)
             //       So, we can check it with MIN <= f.
-            let gt_min = if MIN != MIN - 1.0 {
-                MIN - 1.0 < f
-            } else {
-                MIN <= f
-            };
+            let gt_min = if MIN != MIN - 1.0 { MIN - 1.0 < f } else { MIN <= f };
 
             if gt_min && f < MAX + 1.0 {
                 Some(f as $int)
@@ -109,10 +105,7 @@ mod tests {
         assert_eq!(f32_to_u32(0.0), Some(0));
         assert_eq!(f32_to_u32(1.0.next_after(0.0)), Some(0));
         assert_eq!(f32_to_u32(1.0), Some(1));
-        assert_eq!(
-            f32_to_u32((u32::MAX as f32).next_after(0.0)),
-            Some(0xffff_ff00)
-        );
+        assert_eq!(f32_to_u32((u32::MAX as f32).next_after(0.0)), Some(0xffff_ff00));
         assert_eq!(f32_to_u32(u32::MAX as f32), None);
         assert_eq!(f32_to_u32(f32::INFINITY), None);
         assert_eq!(f32_to_u32(f32::NEG_INFINITY), None);
@@ -141,10 +134,7 @@ mod tests {
         assert_eq!(f64_to_u32(0.0), Some(0));
         assert_eq!(f64_to_u32(1.0.next_after(0.0)), Some(0));
         assert_eq!(f64_to_u32(1.0), Some(1));
-        assert_eq!(
-            f64_to_u32((u32::MAX as f64 + 1.0).next_after(0.0)),
-            Some(u32::MAX)
-        );
+        assert_eq!(f64_to_u32((u32::MAX as f64 + 1.0).next_after(0.0)), Some(u32::MAX));
         assert_eq!(f64_to_u32(u32::MAX as f64 + 1.0), None);
         assert_eq!(f64_to_u32(f64::INFINITY), None);
         assert_eq!(f64_to_u32(f64::NEG_INFINITY), None);
@@ -170,10 +160,7 @@ mod tests {
 
     #[test]
     fn float_to_int() {
-        assert_eq!(
-            f32_to_i32((i32::MIN as f32).next_after(f32::NEG_INFINITY)),
-            None
-        );
+        assert_eq!(f32_to_i32((i32::MIN as f32).next_after(f32::NEG_INFINITY)), None);
         assert_eq!(f32_to_i32(i32::MIN as f32), Some(i32::MIN));
         assert_eq!(f32_to_i32(-1.0), Some(-1));
         assert_eq!(f32_to_i32(-(1.0.next_after(-0.0))), Some(0));
@@ -181,20 +168,14 @@ mod tests {
         assert_eq!(f32_to_i32(0.0), Some(0));
         assert_eq!(f32_to_i32(1.0.next_after(0.0)), Some(0));
         assert_eq!(f32_to_i32(1.0), Some(1));
-        assert_eq!(
-            f32_to_i32((i32::MAX as f32).next_after(0.0)),
-            Some(0x7fff_ff80)
-        );
+        assert_eq!(f32_to_i32((i32::MAX as f32).next_after(0.0)), Some(0x7fff_ff80));
         assert_eq!(f32_to_i32(i32::MAX as f32), None);
         assert_eq!(f32_to_i32(f32::INFINITY), None);
         assert_eq!(f32_to_i32(f32::NEG_INFINITY), None);
         assert_eq!(f32_to_i32(f32::NAN), None);
         assert_eq!(f32_to_i32(-f32::NAN), None);
 
-        assert_eq!(
-            f32_to_i64((i64::MIN as f32).next_after(f32::NEG_INFINITY)),
-            None
-        );
+        assert_eq!(f32_to_i64((i64::MIN as f32).next_after(f32::NEG_INFINITY)), None);
         assert_eq!(f32_to_i64(i64::MIN as f32), Some(i64::MIN));
         assert_eq!(f32_to_i64(-1.0), Some(-1));
         assert_eq!(f32_to_i64(-(1.0.next_after(-0.0))), Some(0));
@@ -213,30 +194,21 @@ mod tests {
         assert_eq!(f32_to_i64(-f32::NAN), None);
 
         assert_eq!(f64_to_i32(i32::MIN as f64 - 1.0), None);
-        assert_eq!(
-            f64_to_i32((i32::MIN as f64 - 1.0).next_after(-0.0)),
-            Some(i32::MIN)
-        );
+        assert_eq!(f64_to_i32((i32::MIN as f64 - 1.0).next_after(-0.0)), Some(i32::MIN));
         assert_eq!(f64_to_i32(-1.0), Some(-1));
         assert_eq!(f64_to_i32(-(1.0.next_after(-0.0))), Some(0));
         assert_eq!(f64_to_i32(-0.0), Some(0));
         assert_eq!(f64_to_i32(0.0), Some(0));
         assert_eq!(f64_to_i32(1.0.next_after(0.0)), Some(0));
         assert_eq!(f64_to_i32(1.0), Some(1));
-        assert_eq!(
-            f64_to_i32((i32::MAX as f64 + 1.0).next_after(0.0)),
-            Some(i32::MAX)
-        );
+        assert_eq!(f64_to_i32((i32::MAX as f64 + 1.0).next_after(0.0)), Some(i32::MAX));
         assert_eq!(f64_to_i32(i32::MAX as f64 + 1.0), None);
         assert_eq!(f64_to_i32(f64::INFINITY), None);
         assert_eq!(f64_to_i32(f64::NEG_INFINITY), None);
         assert_eq!(f64_to_i32(f64::NAN), None);
         assert_eq!(f64_to_i32(-f64::NAN), None);
 
-        assert_eq!(
-            f64_to_i64((i64::MIN as f64).next_after(f64::NEG_INFINITY)),
-            None
-        );
+        assert_eq!(f64_to_i64((i64::MIN as f64).next_after(f64::NEG_INFINITY)), None);
         assert_eq!(f64_to_i64(i64::MIN as f64), Some(i64::MIN));
         assert_eq!(f64_to_i64(-1.0), Some(-1));
         assert_eq!(f64_to_i64(-(1.0.next_after(-0.0))), Some(0));

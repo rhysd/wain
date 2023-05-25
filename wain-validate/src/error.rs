@@ -92,18 +92,10 @@ impl<S: Source> fmt::Display for Error<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ErrorKind::*;
         match &self.kind {
-            IndexOutOfBounds { idx, upper, what } => write!(
-                f,
-                "{} index {} out of bounds 0 <= idx < {}",
-                what, idx, upper
-            )?,
+            IndexOutOfBounds { idx, upper, what } => write!(f, "{} index {} out of bounds 0 <= idx < {}", what, idx, upper)?,
             MultipleReturnTypes(tys) => {
                 let ss = tys.iter().map(AsRef::as_ref).collect::<Vec<&str>>();
-                write!(
-                    f,
-                    "multiple return types are not allowed for now but got [{}]",
-                    ss.join(", ")
-                )?
+                write!(f, "multiple return types are not allowed for now but got [{}]", ss.join(", "))?
             }
             TypeMismatch { expected, actual } => {
                 assert_ne!(expected, actual);
@@ -116,20 +108,18 @@ impl<S: Source> fmt::Display for Error<S> {
                     None => write!(f, "but got no type")?,
                 }
             }
-            CtrlFrameEmpty {
-                op,
-                frame_start,
-                idx_in_op_stack: 0,
-            } => write!(f, "operand stack cannot be empty at '{}' instruction while validating instruction sequence starting at offset {}", op, frame_start)?,
-            CtrlFrameEmpty {
-                op,
-                frame_start,
-                idx_in_op_stack,
-            } => write!(
+            CtrlFrameEmpty { op, frame_start, idx_in_op_stack: 0 } => write!(
+                f,
+                "operand stack cannot be empty at '{}' instruction while validating instruction sequence starting at offset {}",
+                op, frame_start
+            )?,
+            CtrlFrameEmpty { op, frame_start, idx_in_op_stack } => write!(
                 f,
                 "empty control frame cannot be empty at '{}' instruction. the frame started at byte offset {} and top of \
-                 control frame is op_stack[{}]", op, frame_start, idx_in_op_stack)?,
-            SetImmutableGlobal{ ty, idx } => write!(f, "{} value cannot be set to immutable global variable {}", ty, idx)?,
+                 control frame is op_stack[{}]",
+                op, frame_start, idx_in_op_stack
+            )?,
+            SetImmutableGlobal { ty, idx } => write!(f, "{} value cannot be set to immutable global variable {}", ty, idx)?,
             TooLargeAlign { align, bits } => write!(f, "align {} must not be larger than {}bits / 8", align, bits)?,
             InvalidLimitRange(min, max) => write!(f, "range for limits {}..{} is invalid", min, max)?,
             LimitsOutOfRange { value, min, max, what } => write!(f, "limit {} is out of range {}..{} at {}", value, min, max, what)?,
@@ -137,7 +127,7 @@ impl<S: Source> fmt::Display for Error<S> {
             NoInstructionForConstant => write!(f, "at least one instruction is necessary for constant expressions")?,
             TooManyInstructionForConstant(len) => write!(f, "exactly one instruction is allowed for constant expressions but {} instructions found", len)?,
             MutableForConstant(idx) => write!(f, "constant expressions cannot reference mutable global variable {}", idx)?,
-            StartFunctionSignature{ idx, params, results } => write!(
+            StartFunctionSignature { idx, params, results } => write!(
                 f,
                 "start function should have no parameter and no result [] -> [] but found function '{}' is [{}] -> [{}]",
                 idx,
@@ -146,15 +136,9 @@ impl<S: Source> fmt::Display for Error<S> {
             )?,
             MultipleTables(size) => write!(f, "number of tables must not be larger than 1 but got {}", size)?,
             MultipleMemories(size) => write!(f, "number of memories must not be larger than 1 but got {}", size)?,
-            AlreadyExported{ name, prev_offset } => write!(f, "'{}' was already exported at offset {}", name, prev_offset)?,
+            AlreadyExported { name, prev_offset } => write!(f, "'{}' was already exported at offset {}", name, prev_offset)?,
             MemoryIsNotDefined => write!(f, "at least one memory section must be defined")?,
-            InvalidStackDepth { expected, actual, remaining } => write!(
-                f,
-                "expected operand stack depth is {} but actually {} with {} remaining on the stack",
-                expected,
-                actual,
-                remaining,
-            )?,
+            InvalidStackDepth { expected, actual, remaining } => write!(f, "expected operand stack depth is {} but actually {} with {} remaining on the stack", expected, actual, remaining,)?,
         }
 
         write!(f, ". error while validating {}. ", self.when)?;
@@ -164,12 +148,7 @@ impl<S: Source> fmt::Display for Error<S> {
 }
 
 impl<S: Source> Error<S> {
-    pub(crate) fn new(
-        kind: ErrorKind,
-        when: Cow<'static, str>,
-        offset: usize,
-        source: &S,
-    ) -> Box<Self> {
+    pub(crate) fn new(kind: ErrorKind, when: Cow<'static, str>, offset: usize, source: &S) -> Box<Self> {
         Box::new(Self {
             kind,
             source: source.clone(),

@@ -37,11 +37,7 @@ pub struct TransformError<'s> {
 
 impl<'s> TransformError<'s> {
     fn new(kind: TransformErrorKind<'s>, offset: usize, source: &'s str) -> Box<Self> {
-        Box::new(TransformError {
-            kind,
-            offset,
-            source,
-        })
+        Box::new(TransformError { kind, offset, source })
     }
 
     pub fn offset(&self) -> usize {
@@ -57,18 +53,13 @@ impl<'s> fmt::Display for TransformError<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TransformErrorKind::*;
         match &self.kind {
-            IdIsNotDefined { id, what } => {
-                write!(f, "No identifier '{}' for {} is found", id, what)?
-            }
+            IdIsNotDefined { id, what } => write!(f, "No identifier '{}' for {} is found", id, what)?,
             IdAlreadyDefined { id, idx, what } => write!(
                 f,
                 "Identifier '{}' is already defined to be mapped to index {} for {}",
                 id, idx, what
             )?,
-            LabelAndIdMismatch {
-                label: Some(label),
-                id,
-            } => write!(
+            LabelAndIdMismatch { label: Some(label), id } => write!(
                 f,
                 "in control instruction, label '{}' and identifier '{}' must be the same",
                 label, id
@@ -121,10 +112,7 @@ struct LabelStack<'s> {
 
 impl<'s> LabelStack<'s> {
     fn new(source: &'s str) -> Self {
-        Self {
-            source,
-            stack: vec![],
-        }
+        Self { source, stack: vec![] }
     }
 
     fn resolve(&self, idx: wat::Index<'s>, offset: usize) -> Result<'s, u32> {
@@ -144,12 +132,7 @@ impl<'s> LabelStack<'s> {
         }
     }
 
-    fn push(
-        &mut self,
-        label: Option<&'s str>,
-        id: Option<&'s str>,
-        offset: usize,
-    ) -> Result<'s, ()> {
+    fn push(&mut self, label: Option<&'s str>, id: Option<&'s str>, offset: usize) -> Result<'s, ()> {
         let label = match (label, id) {
             (Some(label), Some(id)) if label == id => label,
             (_, Some(id)) => {
@@ -189,14 +172,10 @@ impl<'s> LabelStack<'s> {
     // to those farther out.
     //   https://webassembly.github.io/spec/core/syntax/instructions.html#control-instructions
     fn find(&self, label: &'s str) -> Option<u32> {
-        self.stack
-            .iter()
-            .rev()
-            .enumerate()
-            .find_map(|(i, l)| match l {
-                Some(l) if *l == label => Some(i as u32),
-                _ => None,
-            })
+        self.stack.iter().rev().enumerate().find_map(|(i, l)| match l {
+            Some(l) if *l == label => Some(i as u32),
+            _ => None,
+        })
     }
 }
 
@@ -245,20 +224,10 @@ impl<'s> Context<'s> {
                 if idx as usize >= self.types.len() {
                     return Ok(idx);
                 }
-                let wat::FuncType {
-                    params, results, ..
-                } = &self.types[idx as usize];
+                let wat::FuncType { params, results, .. } = &self.types[idx as usize];
                 if ty.params.is_empty() && ty.results.is_empty()
-                    || ty
-                        .params
-                        .iter()
-                        .map(|p| p.ty)
-                        .eq(params.iter().map(|p| p.ty))
-                        && ty
-                            .results
-                            .iter()
-                            .map(|r| r.ty)
-                            .eq(results.iter().map(|r| r.ty))
+                    || ty.params.iter().map(|p| p.ty).eq(params.iter().map(|p| p.ty))
+                        && ty.results.iter().map(|r| r.ty).eq(results.iter().map(|r| r.ty))
                 {
                     Ok(idx)
                 } else {
@@ -323,10 +292,7 @@ impl<'s> Context<'s> {
     }
 }
 
-pub fn wat2wasm<'s>(
-    mut parsed: wat::Parsed<'s>,
-    source: &'s str,
-) -> Result<'s, wasm::Root<'s, TextSource<'s>>> {
+pub fn wat2wasm<'s>(mut parsed: wat::Parsed<'s>, source: &'s str) -> Result<'s, wasm::Root<'s, TextSource<'s>>> {
     let mut ctx = Context {
         source,
         type_indices: parsed.type_indices,
@@ -483,12 +449,7 @@ impl<'s> Transform<'s> for wat::Instruction<'s> {
     fn transform(self, ctx: &mut Context<'s>) -> Result<'s, Self::Target> {
         let start = self.start;
         let kind = match self.kind {
-            wat::InsnKind::Block {
-                label,
-                ty,
-                body,
-                id,
-            } => {
+            wat::InsnKind::Block { label, ty, body, id } => {
                 ctx.label_stack.push(label, id, start)?;
                 let body = body.transform(ctx)?;
                 ctx.label_stack.pop();
@@ -497,12 +458,7 @@ impl<'s> Transform<'s> for wat::Instruction<'s> {
                     body,
                 }
             }
-            wat::InsnKind::Loop {
-                label,
-                ty,
-                body,
-                id,
-            } => {
+            wat::InsnKind::Loop { label, ty, body, id } => {
                 ctx.label_stack.push(label, id, start)?;
                 let body = body.transform(ctx)?;
                 ctx.label_stack.pop();
@@ -535,10 +491,7 @@ impl<'s> Transform<'s> for wat::Instruction<'s> {
             wat::InsnKind::Nop => wasm::InsnKind::Nop,
             wat::InsnKind::Br(idx) => wasm::InsnKind::Br(ctx.label_stack.resolve(idx, start)?),
             wat::InsnKind::BrIf(idx) => wasm::InsnKind::BrIf(ctx.label_stack.resolve(idx, start)?),
-            wat::InsnKind::BrTable {
-                labels,
-                default_label,
-            } => wasm::InsnKind::BrTable {
+            wat::InsnKind::BrTable { labels, default_label } => wasm::InsnKind::BrTable {
                 labels: labels
                     .into_iter()
                     .map(|idx| ctx.label_stack.resolve(idx, start))
@@ -547,28 +500,16 @@ impl<'s> Transform<'s> for wat::Instruction<'s> {
             },
             wat::InsnKind::Return => wasm::InsnKind::Return,
             wat::InsnKind::Call(idx) => wasm::InsnKind::Call(ctx.resolve_func_idx(idx, start)?),
-            wat::InsnKind::CallIndirect(ty) => {
-                wasm::InsnKind::CallIndirect(ctx.resolve_type_idx(ty, start)?)
-            }
+            wat::InsnKind::CallIndirect(ty) => wasm::InsnKind::CallIndirect(ctx.resolve_type_idx(ty, start)?),
             // Parametric instructions
             wat::InsnKind::Drop => wasm::InsnKind::Drop,
             wat::InsnKind::Select => wasm::InsnKind::Select,
             // Variable instructions
-            wat::InsnKind::LocalGet(idx) => {
-                wasm::InsnKind::LocalGet(ctx.resolve_local_idx(idx, start)?)
-            }
-            wat::InsnKind::LocalSet(idx) => {
-                wasm::InsnKind::LocalSet(ctx.resolve_local_idx(idx, start)?)
-            }
-            wat::InsnKind::LocalTee(idx) => {
-                wasm::InsnKind::LocalTee(ctx.resolve_local_idx(idx, start)?)
-            }
-            wat::InsnKind::GlobalGet(idx) => {
-                wasm::InsnKind::GlobalGet(ctx.resolve_global_idx(idx, start)?)
-            }
-            wat::InsnKind::GlobalSet(idx) => {
-                wasm::InsnKind::GlobalSet(ctx.resolve_global_idx(idx, start)?)
-            }
+            wat::InsnKind::LocalGet(idx) => wasm::InsnKind::LocalGet(ctx.resolve_local_idx(idx, start)?),
+            wat::InsnKind::LocalSet(idx) => wasm::InsnKind::LocalSet(ctx.resolve_local_idx(idx, start)?),
+            wat::InsnKind::LocalTee(idx) => wasm::InsnKind::LocalTee(ctx.resolve_local_idx(idx, start)?),
+            wat::InsnKind::GlobalGet(idx) => wasm::InsnKind::GlobalGet(ctx.resolve_global_idx(idx, start)?),
+            wat::InsnKind::GlobalSet(idx) => wasm::InsnKind::GlobalSet(ctx.resolve_global_idx(idx, start)?),
             // Memory instructions
             wat::InsnKind::I32Load(mem) => wasm::InsnKind::I32Load(mem.transform(ctx)?),
             wat::InsnKind::I64Load(mem) => wasm::InsnKind::I64Load(mem.transform(ctx)?),
@@ -756,10 +697,7 @@ impl<'s> Transform<'s> for wat::Func<'s> {
                     }
 
                     wasm::FuncKind::Body {
-                        locals: locals
-                            .iter()
-                            .map(|l| l.ty.transform(ctx))
-                            .collect::<Result<'_, _>>()?,
+                        locals: locals.iter().map(|l| l.ty.transform(ctx)).collect::<Result<'_, _>>()?,
                         expr: body.transform(ctx)?,
                     }
                 }

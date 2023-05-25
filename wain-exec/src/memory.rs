@@ -123,12 +123,7 @@ impl Memory {
         prev as i32
     }
 
-    fn check_addr<V: LittleEndian>(
-        &self,
-        addr: usize,
-        at: usize,
-        operation: &'static str,
-    ) -> Result<()> {
+    fn check_addr<V: LittleEndian>(&self, addr: usize, at: usize, operation: &'static str) -> Result<()> {
         if addr.saturating_add(size_of::<V>()) > self.data.len() {
             Err(Trap::new(
                 TrapReason::LoadMemoryOutOfRange {

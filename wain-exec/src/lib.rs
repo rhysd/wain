@@ -14,9 +14,7 @@ mod stack;
 mod table;
 mod value;
 
-pub use import::{
-    check_func_signature, DefaultImporter, ImportInvalidError, ImportInvokeError, Importer,
-};
+pub use import::{check_func_signature, DefaultImporter, ImportInvalidError, ImportInvokeError, Importer};
 pub use memory::Memory;
 pub use runtime::Runtime;
 pub use stack::Stack;

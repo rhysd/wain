@@ -24,9 +24,7 @@ impl io::Write for Discard {
 }
 
 fn help() {
-    eprintln!(
-        "Usage: crash-tester {{byte-offset}} {{name}} with proper stdin for arguments and source"
-    );
+    eprintln!("Usage: crash-tester {{byte-offset}} {{name}} with proper stdin for arguments and source");
     process::exit(1);
 }
 
@@ -89,10 +87,7 @@ fn main() {
     let importer = DefaultImporter::with_stdio(Discard, Discard);
     let mut runtime = match Runtime::instantiate(&ast.module, importer) {
         Ok(rt) => rt,
-        Err(err) => panic!(
-            "cannot instantiate module '{}' at offset {}: {}",
-            source, offset, err
-        ),
+        Err(err) => panic!("cannot instantiate module '{}' at offset {}: {}", source, offset, err),
     };
 
     match runtime.invoke(name, &invoke_args) {

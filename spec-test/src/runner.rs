@@ -153,11 +153,7 @@ impl<W: Write> Runner<W> {
         writeln!(&mut self.out, "{}", err).unwrap();
     }
 
-    fn save_summaries(
-        &mut self,
-        summaries: &mut [(String, Summary)],
-        total: &Summary,
-    ) -> io::Result<()> {
+    fn save_summaries(&mut self, summaries: &mut [(String, Summary)], total: &Summary) -> io::Result<()> {
         let mut file = if let Some(f) = &self.summary_file {
             fs::File::create(f)?
         } else {
@@ -209,12 +205,7 @@ impl<W: Write> Runner<W> {
 
         let msecs = start_time.elapsed().unwrap().as_millis();
         self.out.write_all(total.color()).unwrap();
-        writeln!(
-            &mut self.out,
-            "\nResults of {} files ({} ms):",
-            num_files, msecs,
-        )
-        .unwrap();
+        writeln!(&mut self.out, "\nResults of {} files ({} ms):", num_files, msecs,).unwrap();
         total.println(&mut self.out);
         self.out.write_all(color::RESET).unwrap();
         self.save_summaries(&mut summaries, &total)?;
@@ -312,16 +303,9 @@ impl<'m, 's> Instances<'m, 's> {
         Ok(())
     }
 
-    fn find(
-        &mut self,
-        id: Option<&'s str>,
-        pos: usize,
-    ) -> Result<'s, (&mut TestRuntime<'m, 's>, usize)> {
+    fn find(&mut self, id: Option<&'s str>, pos: usize) -> Result<'s, (&mut TestRuntime<'m, 's>, usize)> {
         let searched = if let Some(id) = id {
-            self.runtimes
-                .iter_mut()
-                .rev()
-                .find(|(m, _)| m.module().id == Some(id))
+            self.runtimes.iter_mut().rev().find(|(m, _)| m.module().id == Some(id))
         } else {
             self.runtimes.last_mut()
         };
@@ -330,11 +314,7 @@ impl<'m, 's> Instances<'m, 's> {
         if let Some((m, mod_pos)) = searched {
             Ok((m, *mod_pos))
         } else {
-            Err(Error::run_error(
-                RunKind::ModuleNotFound(id),
-                self.source,
-                pos,
-            ))
+            Err(Error::run_error(RunKind::ModuleNotFound(id), self.source, pos))
         }
     }
 
@@ -372,30 +352,21 @@ impl<'a> Tester<'a> {
         }
     }
 
-    fn parse_embedded_module(
-        &self,
-        m: &'a wast::EmbeddedModule,
-    ) -> Result<'a, (ast::Module<'a>, usize)> {
+    fn parse_embedded_module(&self, m: &'a wast::EmbeddedModule) -> Result<'a, (ast::Module<'a>, usize)> {
         match &m.src {
             wast::EmbeddedSrc::Quote(text) => {
-                let root = wat::parse(text).map_err(|err| {
-                    Error::run_error(RunKind::ParseQuoteFailure(err), self.source, m.start)
-                })?;
+                let root = wat::parse(text)
+                    .map_err(|err| Error::run_error(RunKind::ParseQuoteFailure(err), self.source, m.start))?;
 
-                validate(&root).map_err(|err| {
-                    Error::run_error(RunKind::InvalidText(*err), self.source, m.start)
-                })?;
+                validate(&root).map_err(|err| Error::run_error(RunKind::InvalidText(*err), self.source, m.start))?;
 
                 Ok((root.module, m.start))
             }
             wast::EmbeddedSrc::Binary(bin) => {
-                let root = binary::parse(bin).map_err(|err| {
-                    Error::run_error(RunKind::ParseBinaryFailure(*err), self.source, m.start)
-                })?;
+                let root = binary::parse(bin)
+                    .map_err(|err| Error::run_error(RunKind::ParseBinaryFailure(*err), self.source, m.start))?;
 
-                validate(&root).map_err(|err| {
-                    Error::run_error(RunKind::InvalidBinary(*err), self.source, m.start)
-                })?;
+                validate(&root).map_err(|err| Error::run_error(RunKind::InvalidBinary(*err), self.source, m.start))?;
 
                 Ok((root.module, m.start))
             }
@@ -467,11 +438,7 @@ impl<'a> Tester<'a> {
                 }
                 Ok(())
             }
-            AssertReturn(wast::AssertReturn::Global {
-                start,
-                get,
-                expected,
-            }) => {
+            AssertReturn(wast::AssertReturn::Global { start, get, expected }) => {
                 let (runtime, _) = instances.find(get.id, *start)?;
                 if let Some(actual) = runtime.get_global(&get.name) {
                     if expected.matches(&actual) {
@@ -544,11 +511,7 @@ impl<'a> Tester<'a> {
                     }
                 }
             }
-            AssertInvalid(wast::AssertInvalid {
-                start,
-                wat,
-                expected,
-            }) => match validate(wat) {
+            AssertInvalid(wast::AssertInvalid { start, wat, expected }) => match validate(wat) {
                 Ok(()) => Err(Error::run_error(
                     RunKind::UnexpectedValid {
                         expected: expected.clone(),
@@ -609,8 +572,7 @@ impl<'a> Tester<'a> {
                 invoke,
             }) => {
                 let (_, mod_pos) = instances.find(invoke.id, invoke.start)?;
-                let stderr =
-                    crasher.test_crash(self.source, mod_pos, &invoke.name, &invoke.args)?;
+                let stderr = crasher.test_crash(self.source, mod_pos, &invoke.name, &invoke.args)?;
                 match expected.as_str() {
                     "call stack exhausted"
                         if stderr.contains("fatal runtime error: stack overflow")
@@ -628,12 +590,9 @@ impl<'a> Tester<'a> {
                     )),
                 }
             }
-            Register(wast::Register { start, .. })
-            | AssertUnlinkable(wast::AssertUnlinkable { start, .. }) => Err(Error::run_error(
-                RunKind::NotImplementedYet,
-                self.source,
-                *start,
-            )),
+            Register(wast::Register { start, .. }) | AssertUnlinkable(wast::AssertUnlinkable { start, .. }) => {
+                Err(Error::run_error(RunKind::NotImplementedYet, self.source, *start))
+            }
             Invoke(invoke) => instances.invoke(invoke).map(|_| ()),
         }
     }

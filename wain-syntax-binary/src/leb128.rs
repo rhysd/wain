@@ -77,8 +77,7 @@ fn read_32(bytes: &[u8], signed: bool) -> Result<(u32, usize)> {
         //   Next byte must be <= 0b1111
         // signed:
         //   Next byte must be <= 0b0111 for positive values and >= 0b1111000 for negative values
-        if idx > 4 || idx == 4 && (!signed && b > 0b1111 || signed && b > 0b0111 && b < 0b111_1000)
-        {
+        if idx > 4 || idx == 4 && (!signed && b > 0b1111 || signed && b > 0b0111 && b < 0b111_1000) {
             let ty = if signed { "i32" } else { "u32" };
             return Err(Box::new(ErrorKind::IntOverflow { ty, got: None }));
         }
@@ -118,11 +117,7 @@ mod tests {
             (vec![0x80, 0x80, 0x80, 0x80, 0x78], i32::MIN),
         ] {
             let (i, s) = i32::read_leb128(&input).unwrap();
-            assert_eq!(
-                i, expected,
-                "expected {} but got {} for {:?}",
-                expected, i, input,
-            );
+            assert_eq!(i, expected, "expected {} but got {} for {:?}", expected, i, input,);
             assert_eq!(
                 s,
                 input.len(),
@@ -144,8 +139,7 @@ mod tests {
             (vec![0xff, 0xff, 0xff, 0xff, 0x07], i32::MAX as i64),
             (
                 vec![
-                    0b10011111, 0b11111111, 0b11000111, 0b11000100, 0b11010110, 0b11111101,
-                    0b00000000,
+                    0b10011111, 0b11111111, 0b11000111, 0b11000100, 0b11010110, 0b11111101, 0b00000000,
                 ],
                 4318196531103,
             ),
@@ -158,8 +152,7 @@ mod tests {
             (vec![0x80, 0x7f], -128),
             (
                 vec![
-                    0b11100001, 0b10000000, 0b10111000, 0b10111011, 0b10101001, 0b10000010,
-                    0b1111111,
+                    0b11100001, 0b10000000, 0b10111000, 0b10111011, 0b10101001, 0b10000010, 0b1111111,
                 ],
                 -4318196531103,
             ),
@@ -170,11 +163,7 @@ mod tests {
             ),
         ] {
             let (i, s) = i64::read_leb128(&input).unwrap();
-            assert_eq!(
-                i, expected,
-                "expected {} but got {} for {:?}",
-                expected, i, input,
-            );
+            assert_eq!(i, expected, "expected {} but got {} for {:?}", expected, i, input,);
             assert_eq!(
                 s,
                 input.len(),
@@ -196,11 +185,7 @@ mod tests {
             (vec![0xff, 0xff, 0xff, 0xff, 0x0f], u32::MAX),
         ] {
             let (i, s) = u32::read_leb128(&input).unwrap();
-            assert_eq!(
-                i, expected,
-                "expected {} but got {} for {:?}",
-                expected, i, input,
-            );
+            assert_eq!(i, expected, "expected {} but got {} for {:?}", expected, i, input,);
             assert_eq!(
                 s,
                 input.len(),
@@ -220,21 +205,14 @@ mod tests {
             (vec![0xc0, 0xc4, 0x07], 123456),
             (vec![0x01], 1),
             (vec![0xff, 0xff, 0xff, 0xff, 0x0f], u32::MAX as u64),
-            (
-                vec![0x9f, 0xff, 0xc5, 0xaf, 0x91, 0xa2, 0x1c],
-                124318196531103,
-            ),
+            (vec![0x9f, 0xff, 0xc5, 0xaf, 0x91, 0xa2, 0x1c], 124318196531103),
             (
                 vec![0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1],
                 u64::MAX,
             ),
         ] {
             let (i, s) = u64::read_leb128(&input).unwrap();
-            assert_eq!(
-                i, expected,
-                "expected {} but got {} for {:?}",
-                expected, i, input,
-            );
+            assert_eq!(i, expected, "expected {} but got {} for {:?}", expected, i, input,);
             assert_eq!(
                 s,
                 input.len(),

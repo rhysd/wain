@@ -1,20 +1,12 @@
 use std::fmt;
 use wain_ast::source::Source;
 
-pub(crate) fn describe_position(
-    f: &mut fmt::Formatter<'_>,
-    source: &[u8],
-    pos: usize,
-) -> fmt::Result {
+pub(crate) fn describe_position(f: &mut fmt::Formatter<'_>, source: &[u8], pos: usize) -> fmt::Result {
     if pos == source.len() {
         write!(f, " caused at byte offset {} (end of input)", pos)
     } else {
         let source = &source[pos..];
-        let source = if source.len() > 25 {
-            &source[..25]
-        } else {
-            source
-        };
+        let source = if source.len() > 25 { &source[..25] } else { source };
         write!(f, " caused at byte offset {}\n\n ...", pos)?;
         for b in source {
             write!(f, " {:02x}", b)?;

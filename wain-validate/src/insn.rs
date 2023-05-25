@@ -214,14 +214,10 @@ impl<'outer, 'm, 's, S: Source> FuncBodyContext<'outer, 'm, 's, S> {
     }
 
     fn validate_memarg(&self, mem: &Mem, bits: u32) -> Result<(), S> {
-        self.outer
-            .memory_from_idx(0, self.current_op, self.current_offset)?;
+        self.outer.memory_from_idx(0, self.current_op, self.current_offset)?;
         // The alignment must not be larger than the bit width of t divided by 8.
         if mem.align > (bits / 8).trailing_zeros() {
-            return self.error(ErrorKind::TooLargeAlign {
-                align: mem.align,
-                bits,
-            });
+            return self.error(ErrorKind::TooLargeAlign { align: mem.align, bits });
         }
         Ok(())
     }
@@ -286,9 +282,7 @@ trait ValidateInsnSeq<'outer, 'm, 's, S: Source> {
     fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 's, S>) -> Result<(), S>;
 }
 
-impl<'s, 'm, 'outer, S: Source, V: ValidateInsnSeq<'outer, 'm, 's, S>>
-    ValidateInsnSeq<'outer, 'm, 's, S> for [V]
-{
+impl<'s, 'm, 'outer, S: Source, V: ValidateInsnSeq<'outer, 'm, 's, S>> ValidateInsnSeq<'outer, 'm, 's, S> for [V] {
     fn validate(&self, ctx: &mut FuncBodyContext<'outer, 'm, 's, S>) -> Result<(), S> {
         self.iter().try_for_each(|insn| insn.validate(ctx))
     }
@@ -365,10 +359,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 }
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-br-table
-            BrTable {
-                labels,
-                default_label,
-            } => {
+            BrTable { labels, default_label } => {
                 ctx.pop_op_stack(ValType::I32)?;
                 let expected = ctx.validate_label_idx(*default_label)?;
                 for (i, idx) in labels.iter().enumerate() {
@@ -376,14 +367,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                     if expected != actual {
                         return ctx
                             .error(ErrorKind::TypeMismatch { expected, actual })
-                            .map_err(|e| {
-                                e.update_msg(format!(
-                                    "{} label {} at {}",
-                                    Ordinal(i),
-                                    idx,
-                                    ctx.current_op
-                                ))
-                            });
+                            .map_err(|e| e.update_msg(format!("{} label {} at {}", Ordinal(i), idx, ctx.current_op)));
                     }
                 }
                 ctx.mark_unreachable(expected)?;
@@ -396,9 +380,7 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             Call(funcidx) => {
                 let func = ctx.outer.func_from_idx(*funcidx, ctx.current_op, start)?;
                 // func.idx might be invalid when the callee is not validated yet (#39)
-                let fty = ctx
-                    .outer
-                    .type_from_idx(func.idx, "callee at call instruction", start)?;
+                let fty = ctx.outer.type_from_idx(func.idx, "callee at call instruction", start)?;
                 // Pop extracts parameters in reverse order
                 for (i, ty) in fty.params.iter().enumerate().rev() {
                     ctx.pop_op_stack(*ty)
@@ -414,9 +396,8 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
                 let fty = ctx.outer.type_from_idx(*typeidx, ctx.current_op, start)?;
                 // Pop extracts parameters in reverse order
                 for (i, ty) in fty.params.iter().enumerate().rev() {
-                    ctx.pop_op_stack(*ty).map_err(|e| {
-                        e.update_msg(format!("{} parameter at call.indirect", Ordinal(i)))
-                    })?;
+                    ctx.pop_op_stack(*ty)
+                        .map_err(|e| e.update_msg(format!("{} parameter at call.indirect", Ordinal(i))))?;
                 }
                 ctx.op_stack.extend_from_slice(&fty.results);
             }
@@ -445,22 +426,15 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-global-get
             GlobalGet(globalidx) => {
-                let global = ctx
-                    .outer
-                    .global_from_idx(*globalidx, ctx.current_op, start)?;
+                let global = ctx.outer.global_from_idx(*globalidx, ctx.current_op, start)?;
                 ctx.op_stack.push(global.ty);
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-global-set
             GlobalSet(globalidx) => {
-                let global = ctx
-                    .outer
-                    .global_from_idx(*globalidx, ctx.current_op, start)?;
+                let global = ctx.outer.global_from_idx(*globalidx, ctx.current_op, start)?;
                 let ty = global.ty;
                 if !global.mutable {
-                    return ctx.error(ErrorKind::SetImmutableGlobal {
-                        ty,
-                        idx: *globalidx,
-                    });
+                    return ctx.error(ErrorKind::SetImmutableGlobal { ty, idx: *globalidx });
                 }
                 ctx.pop_op_stack(ty)?;
             }
@@ -522,13 +496,13 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-binop
             // [t t] -> [t]
-            I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or
-            | I32Xor | I32Shl | I32ShrS | I32ShrU | I32Rotl | I32Rotr => {
+            I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl
+            | I32ShrS | I32ShrU | I32Rotl | I32Rotr => {
                 ctx.pop_op_stack(ValType::I32)?;
                 ctx.ensure_op_stack_top(ValType::I32)?;
             }
-            I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or
-            | I64Xor | I64Shl | I64ShrS | I64ShrU | I64Rotl | I64Rotr => {
+            I64Add | I64Sub | I64Mul | I64DivS | I64DivU | I64RemS | I64RemU | I64And | I64Or | I64Xor | I64Shl
+            | I64ShrS | I64ShrU | I64Rotl | I64Rotr => {
                 ctx.pop_op_stack(ValType::I64)?;
                 ctx.ensure_op_stack_top(ValType::I64)?;
             }
@@ -549,13 +523,11 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-relop
             // [t t] -> [i32]
-            I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS
-            | I32GeU => {
+            I32Eq | I32Ne | I32LtS | I32LtU | I32GtS | I32GtU | I32LeS | I32LeU | I32GeS | I32GeU => {
                 ctx.pop_op_stack(ValType::I32)?;
                 ctx.ensure_op_stack_top(ValType::I32)?;
             }
-            I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU | I64GeS
-            | I64GeU => {
+            I64Eq | I64Ne | I64LtS | I64LtU | I64GtS | I64GtU | I64LeS | I64LeU | I64GeS | I64GeU => {
                 ctx.pop_op_stack(ValType::I64)?;
                 ctx.pop_op_stack(ValType::I64)?;
                 ctx.op_stack.push(ValType::I32);
@@ -573,24 +545,16 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-cvtop
             // [t1] -> [t2]
             I32WrapI64 => ctx.validate_convert(ValType::I64, ValType::I32)?,
-            I32TruncF32S | I32TruncF32U | I32ReinterpretF32 => {
-                ctx.validate_convert(ValType::F32, ValType::I32)?
-            }
+            I32TruncF32S | I32TruncF32U | I32ReinterpretF32 => ctx.validate_convert(ValType::F32, ValType::I32)?,
             I32TruncF64S | I32TruncF64U => ctx.validate_convert(ValType::F64, ValType::I32)?,
             I64ExtendI32S | I64ExtendI32U => ctx.validate_convert(ValType::I32, ValType::I64)?,
             I64TruncF32S | I64TruncF32U => ctx.validate_convert(ValType::F32, ValType::I64)?,
-            I64TruncF64S | I64TruncF64U | I64ReinterpretF64 => {
-                ctx.validate_convert(ValType::F64, ValType::I64)?
-            }
-            F32ConvertI32S | F32ConvertI32U | F32ReinterpretI32 => {
-                ctx.validate_convert(ValType::I32, ValType::F32)?
-            }
+            I64TruncF64S | I64TruncF64U | I64ReinterpretF64 => ctx.validate_convert(ValType::F64, ValType::I64)?,
+            F32ConvertI32S | F32ConvertI32U | F32ReinterpretI32 => ctx.validate_convert(ValType::I32, ValType::F32)?,
             F32ConvertI64S | F32ConvertI64U => ctx.validate_convert(ValType::I64, ValType::F32)?,
             F32DemoteF64 => ctx.validate_convert(ValType::F64, ValType::F32)?,
             F64ConvertI32S | F64ConvertI32U => ctx.validate_convert(ValType::I32, ValType::F64)?,
-            F64ConvertI64S | F64ConvertI64U | F64ReinterpretI64 => {
-                ctx.validate_convert(ValType::I64, ValType::F64)?
-            }
+            F64ConvertI64S | F64ConvertI64U | F64ReinterpretI64 => ctx.validate_convert(ValType::I64, ValType::F64)?,
             F64PromoteF32 => ctx.validate_convert(ValType::F32, ValType::F64)?,
         }
         Ok(())
@@ -639,9 +603,7 @@ pub(crate) fn validate_constant<S: Source>(
                         "",
                         insn.start,
                     )
-                    .map_err(|e| {
-                        e.update_msg(format!("constant expression in {} at {}", name, when))
-                    });
+                    .map_err(|e| e.update_msg(format!("constant expression in {} at {}", name, when)));
             }
         }
         I32Const(_) => ValType::I32,

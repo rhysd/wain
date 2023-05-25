@@ -89,7 +89,10 @@ impl<'s> Composer<'s> {
 
         // Check m1.start = ϵ ∨ m2.start = ϵ
         if let (Some(s1), Some(s2)) = (&self.target.entrypoint, &composed.entrypoint) {
-            let msg = format!("start function can appear only once across modules: previous start function was defined at offset {}", s1.start);
+            let msg = format!(
+                "start function can appear only once across modules: previous start function was defined at offset {}",
+                s1.start
+            );
             return self.error(msg, s2.start);
         }
 
@@ -215,9 +218,7 @@ impl<'s> Adjust<'s> for Instruction {
             Block { body, .. } => body.adjust(composer)?,
             Loop { body, .. } => body.adjust(composer)?,
             If {
-                then_body,
-                else_body,
-                ..
+                then_body, else_body, ..
             } => {
                 then_body.adjust(composer)?;
                 else_body.adjust(composer)?;

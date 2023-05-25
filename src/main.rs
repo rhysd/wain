@@ -4,8 +4,7 @@
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io;
-use std::io::Read;
+use std::io::{self, Read};
 use std::process::exit;
 
 enum InputOption {
@@ -93,11 +92,7 @@ fn parse_args() -> Result<Options, String> {
         ));
     }
 
-    Ok(Options {
-        file,
-        help,
-        version,
-    })
+    Ok(Options { file, help, version })
 }
 
 fn help() -> ! {
@@ -153,25 +148,16 @@ fn main() {
 
     match unwrap("reading input", opts.file.read()) {
         #[cfg(feature = "binary")]
-        Input::Binary(bin) => run(unwrap(
-            "parsing binary format",
-            wain_syntax_binary::parse(&bin),
-        )),
+        Input::Binary(bin) => run(unwrap("parsing binary format", wain_syntax_binary::parse(&bin))),
         #[cfg(feature = "text")]
-        Input::Text(text) => run(unwrap(
-            "parsing text format",
-            wain_syntax_text::parse(&text),
-        )),
+        Input::Text(text) => run(unwrap("parsing text format", wain_syntax_text::parse(&text))),
         #[cfg(not(all(feature = "binary", feature = "text")))]
         input => {
             let format = match input {
                 Input::Text(_) => "text",
                 Input::Binary(_) => "binary",
             };
-            eprintln!(
-                "Executing {0} format is unsupported. Build with '{0}' feature",
-                format,
-            );
+            eprintln!("Executing {0} format is unsupported. Build with '{0}' feature", format,);
             exit(1);
         }
     }

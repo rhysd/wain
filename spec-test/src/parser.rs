@@ -232,12 +232,7 @@ impl<'s> Parse<'s> for Const {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         macro_rules! parse_int_fn {
             ($name:ident, $int:ty, $uint:ty) => {
-                fn $name<'s>(
-                    parser: &mut Parser<'s>,
-                    sign: Sign,
-                    base: NumBase,
-                    digits: &'s str,
-                ) -> Result<'s, $int> {
+                fn $name<'s>(parser: &mut Parser<'s>, sign: Sign, base: NumBase, digits: &'s str) -> Result<'s, $int> {
                     // Operand of iNN.const is in range of iNN::MIN <= i <= uNN::MAX.
                     // When the value is over iNN::MAX, it is parsed as uNN and bitcasted to iNN.
                     let parsed = if base == NumBase::Hex {
@@ -434,12 +429,7 @@ impl<'s> Parse<'s> for Invoke<'s> {
         }
 
         expect!(parser, Token::RParen);
-        Ok(Invoke {
-            start,
-            id,
-            name,
-            args,
-        })
+        Ok(Invoke { start, id, name, args })
     }
 }
 
@@ -488,11 +478,7 @@ impl<'s> Parse<'s> for AssertReturn<'s> {
                 let get = parser.parse()?;
                 let expected = parser.parse()?;
                 expect!(parser, Token::RParen);
-                Ok(AssertReturn::Global {
-                    start,
-                    get,
-                    expected,
-                })
+                Ok(AssertReturn::Global { start, get, expected })
             }
             (Some(Token::LParen), t) | (t, _) => {
                 let t = t.cloned();
@@ -507,12 +493,8 @@ impl<'s> Parse<'s> for AssertTrap<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.parse_start("assert_trap")?;
         let pred = match parser.peek()? {
-            (Some(Token::LParen), Some(Token::Keyword("invoke"))) => {
-                TrapPredicate::Invoke(parser.parse()?)
-            }
-            (Some(Token::LParen), Some(Token::Keyword("module"))) => {
-                TrapPredicate::Module(parser.parse()?)
-            }
+            (Some(Token::LParen), Some(Token::Keyword("invoke"))) => TrapPredicate::Invoke(parser.parse()?),
+            (Some(Token::LParen), Some(Token::Keyword("module"))) => TrapPredicate::Module(parser.parse()?),
             (Some(Token::LParen), t) | (t, _) => {
                 let t = t.cloned();
                 return parser.unexpected_token(t, "'invoke' or 'module' for assert_trap");
@@ -520,11 +502,7 @@ impl<'s> Parse<'s> for AssertTrap<'s> {
         };
         let expected = parser.parse()?;
         expect!(parser, Token::RParen);
-        Ok(AssertTrap {
-            start,
-            pred,
-            expected,
-        })
+        Ok(AssertTrap { start, pred, expected })
     }
 }
 
@@ -571,11 +549,7 @@ impl<'s> Parse<'s> for AssertInvalid<'s> {
         let wat = parser.parse()?;
         let expected = parser.parse()?;
         expect!(parser, Token::RParen);
-        Ok(AssertInvalid {
-            start,
-            wat,
-            expected,
-        })
+        Ok(AssertInvalid { start, wat, expected })
     }
 }
 
@@ -586,11 +560,7 @@ impl<'s> Parse<'s> for AssertUnlinkable<'s> {
         let wat = parser.parse()?;
         let expected = parser.parse()?;
         expect!(parser, Token::RParen);
-        Ok(AssertUnlinkable {
-            start,
-            wat,
-            expected,
-        })
+        Ok(AssertUnlinkable { start, wat, expected })
     }
 }
 
@@ -624,16 +594,10 @@ impl<'s> Parse<'s> for Command<'s> {
         match t2 {
             Some(Token::Keyword("assert_return")) => Ok(Command::AssertReturn(parser.parse()?)),
             Some(Token::Keyword("assert_trap")) => Ok(Command::AssertTrap(parser.parse()?)),
-            Some(Token::Keyword("assert_malformed")) => {
-                Ok(Command::AssertMalformed(parser.parse()?))
-            }
+            Some(Token::Keyword("assert_malformed")) => Ok(Command::AssertMalformed(parser.parse()?)),
             Some(Token::Keyword("assert_invalid")) => Ok(Command::AssertInvalid(parser.parse()?)),
-            Some(Token::Keyword("assert_unlinkable")) => {
-                Ok(Command::AssertUnlinkable(parser.parse()?))
-            }
-            Some(Token::Keyword("assert_exhaustion")) => {
-                Ok(Command::AssertExhaustion(parser.parse()?))
-            }
+            Some(Token::Keyword("assert_unlinkable")) => Ok(Command::AssertUnlinkable(parser.parse()?)),
+            Some(Token::Keyword("assert_exhaustion")) => Ok(Command::AssertExhaustion(parser.parse()?)),
             Some(Token::Keyword("register")) => Ok(Command::Register(parser.parse()?)),
             Some(Token::Keyword("invoke")) => Ok(Command::Invoke(parser.parse()?)),
             Some(Token::Keyword("module")) => {
@@ -799,18 +763,12 @@ mod tests {
         assert_eq!(p("(f32.const 1.23e10)").unwrap(), Const::F32(1.23e10));
         assert_eq!(p("(f32.const 0x12.34)").unwrap(), Const::F32(18.203125));
         assert_eq!(p("(f32.const 0x12.34p2)").unwrap(), Const::F32(72.8125));
-        assert_eq!(
-            p("(f32.const 0x12.34p-2)").unwrap(),
-            Const::F32(4.550_781_3)
-        );
+        assert_eq!(p("(f32.const 0x12.34p-2)").unwrap(), Const::F32(4.550_781_3));
         assert_eq!(p("(f32.const -123.456)").unwrap(), Const::F32(-123.456));
         assert_eq!(p("(f32.const -1.23e10)").unwrap(), Const::F32(-1.23e10));
         assert_eq!(p("(f32.const -0x12.34)").unwrap(), Const::F32(-18.203125));
         assert_eq!(p("(f32.const -0x12.34p2)").unwrap(), Const::F32(-72.8125));
-        assert_eq!(
-            p("(f32.const -0x12.34p-2)").unwrap(),
-            Const::F32(-4.550_781_3)
-        );
+        assert_eq!(p("(f32.const -0x12.34p-2)").unwrap(), Const::F32(-4.550_781_3));
 
         assert_eq!(p("(f64.const 0)").unwrap(), Const::F64(0.0));
         assert_eq!(p("(f64.const 123)").unwrap(), Const::F64(123.0));
@@ -826,10 +784,7 @@ mod tests {
         assert_eq!(p("(f64.const -1.23e10)").unwrap(), Const::F64(-1.23e10));
         assert_eq!(p("(f64.const -0x12.34)").unwrap(), Const::F64(-18.203125));
         assert_eq!(p("(f64.const -0x12.34p2)").unwrap(), Const::F64(-72.8125));
-        assert_eq!(
-            p("(f64.const -0x12.34p-2)").unwrap(),
-            Const::F64(-4.55078125)
-        );
+        assert_eq!(p("(f64.const -0x12.34p-2)").unwrap(), Const::F64(-4.55078125));
 
         let f = p("(f32.const nan)").unwrap();
         assert!(matches!(f, Const::F32(f) if f.is_nan()));
@@ -876,9 +831,7 @@ mod tests {
         assert_eq!(i.args[0], Const::I32(123));
         assert_eq!(i.args[1], Const::F64(1.23));
 
-        let i: Invoke<'_> = Parser::new(r#"(invoke $Func "e" (i32.const 42))"#)
-            .parse()
-            .unwrap();
+        let i: Invoke<'_> = Parser::new(r#"(invoke $Func "e" (i32.const 42))"#).parse().unwrap();
         assert_eq!(i.id, Some("$Func"));
         assert_eq!(i.name, "e");
         assert_eq!(i.args.len(), 1);
@@ -907,9 +860,7 @@ mod tests {
         .unwrap();
 
         match a {
-            AssertReturn::Invoke {
-                invoke, expected, ..
-            } => {
+            AssertReturn::Invoke { invoke, expected, .. } => {
                 assert_eq!(invoke.name, "8u_good1");
                 assert_eq!(invoke.args.len(), 1);
                 assert_eq!(invoke.args[0], Const::I32(0));
@@ -918,14 +869,10 @@ mod tests {
             _ => panic!("expected invoke"),
         }
 
-        let a: AssertReturn<'_> = Parser::new(r#"(assert_return (invoke "type-i32"))"#)
-            .parse()
-            .unwrap();
+        let a: AssertReturn<'_> = Parser::new(r#"(assert_return (invoke "type-i32"))"#).parse().unwrap();
 
         match a {
-            AssertReturn::Invoke {
-                invoke, expected, ..
-            } => {
+            AssertReturn::Invoke { invoke, expected, .. } => {
                 assert_eq!(invoke.name, "type-i32");
                 assert!(invoke.args.is_empty());
                 assert_eq!(expected, None);
@@ -946,10 +893,9 @@ mod tests {
             _ => panic!("expected global"),
         }
 
-        let a: AssertReturn<'_> =
-            Parser::new(r#"(assert_return (get $Global "e") (i32.const 42))"#)
-                .parse()
-                .unwrap();
+        let a: AssertReturn<'_> = Parser::new(r#"(assert_return (get $Global "e") (i32.const 42))"#)
+            .parse()
+            .unwrap();
 
         match a {
             AssertReturn::Global { get, expected, .. } => {
@@ -963,11 +909,10 @@ mod tests {
 
     #[test]
     fn assert_trap() {
-        let a: AssertTrap<'_> = Parser::new(
-            r#"(assert_trap (invoke "32_good5" (i32.const 65508)) "out of bounds memory access")"#,
-        )
-        .parse()
-        .unwrap();
+        let a: AssertTrap<'_> =
+            Parser::new(r#"(assert_trap (invoke "32_good5" (i32.const 65508)) "out of bounds memory access")"#)
+                .parse()
+                .unwrap();
 
         assert_eq!(a.expected, "out of bounds memory access");
         match a.pred {
@@ -1051,7 +996,7 @@ mod tests {
             &m.memories[0],
             ast::Memory {
                 ty: ast::MemType {
-                    limit: ast::Limits::From(0),
+                    limit: ast::Limits::From(0)
                 },
                 import: None,
                 ..
@@ -1091,7 +1036,7 @@ mod tests {
             &m.memories[0],
             ast::Memory {
                 ty: ast::MemType {
-                    limit: ast::Limits::From(0),
+                    limit: ast::Limits::From(0)
                 },
                 import: None,
                 ..
@@ -1139,9 +1084,7 @@ mod tests {
         .unwrap();
         assert!(matches!(d, Command::InlineModule(_)));
 
-        let d: Command<'_> = Parser::new(r#"(assert_return (invoke "br"))"#)
-            .parse()
-            .unwrap();
+        let d: Command<'_> = Parser::new(r#"(assert_return (invoke "br"))"#).parse().unwrap();
         assert!(matches!(d, Command::AssertReturn(_)));
 
         let d: Command<'_> = Parser::new(

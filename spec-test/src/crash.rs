@@ -49,9 +49,7 @@ impl CrashTester {
     ) -> Result<'s, String> {
         let mut cmd = Command::new(&self.bin_path);
         cmd.arg(mod_offset.to_string()).arg(name);
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let mut child = cmd.spawn().unwrap();
 

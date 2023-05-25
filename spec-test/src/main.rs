@@ -103,7 +103,9 @@ fn main() -> io::Result<()> {
     };
 
     if opts.help {
-        println!("Usage: spec-tester [-f|--fast-fail|-w {{file}}|--write-summary {{file}}|-h|--help] [{{file}}|{{dir}}]");
+        println!(
+            "Usage: spec-tester [-f|--fast-fail|-w {{file}}|--write-summary {{file}}|-h|--help] [{{file}}|{{dir}}]"
+        );
         exit(0);
     }
 

@@ -66,11 +66,7 @@ pub struct ParseError<'s> {
 
 impl<'s> ParseError<'s> {
     fn new(kind: ParseErrorKind<'s>, offset: usize, source: &'s str) -> Box<ParseError<'s>> {
-        Box::new(ParseError {
-            kind,
-            offset,
-            source,
-        })
+        Box::new(ParseError { kind, offset, source })
     }
 
     pub fn offset(&self) -> usize {
@@ -87,9 +83,7 @@ impl<'s> fmt::Display for ParseError<'s> {
         use ParseErrorKind::*;
         match &self.kind {
             LexError(err) => return err.fmt(f),
-            UnexpectedToken { got, expected } => {
-                write!(f, "expected {} but got {}", expected, got)?
-            }
+            UnexpectedToken { got, expected } => write!(f, "expected {} but got {}", expected, got)?,
             UnexpectedEndOfFile { expected } => write!(f, "expected {} but reached EOF", expected)?,
             UnexpectedKeyword(kw) => write!(f, "unexpected keyword '{}'", kw)?,
             InvalidValType(ty) => write!(
@@ -97,32 +91,39 @@ impl<'s> fmt::Display for ParseError<'s> {
                 "value type must be one of 'i32', 'i64', 'f32', 'f64' but got '{}'",
                 ty
             )?,
-            MalformedUtf8Encoding => {
-                write!(f, "Name must be valid UTF-8 encoding characters")?
-            }
-            NumberMustBePositive(base, s) => {
-                write!(f, "number must be positive but got -{}{}", base.prefix(), s)?
-            }
+            MalformedUtf8Encoding => write!(f, "Name must be valid UTF-8 encoding characters")?,
+            NumberMustBePositive(base, s) => write!(f, "number must be positive but got -{}{}", base.prefix(), s)?,
             MissingParen {
                 paren,
                 got: Some(tok),
                 what,
             } => write!(f, "expected paren '{}' for {} but got {}", paren, what, tok)?,
-            MissingParen {
-                paren,
-                got: None,
-                what,
-            } => write!(f, "expected paren '{}' for {} but reached EOF", paren, what)?,
-            InvalidOperand { insn, msg } => {
-                write!(f, "invalid operand for '{}' instruction: {}", insn, msg)?
+            MissingParen { paren, got: None, what } => {
+                write!(f, "expected paren '{}' for {} but reached EOF", paren, what)?
             }
+            InvalidOperand { insn, msg } => write!(f, "invalid operand for '{}' instruction: {}", insn, msg)?,
             CannotParseNum { reason, ty } => write!(f, "cannot parse {} number: {}", ty, reason)?,
-            MultipleEntrypoints(prev, cur) => {
-                write!(f, "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}", cur.idx, prev.idx, prev.start)?
-            }
-            IdAlreadyDefined{id, prev_idx, what, scope} => write!(f, "identifier '{}' for {} is already defined for index {} in the {}", id, what, prev_idx, scope)?,
-            ExpectEndOfFile{after, token} => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
-            ImportMustPrecedeOtherDefs{what} => write!(f, "import {} must be put before other function, memory, table and global definitions", what)?,
+            MultipleEntrypoints(prev, cur) => write!(
+                f,
+                "module cannot contain multiple 'start' functions {}. previous start function was {} at offset {}",
+                cur.idx, prev.idx, prev.start
+            )?,
+            IdAlreadyDefined {
+                id,
+                prev_idx,
+                what,
+                scope,
+            } => write!(
+                f,
+                "identifier '{}' for {} is already defined for index {} in the {}",
+                id, what, prev_idx, scope
+            )?,
+            ExpectEndOfFile { after, token } => write!(f, "expect EOF but got {} after parsing {}", token, after)?,
+            ImportMustPrecedeOtherDefs { what } => write!(
+                f,
+                "import {} must be put before other function, memory, table and global definitions",
+                what
+            )?,
             InvalidAlignment(align) => write!(f, "alignment must be power of two but got {}", align)?,
             IdBoundToParam(id) => write!(f, "id '{}' must not be bound to parameter of call_indirect", id)?,
         };
@@ -156,11 +157,7 @@ impl<I: Iterator> LookAhead<I> {
     pub fn new(mut it: I) -> Self {
         let current = it.next();
         let incoming = it.next();
-        LookAhead {
-            it,
-            current,
-            incoming,
-        }
+        LookAhead { it, current, incoming }
     }
     pub fn peek(&self) -> Option<&I::Item> {
         self.current.as_ref()
@@ -179,10 +176,7 @@ impl<I: Iterator> Iterator for LookAhead<I> {
     fn next(&mut self) -> Option<Self::Item> {
         // This implementation can be better. We can delay calling self.it.next() until it is really
         // necessary. In the case, peek() and lookahead() will be `&mut self` method.
-        mem::replace(
-            &mut self.current,
-            mem::replace(&mut self.incoming, self.it.next()),
-        )
+        mem::replace(&mut self.current, mem::replace(&mut self.incoming, self.it.next()))
     }
 }
 
@@ -330,28 +324,15 @@ impl<'s> Parser<'s> {
         Err(ParseError::new(kind, offset, self.source))
     }
 
-    fn unexpected_token<T>(
-        &self,
-        got: Token<'s>,
-        expected: &'static str,
-        offset: usize,
-    ) -> Result<'s, T> {
+    fn unexpected_token<T>(&self, got: Token<'s>, expected: &'static str, offset: usize) -> Result<'s, T> {
         self.error(ParseErrorKind::UnexpectedToken { got, expected }, offset)
     }
 
     fn unexpected_eof<T>(&self, expected: &'static str) -> Result<'s, T> {
-        self.error(
-            ParseErrorKind::UnexpectedEndOfFile { expected },
-            self.source().len(),
-        )
+        self.error(ParseErrorKind::UnexpectedEndOfFile { expected }, self.source().len())
     }
 
-    fn cannot_parse_num<T, S: ToString>(
-        &self,
-        ty: &'static str,
-        reason: S,
-        offset: usize,
-    ) -> Result<'s, T> {
+    fn cannot_parse_num<T, S: ToString>(&self, ty: &'static str, reason: S, offset: usize) -> Result<'s, T> {
         self.error(
             ParseErrorKind::CannotParseNum {
                 reason: reason.to_string(),
@@ -486,9 +467,7 @@ impl<'s> Parser<'s> {
             }
         }
         match s.parse::<F>() {
-            Ok(f) if f.is_infinite() => {
-                self.cannot_parse_num("float", "float constant out of range", offset)
-            }
+            Ok(f) if f.is_infinite() => self.cannot_parse_num("float", "float constant out of range", offset),
             Ok(f) => Ok(sign.apply(f)),
             Err(e) => self.cannot_parse_num("float", format!("{}", e), offset),
         }
@@ -529,12 +508,7 @@ impl<'s> Parser<'s> {
         Ok(Mem { align, offset })
     }
 
-    fn create_inline_typeuse(
-        &mut self,
-        start: usize,
-        params: &[Param<'s>],
-        results: &[FuncResult],
-    ) -> u32 {
+    fn create_inline_typeuse(&mut self, start: usize, params: &[Param<'s>], results: &[FuncResult]) -> u32 {
         let idx = self.ctx.implicit_type_uses.len();
         self.ctx.implicit_type_uses.push(ImplicitTypeUse {
             start,
@@ -560,44 +534,22 @@ impl<'s> Parser<'s> {
         //
 
         let mut resolved = Vec::with_capacity(self.ctx.implicit_type_uses.len());
-        for ImplicitTypeUse {
-            start,
-            params,
-            results,
-        } in mem::take(&mut self.ctx.implicit_type_uses).into_iter()
-        {
-            let idx = if let Some(idx) =
-                self.ctx
-                    .types
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, TypeDef { ty, .. })| {
-                        if ty
-                            .params
-                            .iter()
-                            .map(|t| t.ty)
-                            .eq(params.iter().map(|t| t.ty))
-                            && ty
-                                .results
-                                .iter()
-                                .map(|t| t.ty)
-                                .eq(results.iter().map(|t| t.ty))
-                        {
-                            Some(i)
-                        } else {
-                            None
-                        }
-                    }) {
+        for ImplicitTypeUse { start, params, results } in mem::take(&mut self.ctx.implicit_type_uses).into_iter() {
+            let idx = if let Some(idx) = self.ctx.types.iter().enumerate().find_map(|(i, TypeDef { ty, .. })| {
+                if ty.params.iter().map(|t| t.ty).eq(params.iter().map(|t| t.ty))
+                    && ty.results.iter().map(|t| t.ty).eq(results.iter().map(|t| t.ty))
+                {
+                    Some(i)
+                } else {
+                    None
+                }
+            }) {
                 idx
             } else {
                 self.ctx.types.push(TypeDef {
                     start,
                     id: None,
-                    ty: FuncType {
-                        start,
-                        params,
-                        results,
-                    },
+                    ty: FuncType { start, params, results },
                 });
                 self.ctx.types.len() - 1
             };
@@ -610,12 +562,7 @@ impl<'s> Parser<'s> {
 // TODO: Use trait rather than macros to avoid duplication of implementations
 macro_rules! parse_uint_function {
     ($name:ident, $uint:ty) => {
-        fn $name<'s>(
-            parser: &Parser<'s>,
-            input: &'s str,
-            base: NumBase,
-            offset: usize,
-        ) -> Result<'s, $uint> {
+        fn $name<'s>(parser: &Parser<'s>, input: &'s str, base: NumBase, offset: usize) -> Result<'s, $uint> {
             let radix = base.radix();
             let mut ret: $uint = 0;
             for c in input.chars() {
@@ -630,18 +577,10 @@ macro_rules! parse_uint_function {
                     {
                         ret = added;
                     } else {
-                        return parser.cannot_parse_num(
-                            stringify!($uint),
-                            "too big integer",
-                            offset,
-                        );
+                        return parser.cannot_parse_num(stringify!($uint), "too big integer", offset);
                     }
                 } else {
-                    return parser.cannot_parse_num(
-                        stringify!($uint),
-                        format!("invalid digit '{}'", c),
-                        offset,
-                    );
+                    return parser.cannot_parse_num(stringify!($uint), format!("invalid digit '{}'", c), offset);
                 }
             }
             Ok(ret)
@@ -988,10 +927,7 @@ impl<'s> Parse<'s> for Module<'s> {
                     if m.import.is_none() {
                         can_import = false;
                     } else if !can_import {
-                        return parser.error(
-                            ParseErrorKind::ImportMustPrecedeOtherDefs { what: "memory" },
-                            m.start,
-                        );
+                        return parser.error(ParseErrorKind::ImportMustPrecedeOtherDefs { what: "memory" }, m.start);
                     }
                     memories.push(m);
                 }
@@ -999,10 +935,7 @@ impl<'s> Parse<'s> for Module<'s> {
                     if m.import.is_none() {
                         can_import = false;
                     } else if !can_import {
-                        return parser.error(
-                            ParseErrorKind::ImportMustPrecedeOtherDefs { what: "memory" },
-                            m.start,
-                        );
+                        return parser.error(ParseErrorKind::ImportMustPrecedeOtherDefs { what: "memory" }, m.start);
                     }
                     memories.push(m);
                     data.push(d);
@@ -1021,8 +954,7 @@ impl<'s> Parse<'s> for Module<'s> {
                 ModuleField::Start(start) => {
                     if let Some(prev) = entrypoint {
                         let offset = start.start;
-                        return parser
-                            .error(ParseErrorKind::MultipleEntrypoints(prev, start), offset);
+                        return parser.error(ParseErrorKind::MultipleEntrypoints(prev, start), offset);
                     } else {
                         entrypoint = Some(start);
                     }
@@ -1110,11 +1042,7 @@ impl<'s> Parse<'s> for FuncType<'s> {
         let results = parser.parse()?;
 
         parser.closing_paren("function type")?;
-        Ok(FuncType {
-            start,
-            params,
-            results,
-        })
+        Ok(FuncType { start, params, results })
     }
 }
 
@@ -1164,9 +1092,7 @@ impl<'s> Parse<'s> for ValType {
             (Token::Keyword("i64"), _) => Ok(ValType::I64),
             (Token::Keyword("f32"), _) => Ok(ValType::F32),
             (Token::Keyword("f64"), _) => Ok(ValType::F64),
-            (Token::Keyword(id), offset) => {
-                parser.error(ParseErrorKind::InvalidValType(id), offset)
-            }
+            (Token::Keyword(id), offset) => parser.error(ParseErrorKind::InvalidValType(id), offset),
             (tok, offset) => parser.unexpected_token(tok, expected, offset),
         }
     }
@@ -1204,8 +1130,7 @@ impl<'s> Parse<'s> for Vec<FuncResult> {
 impl<'s> Parse<'s> for Name<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         // A name string must form a valid UTF-8 encoding as defined by Unicode (Section 2.5)
-        let (content, offset) =
-            match_token!(parser, "string literal for name", Token::String(s, _) => s);
+        let (content, offset) = match_token!(parser, "string literal for name", Token::String(s, _) => s);
         let encoded = match content {
             Cow::Borrowed(slice) => str::from_utf8(slice).ok().map(Cow::Borrowed),
             Cow::Owned(vec) => String::from_utf8(vec).ok().map(Cow::Owned),
@@ -1243,7 +1168,8 @@ impl<'s> Parse<'s> for ImportItem<'s> {
         let import = parser.parse()?;
 
         parser.opening_paren("import item")?;
-        let (keyword, offset) = match_token!(parser, "one of 'func', 'table', 'memory', 'global'", Token::Keyword(kw) => kw);
+        let (keyword, offset) =
+            match_token!(parser, "one of 'func', 'table', 'memory', 'global'", Token::Keyword(kw) => kw);
 
         let id = parser.maybe_ident("identifier for import item")?;
 
@@ -1331,9 +1257,7 @@ impl<'s> Parse<'s> for Index<'s> {
             (Token::Int(sign, base, s), offset) if sign == Sign::Minus => {
                 parser.error(ParseErrorKind::NumberMustBePositive(base, s), offset)
             }
-            (Token::Int(_, base, s), offset) => {
-                parse_u32_str(parser, s, base, offset).map(Index::Num)
-            }
+            (Token::Int(_, base, s), offset) => parse_u32_str(parser, s, base, offset).map(Index::Num),
             (Token::Ident(id), _) => Ok(Index::Ident(id)),
             (tok, offset) => parser.unexpected_token(tok.clone(), expected, offset),
         }
@@ -1344,11 +1268,7 @@ impl<'s> Parse<'s> for Index<'s> {
 impl<'s> Parse<'s> for TableType {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let limit = parser.parse()?;
-        match_token!(
-            parser,
-            "'funcref' keyword for table type",
-            Token::Keyword("funcref")
-        );
+        match_token!(parser, "'funcref' keyword for table type", Token::Keyword("funcref"));
         Ok(TableType { limit })
     }
 }
@@ -1380,11 +1300,7 @@ impl<'s> Parse<'s> for GlobalType {
         match parser.peek("'(' for mut or value type of global type")? {
             (Token::LParen, _) => {
                 parser.eat_token(); // eat '('
-                match_token!(
-                    parser,
-                    "'mut' keyword for global type",
-                    Token::Keyword("mut")
-                );
+                match_token!(parser, "'mut' keyword for global type", Token::Keyword("mut"));
                 let ty = parser.parse()?;
                 parser.closing_paren("mutable global type")?;
                 Ok(GlobalType { mutable: true, ty })
@@ -1401,16 +1317,11 @@ impl<'s> Parse<'s> for GlobalType {
 impl<'s> Parse<'s> for Export<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("export")?;
-        match_token!(
-            parser,
-            "'export' keyword for export",
-            Token::Keyword("export")
-        );
+        match_token!(parser, "'export' keyword for export", Token::Keyword("export"));
         let name = parser.parse()?;
 
         parser.opening_paren("export item")?;
-        let (keyword, offset) =
-            match_token!(parser, "keyword for export item", Token::Keyword(kw) => kw);
+        let (keyword, offset) = match_token!(parser, "keyword for export item", Token::Keyword(kw) => kw);
         let kind = match keyword {
             "func" => ExportKind::Func,
             "table" => ExportKind::Table,
@@ -1423,12 +1334,7 @@ impl<'s> Parse<'s> for Export<'s> {
 
         parser.closing_paren("export")?;
 
-        Ok(Export {
-            start,
-            name,
-            kind,
-            idx,
-        })
+        Ok(Export { start, name, kind, idx })
     }
 }
 
@@ -1436,11 +1342,7 @@ impl<'s> Parse<'s> for Export<'s> {
 impl<'s> Parse<'s> for Func<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let start = parser.opening_paren("func")?;
-        match_token!(
-            parser,
-            "'func' keyword for func field",
-            Token::Keyword("func")
-        );
+        match_token!(parser, "'func' keyword for func field", Token::Keyword("func"));
 
         // Note: func has some abbreviations
         // https://webassembly.github.io/spec/core/text/modules.html#text-func-abbrev
@@ -1448,10 +1350,7 @@ impl<'s> Parse<'s> for Func<'s> {
         let id = parser.maybe_ident("identifier for func field")?;
         let idx = parser.ctx.func_indices.new_idx(id, start)?;
         loop {
-            match parser
-                .peek_fold_start("'import', 'export' or typeuse in func field")?
-                .0
-            {
+            match parser.peek_fold_start("'import', 'export' or typeuse in func field")?.0 {
                 Some("import") => {
                     // `(func $id (import "m" "n") {typeuse})` is a syntax sugar of
                     // `(import "m" "n" (func $id {typeuse}))`
@@ -1575,15 +1474,11 @@ fn parse_maybe_result_type<'s>(parser: &mut Parser<'s>) -> Result<'s, Option<Val
 // https://webassembly.github.io/spec/core/text/instructions.html#folded-instructions
 impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
     fn new(parser: &'p mut Parser<'s>) -> MaybeFoldedInsn<'s, 'p> {
-        MaybeFoldedInsn {
-            insns: vec![],
-            parser,
-        }
+        MaybeFoldedInsn { insns: vec![], parser }
     }
 
     fn parse_naked_insn(&mut self, end: bool) -> Result<'s, Instruction<'s>> {
-        let (kw, start) =
-            match_token!(self.parser, "keyword for instruction", Token::Keyword(k) => k);
+        let (kw, start) = match_token!(self.parser, "keyword for instruction", Token::Keyword(k) => k);
         let kind = match kw {
             // Control instructions
             // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
@@ -1592,29 +1487,15 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                 let ty = parse_maybe_result_type(self.parser)?;
                 let body = self.parser.parse()?;
                 let id = if end {
-                    match_token!(
-                        self.parser,
-                        "'end' keyword for block or loop",
-                        Token::Keyword("end")
-                    );
+                    match_token!(self.parser, "'end' keyword for block or loop", Token::Keyword("end"));
                     self.parser.maybe_ident("ID for block or loop")?
                 } else {
                     None
                 };
                 if kw == "block" {
-                    InsnKind::Block {
-                        label,
-                        ty,
-                        body,
-                        id,
-                    }
+                    InsnKind::Block { label, ty, body, id }
                 } else {
-                    InsnKind::Loop {
-                        label,
-                        ty,
-                        body,
-                        id,
-                    }
+                    InsnKind::Loop { label, ty, body, id }
                 }
             }
             "if" => {
@@ -1633,9 +1514,7 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                     loop {
                         let kw = self
                             .parser
-                            .peek_fold_start(
-                                "folded instructions for condition in folded 'if' instruction",
-                            )?
+                            .peek_fold_start("folded instructions for condition in folded 'if' instruction")?
                             .0;
                         match kw {
                             Some("then") => break,
@@ -1647,11 +1526,7 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                 // (then {instr}*)
                 if is_folded {
                     self.parser.opening_paren("'then' clause in folded 'if'")?;
-                    match_token!(
-                        self.parser,
-                        "'then' keyword for folded 'if'",
-                        Token::Keyword("then")
-                    );
+                    match_token!(self.parser, "'then' keyword for folded 'if'", Token::Keyword("then"));
                 }
                 let then_body = self.parser.parse()?;
                 if is_folded {
@@ -1659,35 +1534,32 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                 }
 
                 // (else {instr}*))
-                let (else_body, else_id) =
-                    match self.parser.peek("'else', 'end', '(' or ')' in 'if'")? {
-                        (Token::Keyword("end"), _) if end && !is_folded => (vec![], None),
-                        (Token::RParen, _) if !end => (vec![], None),
-                        (Token::LParen, _) if is_folded => {
-                            self.parser.eat_token(); // Eat '('
-                            match_token!(
-                                self.parser,
-                                "'else' keyword in else clause of folded 'if'",
-                                Token::Keyword("else")
-                            );
-                            let body = self.parser.parse()?;
-                            self.parser.closing_paren("else clause in folded 'if'")?;
-                            (body, None)
-                        }
-                        (Token::Keyword("else"), _) if !is_folded => {
-                            self.parser.eat_token(); // Eat 'else'
-                            let id = self.parser.maybe_ident("ID for 'else' in 'if'")?;
-                            let body = self.parser.parse()?;
-                            (body, id)
-                        }
-                        (tok, offset) => {
-                            return self.parser.unexpected_token(
-                                tok.clone(),
-                                "'else' or 'end' in 'if'",
-                                offset,
-                            );
-                        }
-                    };
+                let (else_body, else_id) = match self.parser.peek("'else', 'end', '(' or ')' in 'if'")? {
+                    (Token::Keyword("end"), _) if end && !is_folded => (vec![], None),
+                    (Token::RParen, _) if !end => (vec![], None),
+                    (Token::LParen, _) if is_folded => {
+                        self.parser.eat_token(); // Eat '('
+                        match_token!(
+                            self.parser,
+                            "'else' keyword in else clause of folded 'if'",
+                            Token::Keyword("else")
+                        );
+                        let body = self.parser.parse()?;
+                        self.parser.closing_paren("else clause in folded 'if'")?;
+                        (body, None)
+                    }
+                    (Token::Keyword("else"), _) if !is_folded => {
+                        self.parser.eat_token(); // Eat 'else'
+                        let id = self.parser.maybe_ident("ID for 'else' in 'if'")?;
+                        let body = self.parser.parse()?;
+                        (body, id)
+                    }
+                    (tok, offset) => {
+                        return self
+                            .parser
+                            .unexpected_token(tok.clone(), "'else' or 'end' in 'if'", offset);
+                    }
+                };
                 let end_id = if end {
                     match_token!(self.parser, "'end' keyword for 'if'", Token::Keyword("end"));
                     self.parser.maybe_ident("ID for end of 'if'")?
@@ -1709,16 +1581,11 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             "br_if" => InsnKind::BrIf(self.parser.parse()?),
             "br_table" => {
                 let mut labels = vec![];
-                while let (Token::Int(..), _) | (Token::Ident(_), _) =
-                    self.parser.peek("labels for 'br_table'")?
-                {
+                while let (Token::Int(..), _) | (Token::Ident(_), _) = self.parser.peek("labels for 'br_table'")? {
                     labels.push(self.parser.parse()?);
                 }
                 if let Some(default_label) = labels.pop() {
-                    InsnKind::BrTable {
-                        labels,
-                        default_label,
-                    }
+                    InsnKind::BrTable { labels, default_label }
                 } else {
                     return self.parser.error(
                         ParseErrorKind::InvalidOperand {
@@ -1783,38 +1650,33 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             "i32.const" => {
                 // Note: i32.const operand takes range of i32::MIN <= i <= u32::MAX
                 // When the value is over i32::MAX, it is treated as u32 value and bitcasted to i32
-                let ((sign, base, digits), offset) = match_token!(self.parser, "integer for i32.const operand", Token::Int(s, b, d) => (s, b, d));
+                let ((sign, base, digits), offset) =
+                    match_token!(self.parser, "integer for i32.const operand", Token::Int(s, b, d) => (s, b, d));
                 let u = parse_u32_str(self.parser, digits, base, offset)?;
                 if sign == Sign::Plus {
                     InsnKind::I32Const(u as i32)
                 } else if u <= i32::MAX as u32 + 1 {
                     InsnKind::I32Const(u.wrapping_neg() as i32)
                 } else {
-                    return self
-                        .parser
-                        .cannot_parse_num("i32", "too small integer", offset);
+                    return self.parser.cannot_parse_num("i32", "too small integer", offset);
                 }
             }
             "i64.const" => {
                 // Note: i64.const operand takes range of i64::MIN <= i <= u64::MAX
                 // When the value is over i64::MAX, it is treated as u64 value and bitcasted to i64
-                let ((sign, base, digits), offset) = match_token!(self.parser, "integer for i64.const operand", Token::Int(s, b, d) => (s, b, d));
+                let ((sign, base, digits), offset) =
+                    match_token!(self.parser, "integer for i64.const operand", Token::Int(s, b, d) => (s, b, d));
                 let u = parse_u64_str(self.parser, digits, base, offset)?;
                 if sign == Sign::Plus {
                     InsnKind::I64Const(u as i64)
                 } else if u <= i64::MAX as u64 + 1 {
                     InsnKind::I64Const(u.wrapping_neg() as i64)
                 } else {
-                    return self
-                        .parser
-                        .cannot_parse_num("i64", "too small integer", offset);
+                    return self.parser.cannot_parse_num("i64", "too small integer", offset);
                 }
             }
             "f32.const" => {
-                let val = match self
-                    .parser
-                    .next_token("float number or integer for f32.const")?
-                {
+                let val = match self.parser.next_token("float number or integer for f32.const")? {
                     (Token::Float(sign, float), offset) => match float {
                         Float::Inf => match sign {
                             Sign::Plus => f32::INFINITY,
@@ -1827,8 +1689,7 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                             //   - within 23bits (fraction of f32 is 23bits)
                             //   - >= 2^(23-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
                             // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
-                            let payload_u =
-                                parse_u32_str(self.parser, payload, NumBase::Hex, offset)?;
+                            let payload_u = parse_u32_str(self.parser, payload, NumBase::Hex, offset)?;
                             if payload_u == 0 || 0x80_0000 <= payload_u {
                                 return self.parser.cannot_parse_num(
                                     "f32",
@@ -1868,20 +1729,15 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                         parse_hex_float_f32(self.parser, sign, digits, None, offset)?
                     }
                     (tok, offset) => {
-                        return self.parser.unexpected_token(
-                            tok,
-                            "float number or integer for f32.const",
-                            offset,
-                        )
+                        return self
+                            .parser
+                            .unexpected_token(tok, "float number or integer for f32.const", offset)
                     }
                 };
                 InsnKind::F32Const(val)
             }
             "f64.const" => {
-                let val = match self
-                    .parser
-                    .next_token("float number or integer for f64.const")?
-                {
+                let val = match self.parser.next_token("float number or integer for f64.const")? {
                     (Token::Float(sign, float), offset) => match float {
                         Float::Inf => match sign {
                             Sign::Plus => f64::INFINITY,
@@ -1894,8 +1750,7 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                             //   - within 52bits (since fraction of f64 is 52bits)
                             //   - >= 2^(52-1) meant that most significant bit must be 1 (since frac cannot be zero for NaN value)
                             // https://webassembly.github.io/spec/core/syntax/values.html#floating-point
-                            let payload_u =
-                                parse_u64_str(self.parser, payload, NumBase::Hex, offset)?;
+                            let payload_u = parse_u64_str(self.parser, payload, NumBase::Hex, offset)?;
                             if payload_u == 0 || 0x10_0000_0000_0000 <= payload_u {
                                 return self.parser.cannot_parse_num(
                                     "f64",
@@ -1931,11 +1786,9 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
                         parse_hex_float_f64(self.parser, sign, digits, None, offset)?
                     }
                     (tok, offset) => {
-                        return self.parser.unexpected_token(
-                            tok,
-                            "float number or integer for f64.const",
-                            offset,
-                        )
+                        return self
+                            .parser
+                            .unexpected_token(tok, "float number or integer for f64.const", offset)
                     }
                 };
                 InsnKind::F64Const(val)
@@ -2063,11 +1916,7 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             "i64.reinterpret_f64" => InsnKind::I64ReinterpretF64,
             "f32.reinterpret_i32" => InsnKind::F32ReinterpretI32,
             "f64.reinterpret_i64" => InsnKind::F64ReinterpretI64,
-            _ => {
-                return self
-                    .parser
-                    .error(ParseErrorKind::UnexpectedKeyword(kw), start)
-            }
+            _ => return self.parser.error(ParseErrorKind::UnexpectedKeyword(kw), start),
         };
         Ok(Instruction { start, kind })
     }
@@ -2110,11 +1959,7 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             //   - ')' and 'end' for end of instruction
             //   - 'else' for 'then' clause of 'if' instruction
             //   - other than keyword except for above
-            match self
-                .parser
-                .peek("instruction keyword or '(' for folded instruction")?
-                .0
-            {
+            match self.parser.peek("instruction keyword or '(' for folded instruction")?.0 {
                 Token::LParen => self.parse_folded()?,
                 Token::RParen | Token::Keyword("end") | Token::Keyword("else") => return Ok(()),
                 Token::Keyword(_) => {
@@ -2207,7 +2052,8 @@ impl<'s> Parse<'s> for TableAbbrev<'s> {
             match parser.peek("argument of table section")?.0 {
                 Token::LParen => {
                     parser.eat_token(); // eat '('
-                    let (keyword, offset) = match_token!(parser, "'import' or 'export' for table section", Token::Keyword(k) => k);
+                    let (keyword, offset) =
+                        match_token!(parser, "'import' or 'export' for table section", Token::Keyword(k) => k);
                     match keyword {
                         "import" => {
                             // (table {id}? (import {name} {name} ) {tabletype}) ==
@@ -2246,11 +2092,7 @@ impl<'s> Parse<'s> for TableAbbrev<'s> {
                     //   where n is length of {funcidx}*
                     parser.eat_token(); // eat 'funcref' (elemtype)
                     let elem_start = parser.opening_paren("elem argument in table section")?;
-                    match_token!(
-                        parser,
-                        "'elem' keyword for table section",
-                        Token::Keyword("elem")
-                    );
+                    match_token!(parser, "'elem' keyword for table section", Token::Keyword("elem"));
 
                     let mut init = vec![];
                     while let Token::Int(..) | Token::Ident(_) =
@@ -2334,11 +2176,7 @@ impl<'s> Parse<'s> for Data<'s> {
                 }
                 (Token::String(content, _), _) => data.extend_from_slice(content.as_ref()),
                 (tok, offset) => {
-                    return parser.unexpected_token(
-                        tok.clone(),
-                        "')' or string literal for data segment",
-                        offset,
-                    )
+                    return parser.unexpected_token(tok.clone(), "')' or string literal for data segment", offset)
                 }
             }
         }
@@ -2401,13 +2239,9 @@ impl<'s> Parse<'s> for MemoryAbbrev<'s> {
 
                             let mut data = vec![];
                             loop {
-                                match parser.next_token(
-                                    "')' or string literal for data of memory section",
-                                )? {
+                                match parser.next_token("')' or string literal for data of memory section")? {
                                     (Token::RParen, _) => break,
-                                    (Token::String(content, _), _) => {
-                                        data.extend_from_slice(content.as_ref())
-                                    }
+                                    (Token::String(content, _), _) => data.extend_from_slice(content.as_ref()),
                                     (tok, offset) => {
                                         return parser.unexpected_token(
                                             tok.clone(),
@@ -2476,7 +2310,8 @@ impl<'s> Parse<'s> for Global<'s> {
             match parser.peek("argument of global section")?.0 {
                 Token::LParen => {
                     parser.eat_token(); // Eat '('
-                    let (keyword, offset) = match_token!(parser, "'import' or 'export' for global section", Token::Keyword(k) => k);
+                    let (keyword, offset) =
+                        match_token!(parser, "'import' or 'export' for global section", Token::Keyword(k) => k);
                     match keyword {
                         "import" => {
                             // (global {id}? (import {name} {name} ) {globaltype}) ==
@@ -2777,10 +2612,7 @@ mod tests {
                     idx: Index::Ident("$f"),
                     ..
                 },
-                Start {
-                    idx: Index::Num(3),
-                    ..
-                },
+                Start { idx: Index::Num(3), .. },
             )
         );
         // abbreviation
@@ -2838,31 +2670,15 @@ mod tests {
 
     #[test]
     fn module_field() {
-        assert_parse!(
-            r#"(type $f1 (func))"#,
-            ModuleField<'_>,
-            ModuleField::Type(..)
-        );
-        assert_parse!(
-            r#"(import "m" "n" (func))"#,
-            ModuleField<'_>,
-            ModuleField::Import(..)
-        );
-        assert_parse!(
-            r#"(export "n" (func $foo))"#,
-            ModuleField<'_>,
-            ModuleField::Export(..)
-        );
+        assert_parse!(r#"(type $f1 (func))"#, ModuleField<'_>, ModuleField::Type(..));
+        assert_parse!(r#"(import "m" "n" (func))"#, ModuleField<'_>, ModuleField::Import(..));
+        assert_parse!(r#"(export "n" (func $foo))"#, ModuleField<'_>, ModuleField::Export(..));
         assert_parse!(
             r#"(elem (offset i32.const 10) $func)"#,
             ModuleField<'_>,
             ModuleField::Elem(..)
         );
-        assert_parse!(
-            r#"(table 0 funcref)"#,
-            ModuleField<'_>,
-            ModuleField::Table(..)
-        );
+        assert_parse!(r#"(table 0 funcref)"#, ModuleField<'_>, ModuleField::Table(..));
         assert_parse!(
             r#"(data 0 i32.const 0 "hello")"#,
             ModuleField<'_>,
@@ -2882,21 +2698,10 @@ mod tests {
 
     #[test]
     fn type_def() {
-        assert_parse!(
-            r#"(type $f1 (func))"#,
-            TypeDef<'_>,
-            TypeDef {
-                id: Some("$f1"),
-                ..
-            }
-        );
+        assert_parse!(r#"(type $f1 (func))"#, TypeDef<'_>, TypeDef { id: Some("$f1"), .. });
         assert_parse!(r#"(type (func))"#, TypeDef<'_>, TypeDef { id: None, .. });
 
-        assert_error!(
-            r#"(type (func) (func))"#,
-            TypeDef<'_>,
-            MissingParen { paren: ')', .. }
-        );
+        assert_error!(r#"(type (func) (func))"#, TypeDef<'_>, MissingParen { paren: ')', .. });
         assert_error!(r#"(type)"#, TypeDef<'_>, MissingParen { paren: '(', .. });
         assert_error!(r#"(type"#, TypeDef<'_>, UnexpectedEndOfFile { .. });
     }
@@ -3104,82 +2909,34 @@ mod tests {
 
         assert_results!("", []);
         assert_results!("(result)", []);
-        assert_results!(
-            "(result i32)",
-            [FuncResult {
-                ty: ValType::I32,
-                ..
-            }]
-        );
+        assert_results!("(result i32)", [FuncResult { ty: ValType::I32, .. }]);
         assert_results!(
             "(result i32) (result i64) (result f32) (result f64) ",
             [
-                FuncResult {
-                    ty: ValType::I32,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::I64,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::F32,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::F64,
-                    ..
-                }
+                FuncResult { ty: ValType::I32, .. },
+                FuncResult { ty: ValType::I64, .. },
+                FuncResult { ty: ValType::F32, .. },
+                FuncResult { ty: ValType::F64, .. }
             ]
         );
         assert_results!(
             "(result i32 i64 f32 f64) ",
             [
-                FuncResult {
-                    ty: ValType::I32,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::I64,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::F32,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::F64,
-                    ..
-                }
+                FuncResult { ty: ValType::I32, .. },
+                FuncResult { ty: ValType::I64, .. },
+                FuncResult { ty: ValType::F32, .. },
+                FuncResult { ty: ValType::F64, .. }
             ]
         );
         assert_results!(
             "(result i32 i64) (result f32) (result) (result f64 i32) (result i64)",
             [
-                FuncResult {
-                    ty: ValType::I32,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::I64,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::F32,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::F64,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::I32,
-                    ..
-                },
-                FuncResult {
-                    ty: ValType::I64,
-                    ..
-                }
+                FuncResult { ty: ValType::I32, .. },
+                FuncResult { ty: ValType::I64, .. },
+                FuncResult { ty: ValType::F32, .. },
+                FuncResult { ty: ValType::F64, .. },
+                FuncResult { ty: ValType::I32, .. },
+                FuncResult { ty: ValType::I64, .. }
             ]
         );
     }
@@ -3231,11 +2988,7 @@ mod tests {
             ImportItem<'_>,
             MissingParen { paren: ')', .. }
         );
-        assert_error!(
-            r#"(import "mod" (func)"#,
-            ImportItem<'_>,
-            UnexpectedToken { .. }
-        );
+        assert_error!(r#"(import "mod" (func)"#, ImportItem<'_>, UnexpectedToken { .. });
         assert_error!(r#"(import (func)"#, ImportItem<'_>, UnexpectedToken { .. });
     }
 
@@ -3330,11 +3083,7 @@ mod tests {
         assert_eq!(parser.ctx.global_indices.indices.len(), 1);
 
         assert_error!(r#"func"#, ImportItem<'_>, MissingParen { paren: '(', .. });
-        assert_error!(
-            r#"(import "m" "n" (func"#,
-            ImportItem<'_>,
-            UnexpectedEndOfFile { .. }
-        );
+        assert_error!(r#"(import "m" "n" (func"#, ImportItem<'_>, UnexpectedEndOfFile { .. });
     }
 
     #[test]
@@ -3450,9 +3199,7 @@ mod tests {
             match &m.types[0] {
                 TypeDef {
                     id: None,
-                    ty: FuncType {
-                        params, results, ..
-                    },
+                    ty: FuncType { params, results, .. },
                     ..
                 } => {
                     assert_eq!(params.len(), 1);
@@ -3602,16 +3349,8 @@ mod tests {
         );
 
         assert_error!(r#"export"#, Export<'_>, MissingParen { paren: '(', .. });
-        assert_error!(
-            r#"(export "hi" (func 0"#,
-            Export<'_>,
-            MissingParen { paren: ')', .. }
-        );
-        assert_error!(
-            r#"(export "hi" (func 0)"#,
-            Export<'_>,
-            MissingParen { paren: ')', .. }
-        );
+        assert_error!(r#"(export "hi" (func 0"#, Export<'_>, MissingParen { paren: ')', .. });
+        assert_error!(r#"(export "hi" (func 0)"#, Export<'_>, MissingParen { paren: ')', .. });
         assert_error!(
             r#"(hello"#,
             Export<'_>,
@@ -3620,11 +3359,7 @@ mod tests {
                 ..
             }
         );
-        assert_error!(
-            r#"(export "hi" (hello 0))"#,
-            Export<'_>,
-            UnexpectedKeyword("hello")
-        );
+        assert_error!(r#"(export "hi" (hello 0))"#, Export<'_>, UnexpectedKeyword("hello"));
     }
 
     #[test]
@@ -3919,18 +3654,9 @@ mod tests {
         assert_insn!(r#"nop"#, [Nop]);
         assert_insn!(r#"(nop)"#, [Nop]);
         assert_insn!(r#"(unreachable (nop))"#, [Nop, Unreachable]);
-        assert_insn!(
-            r#"(return (nop) (unreachable))"#,
-            [Nop, Unreachable, Return]
-        );
-        assert_insn!(
-            r#"(return (unreachable (nop)))"#,
-            [Nop, Unreachable, Return]
-        );
-        assert_insn!(
-            r#"(nop (return (nop) (unreachable)))"#,
-            [Nop, Unreachable, Return, Nop]
-        );
+        assert_insn!(r#"(return (nop) (unreachable))"#, [Nop, Unreachable, Return]);
+        assert_insn!(r#"(return (unreachable (nop)))"#, [Nop, Unreachable, Return]);
+        assert_insn!(r#"(nop (return (nop) (unreachable)))"#, [Nop, Unreachable, Return, Nop]);
         assert_insn!(r#"nop unreachable return"#, [Nop, Unreachable, Return]);
         assert_insn!(r#"nop (nop) (nop)"#, [Nop, Nop, Nop]);
         assert_insn!(r#"(nop) nop (nop)"#, [Nop, Nop, Nop]);
@@ -3974,16 +3700,8 @@ mod tests {
                 ..
             }
         );
-        assert_error!(
-            r#"not-exist"#,
-            Vec<Instruction>,
-            UnexpectedKeyword("not-exist")
-        );
-        assert_error!(
-            r#"(not-exist)"#,
-            Vec<Instruction>,
-            UnexpectedKeyword("not-exist")
-        );
+        assert_error!(r#"not-exist"#, Vec<Instruction>, UnexpectedKeyword("not-exist"));
+        assert_error!(r#"(not-exist)"#, Vec<Instruction>, UnexpectedKeyword("not-exist"));
     }
 
     #[test]
@@ -4293,50 +4011,22 @@ mod tests {
         assert_insn!(r#"global.get 0"#, [GlobalGet(Index::Num(0))]);
         assert_insn!(r#"global.set 0"#, [GlobalSet(Index::Num(0))]);
 
-        assert_error!(
-            r#"local.get foo"#,
-            Vec<Instruction<'_>>,
-            UnexpectedToken { .. }
-        );
+        assert_error!(r#"local.get foo"#, Vec<Instruction<'_>>, UnexpectedToken { .. });
     }
 
     #[test]
     fn memory_instructions() {
         use InsnKind::*;
-        assert_insn!(
-            r#"i32.load"#,
-            [I32Load(Mem {
-                align: 2,
-                offset: 0
-            })]
-        );
-        assert_insn!(
-            r#"i32.load align=32"#,
-            [I32Load(Mem {
-                align: 5,
-                offset: 0,
-            })]
-        );
-        assert_insn!(
-            r#"i32.load offset=10"#,
-            [I32Load(Mem {
-                align: 2,
-                offset: 10,
-            })]
-        );
+        assert_insn!(r#"i32.load"#, [I32Load(Mem { align: 2, offset: 0 })]);
+        assert_insn!(r#"i32.load align=32"#, [I32Load(Mem { align: 5, offset: 0 })]);
+        assert_insn!(r#"i32.load offset=10"#, [I32Load(Mem { align: 2, offset: 10 })]);
         assert_insn!(
             r#"i32.load offset=10 align=32"#,
-            [I32Load(Mem {
-                align: 5,
-                offset: 10,
-            })]
+            [I32Load(Mem { align: 5, offset: 10 })]
         );
         assert_insn!(
             r#"i32.load offset=0x1f align=0x80"#,
-            [I32Load(Mem {
-                align: 7,
-                offset: 0x1f,
-            })]
+            [I32Load(Mem { align: 7, offset: 0x1f })]
         );
         assert_insn!(r#"i64.load"#, [I64Load(..)]);
         assert_insn!(r#"f32.load"#, [F32Load(..)]);
@@ -4368,21 +4058,9 @@ mod tests {
             Vec<Instruction<'_>>,
             UnexpectedKeyword("offset=10")
         );
-        assert_error!(
-            r#"i32.load align=pqr"#,
-            Vec<Instruction<'_>>,
-            CannotParseNum { .. }
-        );
-        assert_error!(
-            r#"i32.load align=0"#,
-            Vec<Instruction<'_>>,
-            InvalidAlignment(0)
-        );
-        assert_error!(
-            r#"i32.load align=7"#,
-            Vec<Instruction<'_>>,
-            InvalidAlignment(7)
-        );
+        assert_error!(r#"i32.load align=pqr"#, Vec<Instruction<'_>>, CannotParseNum { .. });
+        assert_error!(r#"i32.load align=0"#, Vec<Instruction<'_>>, InvalidAlignment(0));
+        assert_error!(r#"i32.load align=7"#, Vec<Instruction<'_>>, InvalidAlignment(7));
     }
 
     #[test]
@@ -4840,10 +4518,7 @@ mod tests {
         assert_parse!(
             r#"(table $tbl 0 0 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev::Table(Table {
-                id: Some("$tbl"),
-                ..
-            })
+            TableAbbrev::Table(Table { id: Some("$tbl"), .. })
         );
         assert_parse!(
             r#"(table $tbl funcref (elem 0 1))"#,
@@ -4877,7 +4552,7 @@ mod tests {
             TableAbbrev::Table(Table {
                 id: Some("$tbl"),
                 ty: TableType {
-                    limit: Limits::From { min: 2 },
+                    limit: Limits::From { min: 2 }
                 },
                 ..
             })
@@ -4897,7 +4572,7 @@ mod tests {
             TableAbbrev::Table(Table {
                 id: Some("$tbl"),
                 ty: TableType {
-                    limit: Limits::From { min: 2 },
+                    limit: Limits::From { min: 2 }
                 },
                 ..
             })
@@ -4932,10 +4607,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(table $tbl (export "n1") (export "n2") (import "m" "n3") 2 funcref)"#,
             TableAbbrev<'_>,
-            TableAbbrev::Table(Table {
-                import: Some(_),
-                ..
-            })
+            TableAbbrev::Table(Table { import: Some(_), .. })
         );
         assert_eq!(parser.ctx.exports.len(), 2);
         let parser = assert_parse!(
@@ -5022,7 +4694,7 @@ mod tests {
             MemoryAbbrev::Memory(Memory {
                 id: None,
                 ty: MemType {
-                    limit: Limits::From { min: 3 },
+                    limit: Limits::From { min: 3 }
                 },
                 ..
             })
@@ -5088,7 +4760,7 @@ mod tests {
             MemoryAbbrev<'_>,
             MemoryAbbrev::Memory(Memory {
                 ty: MemType {
-                    limit: Limits::From { min: 0 },
+                    limit: Limits::From { min: 0 }
                 },
                 ..
             })
@@ -5107,7 +4779,7 @@ mod tests {
             MemoryAbbrev<'_>,
             MemoryAbbrev::Memory(Memory {
                 ty: MemType {
-                    limit: Limits::From { min: 0 },
+                    limit: Limits::From { min: 0 }
                 },
                 ..
             })
@@ -5142,10 +4814,7 @@ mod tests {
         let parser = assert_parse!(
             r#"(memory $m (export "e1") (export "e2") (import "m" "n") 2)"#,
             MemoryAbbrev<'_>,
-            MemoryAbbrev::Memory(Memory {
-                import: Some(_),
-                ..
-            })
+            MemoryAbbrev::Memory(Memory { import: Some(_), .. })
         );
         assert_eq!(parser.ctx.exports.len(), 2);
         let parser = assert_parse!(
@@ -5213,7 +4882,7 @@ mod tests {
             Global {
                 ty: GlobalType {
                     mutable: false,
-                    ty: ValType::I32,
+                    ty: ValType::I32
                 },
                 ..
             }
@@ -5289,14 +4958,7 @@ mod tests {
 
     #[test]
     fn start_function() {
-        assert_parse!(
-            r#"(start 3)"#,
-            Start<'_>,
-            Start {
-                idx: Index::Num(3),
-                ..
-            }
-        );
+        assert_parse!(r#"(start 3)"#, Start<'_>, Start { idx: Index::Num(3), .. });
         assert_parse!(
             r#"(start $f)"#,
             Start<'_>,
@@ -5387,56 +5049,20 @@ mod tests {
         }
 
         // f64, small exponent
-        assert_f64_eq!(
-            "+0x1.000000000000080000000001p-600",
-            "+0x1.0000000000001p-600"
-        );
-        assert_f64_eq!(
-            "-0x1.000000000000080000000001p-600",
-            "-0x1.0000000000001p-600"
-        );
-        assert_f64_eq!(
-            "+0x1.000000000000280000000001p-600",
-            "+0x1.0000000000003p-600"
-        );
-        assert_f64_eq!(
-            "-0x1.000000000000280000000001p-600",
-            "-0x1.0000000000003p-600"
-        );
-        assert_f64_eq!(
-            "+0x8000000.000000400000000001p-627",
-            "+0x1.0000000000001p-600"
-        );
-        assert_f64_eq!(
-            "-0x8000000.000000400000000001p-627",
-            "-0x1.0000000000001p-600"
-        );
-        assert_f64_eq!(
-            "+0x8000000.000001400000000001p-627",
-            "+0x1.0000000000003p-600"
-        );
-        assert_f64_eq!(
-            "-0x8000000.000001400000000001p-627",
-            "-0x1.0000000000003p-600"
-        );
+        assert_f64_eq!("+0x1.000000000000080000000001p-600", "+0x1.0000000000001p-600");
+        assert_f64_eq!("-0x1.000000000000080000000001p-600", "-0x1.0000000000001p-600");
+        assert_f64_eq!("+0x1.000000000000280000000001p-600", "+0x1.0000000000003p-600");
+        assert_f64_eq!("-0x1.000000000000280000000001p-600", "-0x1.0000000000003p-600");
+        assert_f64_eq!("+0x8000000.000000400000000001p-627", "+0x1.0000000000001p-600");
+        assert_f64_eq!("-0x8000000.000000400000000001p-627", "-0x1.0000000000001p-600");
+        assert_f64_eq!("+0x8000000.000001400000000001p-627", "+0x1.0000000000003p-600");
+        assert_f64_eq!("-0x8000000.000001400000000001p-627", "-0x1.0000000000003p-600");
 
         // f64, large exponent
-        assert_f64_eq!(
-            "+0x1.000000000000080000000001p+600",
-            "+0x1.0000000000001p+600"
-        );
-        assert_f64_eq!(
-            "-0x1.000000000000080000000001p+600",
-            "-0x1.0000000000001p+600"
-        );
-        assert_f64_eq!(
-            "+0x1.000000000000280000000001p+600",
-            "+0x1.0000000000003p+600"
-        );
-        assert_f64_eq!(
-            "-0x1.000000000000280000000001p+600",
-            "-0x1.0000000000003p+600"
-        );
+        assert_f64_eq!("+0x1.000000000000080000000001p+600", "+0x1.0000000000001p+600");
+        assert_f64_eq!("-0x1.000000000000080000000001p+600", "-0x1.0000000000001p+600");
+        assert_f64_eq!("+0x1.000000000000280000000001p+600", "+0x1.0000000000003p+600");
+        assert_f64_eq!("-0x1.000000000000280000000001p+600", "-0x1.0000000000003p+600");
         assert_f64_eq!("+0x2000000000000100000000001", "+0x1.0000000000001p+97");
         assert_f64_eq!("-0x2000000000000100000000001", "-0x1.0000000000001p+97");
         assert_f64_eq!("+0x20000000000001fffffffffff", "+0x1.0000000000001p+97");
@@ -5445,14 +5071,8 @@ mod tests {
         assert_f64_eq!("-0x2000000000000500000000001", "-0x1.0000000000003p+97");
 
         // f64, subnormal
-        assert_f64_eq!(
-            "+0x1.000000000000280000000001p-1022",
-            "+0x1.0000000000003p-1022"
-        );
-        assert_f64_eq!(
-            "-0x1.000000000000280000000001p-1022",
-            "-0x1.0000000000003p-1022"
-        );
+        assert_f64_eq!("+0x1.000000000000280000000001p-1022", "+0x1.0000000000003p-1022");
+        assert_f64_eq!("-0x1.000000000000280000000001p-1022", "-0x1.0000000000003p-1022");
     }
 
     #[test]

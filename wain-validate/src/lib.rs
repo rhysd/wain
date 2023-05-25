@@ -66,12 +66,7 @@ impl<'m, 's, S: Source> Context<'m, 's, S> {
         }
     }
 
-    fn type_from_idx(
-        &self,
-        idx: u32,
-        when: &'static str,
-        offset: usize,
-    ) -> Result<&'m FuncType, S> {
+    fn type_from_idx(&self, idx: u32, when: &'static str, offset: usize) -> Result<&'m FuncType, S> {
         self.validate_idx(&self.module.types, idx, "type", when, offset)
     }
 
@@ -83,21 +78,11 @@ impl<'m, 's, S: Source> Context<'m, 's, S> {
         self.validate_idx(&self.module.tables, idx, "table", when, offset)
     }
 
-    fn global_from_idx(
-        &self,
-        idx: u32,
-        when: &'static str,
-        offset: usize,
-    ) -> Result<&'m Global, S> {
+    fn global_from_idx(&self, idx: u32, when: &'static str, offset: usize) -> Result<&'m Global, S> {
         self.validate_idx(&self.module.globals, idx, "global variable", when, offset)
     }
 
-    fn memory_from_idx(
-        &self,
-        idx: u32,
-        when: &'static str,
-        offset: usize,
-    ) -> Result<&'m Memory, S> {
+    fn memory_from_idx(&self, idx: u32, when: &'static str, offset: usize) -> Result<&'m Memory, S> {
         self.validate_idx(&self.module.memories, idx, "memory", when, offset)
     }
 }
@@ -255,13 +240,9 @@ impl<'s, S: Source> Validate<'s, S> for Global<'s> {
 
         match &self.kind {
             GlobalKind::Import(_) => Ok(()),
-            GlobalKind::Init(init) => crate::insn::validate_constant(
-                init,
-                ctx,
-                self.ty,
-                "init expression for global variable",
-                self.start,
-            ),
+            GlobalKind::Init(init) => {
+                crate::insn::validate_constant(init, ctx, self.ty, "init expression for global variable", self.start)
+            }
         }
     }
 }
@@ -361,9 +342,7 @@ impl<'s, S: Source> Validate<'s, S> for Func<'s> {
         let func_ty = ctx.type_from_idx(self.idx, "function", self.start)?;
         match &self.kind {
             FuncKind::Import(_) => Ok(()),
-            FuncKind::Body { locals, expr } => {
-                crate::insn::validate_func_body(expr, func_ty, locals, ctx, self.start)
-            }
+            FuncKind::Body { locals, expr } => crate::insn::validate_func_body(expr, func_ty, locals, ctx, self.start),
         }
     }
 }
@@ -396,11 +375,7 @@ mod tests {
     }
 
     fn func_type(params: Vec<ValType>, ret: Option<ValType>) -> FuncType {
-        let results = if let Some(ret) = ret {
-            vec![ret]
-        } else {
-            vec![]
-        };
+        let results = if let Some(ret) = ret { vec![ret] } else { vec![] };
         FuncType {
             start: 0,
             params,
@@ -409,10 +384,7 @@ mod tests {
     }
 
     fn func(idx: u32, locals: Vec<ValType>, expr: Vec<InsnKind>) -> Func<'static> {
-        let expr = expr
-            .into_iter()
-            .map(|kind| Instruction { start: 0, kind })
-            .collect();
+        let expr = expr.into_iter().map(|kind| Instruction { start: 0, kind }).collect();
         Func {
             start: 0,
             idx,

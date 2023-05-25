@@ -1,7 +1,5 @@
 use wain_ast::ValType;
-use wain_exec::{
-    check_func_signature, ImportInvalidError, ImportInvokeError, Importer, Memory, Stack,
-};
+use wain_exec::{check_func_signature, ImportInvalidError, ImportInvokeError, Importer, Memory, Stack};
 
 pub struct SpecTestImporter;
 
@@ -12,12 +10,7 @@ pub struct SpecTestImporter;
 impl Importer for SpecTestImporter {
     const MODULE_NAME: &'static str = "spectest";
 
-    fn validate(
-        &self,
-        name: &str,
-        params: &[ValType],
-        ret: Option<ValType>,
-    ) -> Option<ImportInvalidError> {
+    fn validate(&self, name: &str, params: &[ValType], ret: Option<ValType>) -> Option<ImportInvalidError> {
         use ValType::*;
         match name {
             "print" => check_func_signature(params, ret, &[], None),
@@ -34,12 +27,7 @@ impl Importer for SpecTestImporter {
         }
     }
 
-    fn call(
-        &mut self,
-        name: &str,
-        stack: &mut Stack,
-        _: &mut Memory,
-    ) -> Result<(), ImportInvokeError> {
+    fn call(&mut self, name: &str, stack: &mut Stack, _: &mut Memory) -> Result<(), ImportInvokeError> {
         match name {
             "print" => Ok(()),
             "print_i32" => {

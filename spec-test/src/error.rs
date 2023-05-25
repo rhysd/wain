@@ -163,35 +163,20 @@ impl<'s> fmt::Display for Error<'s> {
                     Lex(err) => write!(f, "lexer error: {}", err)?,
                     ParseWat(err) => write!(f, "parse error on parsing WAT module: {}", err)?,
                     Wat2Wasm(err) => write!(f, "could not transform from WAT to WASM: {}", err)?,
-                    Unexpected {
-                        expected,
-                        token: None,
-                    } => write!(f, "unexpected token while {} is expected", expected)?,
+                    Unexpected { expected, token: None } => {
+                        write!(f, "unexpected token while {} is expected", expected)?
+                    }
                     Unexpected {
                         expected,
                         token: Some(token),
-                    } => write!(
-                        f,
-                        "unexpected token {} while {} is expected",
-                        token, expected
-                    )?,
-                    EndOfFile { expected } => {
-                        write!(f, "unxpected EOF while {} is expected", expected)?
-                    }
+                    } => write!(f, "unexpected token {} while {} is expected", token, expected)?,
+                    EndOfFile { expected } => write!(f, "unxpected EOF while {} is expected", expected)?,
                     Utf8Error(err) => write!(f, "cannot parse text as UTF-8: {}", err)?,
-                    InvalidStringLiteral { lit, reason } => {
-                        write!(f, "invalid string literal '{}': {}", lit, reason)?
-                    }
+                    InvalidStringLiteral { lit, reason } => write!(f, "invalid string literal '{}': {}", lit, reason)?,
                     InvalidInt { ty, err } => write!(f, "invalid int literal for {}: {}", ty, err)?,
-                    TooSmallInt { ty, digits } => {
-                        write!(f, "-{} is too small value for {}", digits, ty)?
-                    }
-                    InvalidFloat { ty, err } => {
-                        write!(f, "invalid float number literal for {}: {}", ty, err)?
-                    }
-                    InvalidHexFloat { ty } => {
-                        write!(f, "invalid hex float number literal for {}", ty)?
-                    }
+                    TooSmallInt { ty, digits } => write!(f, "-{} is too small value for {}", digits, ty)?,
+                    InvalidFloat { ty, err } => write!(f, "invalid float number literal for {}: {}", ty, err)?,
+                    InvalidHexFloat { ty } => write!(f, "invalid hex float number literal for {}", ty)?,
                 }
                 "parsing"
             }
@@ -200,60 +185,46 @@ impl<'s> fmt::Display for Error<'s> {
                 match kind {
                     NotImplementedYet => write!(f, "this command is not implemented yet")?,
                     ParseQuoteFailure(err) => write!(f, "cannot parse quoted module: {}", err)?,
-                    ParseBinaryFailure(err) => write!(
-                        f,
-                        "cannot parse binary module at offset {}: {}",
-                        err.pos, err,
-                    )?,
+                    ParseBinaryFailure(err) => write!(f, "cannot parse binary module at offset {}: {}", err.pos, err,)?,
                     InvalidText(err) => write!(f, "invalid text module: {}", err)?,
                     InvalidBinary(err) => write!(f, "invalid binary module: {}", err)?,
                     ModuleNotFound(Some(id)) => write!(f, "module '{}' is not found", id)?,
                     ModuleNotFound(None) => write!(f, "no module is found")?,
                     Trapped(trap) => write!(f, "execution was unexpectedly trapped: {}", trap)?,
-                    InvokeUnexpectedReturn { actual, expected } => write!(
-                        f,
-                        "assert_return expected '{:?}' but got '{}'",
-                        expected, actual
-                    )?,
+                    InvokeUnexpectedReturn { actual, expected } => {
+                        write!(f, "assert_return expected '{:?}' but got '{}'", expected, actual)?
+                    }
                     InvokeTrapExpected { ret: None, expected } => write!(
                         f,
                         "expected trap with message '{}' while invocation but it unexpectedly returned successfully",
                         expected
                     )?,
-                    InvokeTrapExpected { ret: Some(ret), expected } => write!(
+                    InvokeTrapExpected {
+                        ret: Some(ret),
+                        expected,
+                    } => write!(
                         f,
                         "expected trap with message '{}' while invocation but it unexpectedly returned {} successfully",
-                        expected,
-                        ret,
+                        expected, ret,
                     )?,
-                    UnexpectedValid { expected } => write!(
-                        f,
-                        "expected invalid error with message '{}' but got no error",
-                        expected,
-                    )?,
+                    UnexpectedValid { expected } => {
+                        write!(f, "expected invalid error with message '{}' but got no error", expected,)?
+                    }
                     ExpectedParseError { expected } => write!(
                         f,
                         "expected parse error with message '{}' but it was successfully done",
                         expected,
                     )?,
-                    GlobalNotFound(name) => write!(
+                    GlobalNotFound(name) => write!(f, "exported global variable '{}' is not found", name,)?,
+                    DidNotCrash { bin, args, stdout } => write!(
                         f,
-                        "exported global variable '{}' is not found",
-                        name,
+                        "running crash-tester did not crash: bin {:?} with args {:?}. stdout: '{}'",
+                        bin, args, stdout,
                     )?,
-                    DidNotCrash {
-                        bin,
-                        args,
-                        stdout,
-                    } => write!(
-                        f,
-                        "running crash-tester did not crash: bin {:?} with args {:?}. stdout: '{}'", bin, args, stdout,
-                    )?,
-                    UnexpectedCrash{stderr, expected} => write!(
+                    UnexpectedCrash { stderr, expected } => write!(
                         f,
                         "unexpected crash with stderr '{}' while expecting '{}'",
-                        stderr,
-                        expected,
+                        stderr, expected,
                     )?,
                 }
                 "running"
@@ -268,11 +239,7 @@ impl<'s> fmt::Display for Error<'s> {
         describe_position(f, self.source, self.pos)?;
 
         if let Some(prev) = &self.prev_error {
-            write!(
-                f,
-                "\n\nabove error may be caused by below previous error: {}",
-                prev
-            )?;
+            write!(f, "\n\nabove error may be caused by below previous error: {}", prev)?;
         }
 
         Ok(())

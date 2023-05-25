@@ -71,11 +71,7 @@ pub struct Trap {
 }
 
 impl Trap {
-    pub(crate) fn unknown_import(
-        import: &Import<'_>,
-        kind: &'static str,
-        offset: usize,
-    ) -> Box<Self> {
+    pub(crate) fn unknown_import(import: &Import<'_>, kind: &'static str, offset: usize) -> Box<Self> {
         Self::new(
             TrapReason::UnknownImport {
                 mod_name: import.mod_name.0.to_string(),
@@ -86,11 +82,7 @@ impl Trap {
         )
     }
 
-    pub(crate) fn out_of_range<N: Into<Value>>(
-        num: N,
-        type_name: &'static str,
-        offset: usize,
-    ) -> Box<Self> {
+    pub(crate) fn out_of_range<N: Into<Value>>(num: N, type_name: &'static str, offset: usize) -> Box<Self> {
         Self::new(
             TrapReason::ValueOutOfRange {
                 src_val: num.into(),
@@ -123,20 +115,14 @@ impl fmt::Display for Trap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TrapReason::*;
         match &self.reason {
-            UnknownImport {
-                mod_name,
-                name,
-                kind,
-            } => write!(
+            UnknownImport { mod_name, name, kind } => write!(
                 f,
                 "unknown module '{}' or unknown {} value '{}' imported from the module",
                 mod_name, kind, name,
             )?,
-            OutOfLimit { max, idx, kind } => write!(
-                f,
-                "specified {} index 0x{:x} is out of limit 0x{:x}",
-                kind, idx, max,
-            )?,
+            OutOfLimit { max, idx, kind } => {
+                write!(f, "specified {} index 0x{:x} is out of limit 0x{:x}", kind, idx, max,)?
+            }
             DataSegmentOutOfBuffer {
                 segment_end,
                 buffer_size,
@@ -159,9 +145,7 @@ impl fmt::Display for Trap {
                 "cannot refer function because index {} is out of table size {}",
                 idx, table_size
             )?,
-            UninitializedElem(idx) => {
-                write!(f, "element at index {} in table is uninitialized", idx,)?
-            }
+            UninitializedElem(idx) => write!(f, "element at index {} in table is uninitialized", idx,)?,
             FuncSignatureMismatch {
                 import,
                 expected_params,
@@ -197,21 +181,20 @@ impl fmt::Display for Trap {
                 "cannot {} {} value at 0x{:x} due to out of range of memory. memory size is 0x{:x}",
                 operation, ty, addr, max,
             )?,
-            ImportFuncCallFail {
-                mod_name,
-                name,
-                msg,
-            } => write!(
+            ImportFuncCallFail { mod_name, name, msg } => write!(
                 f,
                 "calling imported function '{}' in module '{}': {}",
                 name, mod_name, msg,
             )?,
             WrongInvokeTarget { name, actual: None } => write!(f, "cannot invoke unknown function '{}'", name)?,
-            WrongInvokeTarget { name, actual: Some(actual) } => write!(
+            WrongInvokeTarget {
+                name,
+                actual: Some(actual),
+            } => write!(
                 f,
                 "cannot invoke '{name}': '{name}' is {actual}",
-                name=name,
-                actual=actual,
+                name = name,
+                actual = actual,
             )?,
             InvokeInvalidArgs { name, args, arg_types } => write!(
                 f,
@@ -222,16 +205,13 @@ impl fmt::Display for Trap {
             )?,
             RemZeroDivisor => f.write_str("attempt to calculate reminder with zero divisor")?,
             DivByZeroOrOverflow => f.write_str("integer overflow or attempt to divide integer by zero")?,
-            ValueOutOfRange {
-                src_val,
-                dest_type,
-            } => write!(f, "source value '{}' cannot represent destination type '{}'", src_val, dest_type)?,
+            ValueOutOfRange { src_val, dest_type } => write!(
+                f,
+                "source value '{}' cannot represent destination type '{}'",
+                src_val, dest_type
+            )?,
         }
-        write!(
-            f,
-            ": execution was trapped at byte offset 0x{:x}",
-            self.offset
-        )
+        write!(f, ": execution was trapped at byte offset 0x{:x}", self.offset)
     }
 }
 

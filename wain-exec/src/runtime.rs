@@ -196,12 +196,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
     }
 
     // Returns if it has return value on stack or not
-    fn invoke_import(
-        &mut self,
-        import: &ast::Import<'s>,
-        has_ret: bool,
-        pos: usize,
-    ) -> Result<bool> {
+    fn invoke_import(&mut self, import: &ast::Import<'s>, has_ret: bool, pos: usize) -> Result<bool> {
         if import.mod_name.0 == I::MODULE_NAME {
             match self
                 .importer
@@ -235,9 +230,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
 
         // Call this function with params
         let (locals, body) = match &func.kind {
-            ast::FuncKind::Import(i) => {
-                return self.invoke_import(i, !fty.results.is_empty(), func.start)
-            }
+            ast::FuncKind::Import(i) => return self.invoke_import(i, !fty.results.is_empty(), func.start),
             ast::FuncKind::Body { locals, expr } => (locals, expr),
         };
 
@@ -290,15 +283,10 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
 
         let name = name.as_ref();
         let (funcidx, start) = find_func_to_invoke(name, &self.module.ast.exports)?;
-        let arg_types =
-            &self.module.ast.types[self.module.ast.funcs[funcidx as usize].idx as usize].params;
+        let arg_types = &self.module.ast.types[self.module.ast.funcs[funcidx as usize].idx as usize].params;
 
         // Check parameter types
-        if args
-            .iter()
-            .map(Value::valtype)
-            .ne(arg_types.iter().copied())
-        {
+        if args.iter().map(Value::valtype).ne(arg_types.iter().copied()) {
             return Err(Trap::new(
                 TrapReason::InvokeInvalidArgs {
                     name: name.to_string(),
@@ -500,10 +488,7 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
                 }
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-br-table
-            BrTable {
-                labels,
-                default_label,
-            } => {
+            BrTable { labels, default_label } => {
                 let idx = runtime.stack.pop::<i32>() as u32;
                 let idx = idx as usize;
                 let labelidx = if idx < labels.len() {
@@ -575,24 +560,13 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             }
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-global-get
             GlobalGet(globalidx) => match runtime.module.ast.globals[*globalidx as usize].ty {
-                ast::ValType::I32 => runtime
-                    .stack
-                    .push(runtime.module.globals.get::<i32>(*globalidx)),
-                ast::ValType::I64 => runtime
-                    .stack
-                    .push(runtime.module.globals.get::<i64>(*globalidx)),
-                ast::ValType::F32 => runtime
-                    .stack
-                    .push(runtime.module.globals.get::<f32>(*globalidx)),
-                ast::ValType::F64 => runtime
-                    .stack
-                    .push(runtime.module.globals.get::<f64>(*globalidx)),
+                ast::ValType::I32 => runtime.stack.push(runtime.module.globals.get::<i32>(*globalidx)),
+                ast::ValType::I64 => runtime.stack.push(runtime.module.globals.get::<i64>(*globalidx)),
+                ast::ValType::F32 => runtime.stack.push(runtime.module.globals.get::<f32>(*globalidx)),
+                ast::ValType::F64 => runtime.stack.push(runtime.module.globals.get::<f64>(*globalidx)),
             },
             // https://webassembly.github.io/spec/core/exec/instructions.html#exec-global-set
-            GlobalSet(globalidx) => runtime
-                .module
-                .globals
-                .set_any(*globalidx, runtime.stack.top()),
+            GlobalSet(globalidx) => runtime.module.globals.set_any(*globalidx, runtime.stack.top()),
             // Memory instructions
             // https://webassembly.github.io/spec/core/exec/instructions.html#and
             I32Load(mem) => {
@@ -1073,10 +1047,7 @@ mod tests {
         module.funcs.push(ast::Func {
             start: 0,
             idx: 0,
-            kind: ast::FuncKind::Body {
-                locals: vec![],
-                expr,
-            },
+            kind: ast::FuncKind::Body { locals: vec![], expr },
         });
         module.exports.push(ast::Export {
             start: 0,
@@ -1094,44 +1065,28 @@ mod tests {
         use ast::InsnKind::*;
         use ast::ValType::*;
 
-        let f = exec_insns(F32, vec![F32Const(4.5), F32Nearest])
-            .unwrap()
-            .unwrap();
+        let f = exec_insns(F32, vec![F32Const(4.5), F32Nearest]).unwrap().unwrap();
         assert!(matches!(f, Value::F32(f) if f == 4.0));
 
-        let f = exec_insns(F32, vec![F32Const(3.5), F32Nearest])
-            .unwrap()
-            .unwrap();
+        let f = exec_insns(F32, vec![F32Const(3.5), F32Nearest]).unwrap().unwrap();
         assert!(matches!(f, Value::F32(f) if f == 4.0));
 
-        let f = exec_insns(F32, vec![F32Const(-0.5), F32Nearest])
-            .unwrap()
-            .unwrap();
+        let f = exec_insns(F32, vec![F32Const(-0.5), F32Nearest]).unwrap().unwrap();
         assert!(matches!(f, Value::F32(f) if f == 0.0 && f.is_sign_negative())); // -0.0
 
-        let f = exec_insns(F32, vec![F32Const(0.5), F32Nearest])
-            .unwrap()
-            .unwrap();
+        let f = exec_insns(F32, vec![F32Const(0.5), F32Nearest]).unwrap().unwrap();
         assert!(matches!(f, Value::F32(f) if f == 0.0 && f.is_sign_positive())); // +0.0
 
-        let f = exec_insns(F64, vec![F64Const(4.5), F64Nearest])
-            .unwrap()
-            .unwrap();
+        let f = exec_insns(F64, vec![F64Const(4.5), F64Nearest]).unwrap().unwrap();
         assert!(matches!(f, Value::F64(f) if f == 4.0));
 
-        let f = exec_insns(F64, vec![F64Const(3.5), F64Nearest])
-            .unwrap()
-            .unwrap();
+        let f = exec_insns(F64, vec![F64Const(3.5), F64Nearest]).unwrap().unwrap();
         assert!(matches!(f, Value::F64(f) if f == 4.0));
 
-        let f = exec_insns(F64, vec![F64Const(-0.5), F64Nearest])
-            .unwrap()
-            .unwrap();
+        let f = exec_insns(F64, vec![F64Const(-0.5), F64Nearest]).unwrap().unwrap();
         assert!(matches!(f, Value::F64(f) if f == 0.0 && f.is_sign_negative())); // -0.0
 
-        let f = exec_insns(F64, vec![F64Const(0.5), F64Nearest])
-            .unwrap()
-            .unwrap();
+        let f = exec_insns(F64, vec![F64Const(0.5), F64Nearest]).unwrap().unwrap();
         assert!(matches!(f, Value::F64(f) if f == 0.0 && f.is_sign_positive() /* +0.0 */));
     }
 
@@ -1325,22 +1280,14 @@ mod tests {
         assert!(matches!(i, Value::F32(f) if f == -42.0));
         let i = exec_insns(
             F32,
-            vec![
-                F32Const(f32::INFINITY),
-                F32Const(f32::from_bits(0x7f80_0001)),
-                F32Max,
-            ],
+            vec![F32Const(f32::INFINITY), F32Const(f32::from_bits(0x7f80_0001)), F32Max],
         )
         .unwrap()
         .unwrap();
         assert!(matches!(i, Value::F32(f) if f.is_nan() && f.to_bits() == 0x7fc0_0001));
         let i = exec_insns(
             F32,
-            vec![
-                F32Const(f32::from_bits(0x7fff_ffff)),
-                F32Const(f32::INFINITY),
-                F32Max,
-            ],
+            vec![F32Const(f32::from_bits(0x7fff_ffff)), F32Const(f32::INFINITY), F32Max],
         )
         .unwrap()
         .unwrap();

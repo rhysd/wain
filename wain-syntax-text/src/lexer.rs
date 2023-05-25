@@ -47,9 +47,7 @@ impl<'s> fmt::Display for LexError<'s> {
         match &self.kind {
             UnterminatedBlockComment => write!(f, "block comment is not terminated")?,
             UnterminatedString => write!(f, "string literal is not terminated",)?,
-            ReservedName(name) => {
-                write!(f, "name '{}' is unavailable since it's reserved name", name)?
-            }
+            ReservedName(name) => write!(f, "name '{}' is unavailable since it's reserved name", name)?,
             UnexpectedCharacter(c) => write!(f, "unexpected character '{}'", c)?,
             ControlCharInString => write!(f, "control char in string")?,
             InvalidStringFormat => write!(
@@ -169,14 +167,9 @@ impl<'s> fmt::Display for Token<'s> {
                     exp = exp
                 )
             }
-            Token::Float(
-                sign,
-                Float::Val {
-                    base,
-                    frac,
-                    exp: None,
-                },
-            ) => write!(f, "float number '{}{}{}", sign, base.prefix(), frac,),
+            Token::Float(sign, Float::Val { base, frac, exp: None }) => {
+                write!(f, "float number '{}{}{}", sign, base.prefix(), frac,)
+            }
             Token::String(_, s) => write!(f, "string literal {}", s),
             Token::Ident(ident) => write!(f, "identifier '{}'", ident),
         }
@@ -279,16 +272,12 @@ impl<'s> Lexer<'s> {
                                         match self.chars.next() {
                                             Some((i, '}')) => break i,
                                             Some(_) => continue,
-                                            None => {
-                                                return self
-                                                    .fail(LexErrorKind::UnterminatedString, start)
-                                            }
+                                            None => return self.fail(LexErrorKind::UnterminatedString, start),
                                         }
                                     };
-                                    if let Some(c) =
-                                        u32::from_str_radix(&self.source[brace_start..uend], 16)
-                                            .ok()
-                                            .and_then(char::from_u32)
+                                    if let Some(c) = u32::from_str_radix(&self.source[brace_start..uend], 16)
+                                        .ok()
+                                        .and_then(char::from_u32)
                                     {
                                         let mut b = [0; 4];
                                         buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
@@ -296,9 +285,7 @@ impl<'s> Lexer<'s> {
                                         return self.fail(LexErrorKind::InvalidStringFormat, start);
                                     }
                                 }
-                                Some(_) => {
-                                    return self.fail(LexErrorKind::InvalidStringFormat, start)
-                                }
+                                Some(_) => return self.fail(LexErrorKind::InvalidStringFormat, start),
                                 None => return self.fail(LexErrorKind::UnterminatedString, start),
                             }
                         }
@@ -313,9 +300,7 @@ impl<'s> Lexer<'s> {
                         None => return self.fail(LexErrorKind::UnterminatedString, start),
                     }
                 }
-                _ if c.is_ascii_control() => {
-                    return self.fail(LexErrorKind::ControlCharInString, start)
-                }
+                _ if c.is_ascii_control() => return self.fail(LexErrorKind::ControlCharInString, start),
                 _ if !buf.is_empty() => {
                     let mut b = [0; 4];
                     buf.extend_from_slice(c.encode_utf8(&mut b).as_bytes());
@@ -514,9 +499,7 @@ impl<'s> Lexer<'s> {
                     None
                 }
             }
-            idchars if idchars.starts_with("0x") => {
-                Self::lex_unsigned_number(&idchars[2..], sign, NumBase::Hex)
-            }
+            idchars if idchars.starts_with("0x") => Self::lex_unsigned_number(&idchars[2..], sign, NumBase::Hex),
             idchars => Self::lex_unsigned_number(idchars, sign, NumBase::Dec),
         };
         token.map(|t| (t, start))
@@ -685,13 +668,9 @@ mod tests {
         assert!(lex_all(";;foo\n;;bar\n  ;; piyo").unwrap().is_empty());
         assert!(lex_all("(;;)").unwrap().is_empty());
         assert!(lex_all("(; hi! ;)").unwrap().is_empty());
-        assert!(lex_all("(; hi!\n  how are you?\n  bye!\n ;)")
-            .unwrap()
-            .is_empty());
+        assert!(lex_all("(; hi!\n  how are you?\n  bye!\n ;)").unwrap().is_empty());
         assert!(lex_all("(;(;;);)").unwrap().is_empty());
-        assert!(lex_all("(;\nhi!\n (;how are you?\n;) bye!\n;)")
-            .unwrap()
-            .is_empty());
+        assert!(lex_all("(;\nhi!\n (;how are you?\n;) bye!\n;)").unwrap().is_empty());
         // Errors
         assert_lex_error!("(;", LexErrorKind::UnterminatedBlockComment);
         assert_lex_error!("(; hi! ", LexErrorKind::UnterminatedBlockComment);
@@ -1035,18 +1014,9 @@ mod tests {
         assert_lex_one!("+nan", Token::Float(Sign::Plus, Float::Nan(None)));
         assert_lex_one!("-nan", Token::Float(Sign::Minus, Float::Nan(None)));
         assert_lex_one!("nan:0x1f", Token::Float(Sign::Plus, Float::Nan(Some("1f"))));
-        assert_lex_one!(
-            "nan:0x1_f",
-            Token::Float(Sign::Plus, Float::Nan(Some("1_f")))
-        );
-        assert_lex_one!(
-            "+nan:0x1f",
-            Token::Float(Sign::Plus, Float::Nan(Some("1f")))
-        );
-        assert_lex_one!(
-            "-nan:0x1f",
-            Token::Float(Sign::Minus, Float::Nan(Some("1f")))
-        );
+        assert_lex_one!("nan:0x1_f", Token::Float(Sign::Plus, Float::Nan(Some("1_f"))));
+        assert_lex_one!("+nan:0x1f", Token::Float(Sign::Plus, Float::Nan(Some("1f"))));
+        assert_lex_one!("-nan:0x1f", Token::Float(Sign::Minus, Float::Nan(Some("1f"))));
     }
 
     #[test]
@@ -1133,10 +1103,7 @@ mod tests {
                 Token::Keyword("i32.const"),
                 Token::Int(Sign::Plus, NumBase::Dec, "1024"),
                 Token::RParen,
-                Token::String(
-                    Cow::Borrowed(b"Hello, world\n\x00"),
-                    r#""Hello, world\n\00""#
-                ),
+                Token::String(Cow::Borrowed(b"Hello, world\n\x00"), r#""Hello, world\n\00""#),
                 Token::RParen,
                 Token::LParen,
                 Token::Keyword("table"),

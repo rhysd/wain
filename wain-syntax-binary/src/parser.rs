@@ -122,12 +122,7 @@ impl<'s> Parser<'s> {
         Error::new(kind, pos, self.source, self.parsing)
     }
 
-    fn unexpected_byte<T: AsRef<[u8]>>(
-        &self,
-        expected: T,
-        got: u8,
-        what: &'static str,
-    ) -> Box<Error<'s>> {
+    fn unexpected_byte<T: AsRef<[u8]>>(&self, expected: T, got: u8, what: &'static str) -> Box<Error<'s>> {
         let pos = self.current_pos() - 1; // Unget one character for magic
         let kind = ErrorKind::UnexpectedByte {
             expected: expected.as_ref().to_vec(),
@@ -260,10 +255,7 @@ impl<'s> Parse<'s> for Root<'s, BinarySource<'s>> {
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-module
 impl<'s> Parse<'s> for Module<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        fn parse_section_into_vec<'s, P: Parse<'s>>(
-            parser: &mut Parser<'s>,
-            id: u8,
-        ) -> Result<'s, Vec<P>> {
+        fn parse_section_into_vec<'s, P: Parse<'s>>(parser: &mut Parser<'s>, id: u8) -> Result<'s, Vec<P>> {
             if parser.input.starts_with(&[id]) {
                 let mut inner = parser.section_parser()?;
                 let vec = inner.parse_vec()?.into_vec();
@@ -430,10 +422,7 @@ impl<'s> Parse<'s> for Name<'s> {
                 parser.eat(size);
                 Ok(Name(Cow::Borrowed(name)))
             }
-            Err(error) => Err(parser.error(ErrorKind::InvalidUtf8 {
-                what: "name",
-                error,
-            })),
+            Err(error) => Err(parser.error(ErrorKind::InvalidUtf8 { what: "name", error })),
         }
     }
 }
@@ -445,11 +434,7 @@ impl<'s> Parse<'s> for FuncType {
         parser.parse_flag(0x60, "function type")?;
         let params = parser.parse_vec()?.into_vec()?;
         let results = parser.parse_vec()?.into_vec()?;
-        Ok(FuncType {
-            start,
-            params,
-            results,
-        })
+        Ok(FuncType { start, params, results })
     }
 }
 
@@ -514,9 +499,7 @@ impl<'s> Parse<'s> for ImportDesc<'s> {
 impl<'s> Parse<'s> for TableType {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         parser.parse_flag(0x70, "funcref of table type")?;
-        Ok(TableType {
-            limit: parser.parse()?,
-        })
+        Ok(TableType { limit: parser.parse()? })
     }
 }
 
@@ -534,9 +517,7 @@ impl<'s> Parse<'s> for Limits {
 // https://webassembly.github.io/spec/core/binary/types.html#memory-types
 impl<'s> Parse<'s> for MemType {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
-        Ok(MemType {
-            limit: parser.parse()?,
-        })
+        Ok(MemType { limit: parser.parse()? })
     }
 }
 
@@ -911,11 +892,7 @@ impl<'s> Parse<'s> for Export<'s> {
             0x02 => ExportKind::Memory(parser.parse()?),
             0x03 => ExportKind::Global(parser.parse()?),
             b => {
-                return Err(parser.unexpected_byte(
-                    [0x00, 0x01, 0x02, 0x03],
-                    b,
-                    "export description",
-                ));
+                return Err(parser.unexpected_byte([0x00, 0x01, 0x02, 0x03], b, "export description"));
             }
         };
         Ok(Export { start, name, kind })
@@ -979,11 +956,7 @@ impl<'s> Parse<'s> for Code {
                 remaining_bytes: inner.input.len(),
             }));
         }
-        Ok(Code {
-            start,
-            locals,
-            expr,
-        })
+        Ok(Code { start, locals, expr })
     }
 }
 
@@ -1116,7 +1089,7 @@ mod tests {
             &t[0],
             Table {
                 ty: TableType {
-                    limit: Limits::Range(1, 1),
+                    limit: Limits::Range(1, 1)
                 },
                 import: None,
                 ..
@@ -1128,9 +1101,7 @@ mod tests {
         assert!(matches!(
             &m[0],
             Memory {
-                ty: MemType {
-                    limit: Limits::From(2),
-                },
+                ty: MemType { limit: Limits::From(2) },
                 import: None,
                 ..
             }

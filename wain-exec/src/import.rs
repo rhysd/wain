@@ -17,18 +17,8 @@ pub enum ImportInvokeError {
 
 pub trait Importer {
     const MODULE_NAME: &'static str = "env";
-    fn validate(
-        &self,
-        name: &str,
-        params: &[ValType],
-        ret: Option<ValType>,
-    ) -> Option<ImportInvalidError>;
-    fn call(
-        &mut self,
-        name: &str,
-        stack: &mut Stack,
-        memory: &mut Memory,
-    ) -> Result<(), ImportInvokeError>;
+    fn validate(&self, name: &str, params: &[ValType], ret: Option<ValType>) -> Option<ImportInvalidError>;
+    fn call(&mut self, name: &str, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportInvokeError>;
 }
 
 pub fn check_func_signature(
@@ -115,12 +105,7 @@ impl<R: Read, W: Write> DefaultImporter<R, W> {
 }
 
 impl<R: Read, W: Write> Importer for DefaultImporter<R, W> {
-    fn validate(
-        &self,
-        name: &str,
-        params: &[ValType],
-        ret: Option<ValType>,
-    ) -> Option<ImportInvalidError> {
+    fn validate(&self, name: &str, params: &[ValType], ret: Option<ValType>) -> Option<ImportInvalidError> {
         use ValType::*;
         match name {
             "putchar" => check_func_signature(params, ret, &[I32], Some(I32)),
@@ -131,12 +116,7 @@ impl<R: Read, W: Write> Importer for DefaultImporter<R, W> {
         }
     }
 
-    fn call(
-        &mut self,
-        name: &str,
-        stack: &mut Stack,
-        memory: &mut Memory,
-    ) -> Result<(), ImportInvokeError> {
+    fn call(&mut self, name: &str, stack: &mut Stack, memory: &mut Memory) -> Result<(), ImportInvokeError> {
         match name {
             "putchar" => {
                 self.putchar(stack);
