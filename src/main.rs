@@ -8,7 +8,6 @@ use std::io;
 use std::io::Read;
 use std::process::exit;
 
-#[allow(dead_code)]
 enum InputOption {
     Text(String),
     Binary(String),
@@ -20,7 +19,6 @@ enum Input {
     Binary(Vec<u8>),
 }
 
-#[allow(dead_code)]
 impl InputOption {
     fn filename(&self) -> Option<&str> {
         match self {
@@ -80,19 +78,13 @@ fn parse_args() -> Result<Options, String> {
         }
 
         if arg.ends_with(".wasm") {
-            #[cfg(feature = "binary")]
-            {
-                file = InputOption::Binary(arg);
-                continue;
-            }
+            file = InputOption::Binary(arg);
+            continue;
         }
 
         if arg.ends_with(".wat") {
-            #[cfg(feature = "text")]
-            {
-                file = InputOption::Text(arg);
-                continue;
-            }
+            file = InputOption::Text(arg);
+            continue;
         }
 
         return Err(format!(
@@ -144,25 +136,7 @@ fn unwrap<T, E: fmt::Display>(phase: &'static str, result: Result<T, E>) -> T {
 
 fn run<S: wain_ast::source::Source>(ast: wain_ast::Root<'_, S>) {
     unwrap("validation", wain_validate::validate(&ast));
-    unwrap("running wasm", wain_exec::execute(&ast.module))
-}
-
-#[cfg(feature = "binary")]
-fn run_binary(bin: Vec<u8>) {
-    run(unwrap("parsing", wain_syntax_binary::parse(&bin)))
-}
-#[cfg(not(feature = "binary"))]
-fn run_binary(_: Vec<u8>) {
-    unimplemented!("running binary format is not supported since built without 'binary' feature")
-}
-
-#[cfg(feature = "text")]
-fn run_text(text: String) {
-    run(unwrap("parsing", wain_syntax_text::parse(&text)))
-}
-#[cfg(not(feature = "text"))]
-fn run_text(_: String) {
-    unimplemented!("running text format is not supported since built without 'text' feature")
+    unwrap("executing wasm module", wain_exec::execute(&ast.module));
 }
 
 fn main() {
@@ -178,7 +152,27 @@ fn main() {
     }
 
     match unwrap("reading input", opts.file.read()) {
-        Input::Binary(bin) => run_binary(bin),
-        Input::Text(text) => run_text(text),
+        #[cfg(feature = "binary")]
+        Input::Binary(bin) => run(unwrap(
+            "parsing binary format",
+            wain_syntax_binary::parse(&bin),
+        )),
+        #[cfg(feature = "text")]
+        Input::Text(text) => run(unwrap(
+            "parsing text format",
+            wain_syntax_text::parse(&text),
+        )),
+        #[cfg(not(all(feature = "binary", feature = "text")))]
+        input => {
+            let format = match input {
+                Input::Text(_) => "text",
+                Input::Binary(_) => "binary",
+            };
+            eprintln!(
+                "Executing {0} format is unsupported. Build with '{0}' feature",
+                format,
+            );
+            exit(1);
+        }
     }
 }
