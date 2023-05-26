@@ -50,12 +50,14 @@ impl InputOption {
 struct Options {
     file: InputOption,
     help: bool,
+    validate_only: bool,
     version: bool,
 }
 
 fn parse_args() -> Result<Options, String> {
     let mut file = InputOption::Stdin;
     let mut help = false;
+    let mut validate_only = false;
     let mut version = false;
 
     for arg in env::args().skip(1) {
@@ -67,6 +69,11 @@ fn parse_args() -> Result<Options, String> {
         if arg == "--version" || arg == "-v" {
             version = true;
             break;
+        }
+
+        if arg == "--validate-only" {
+            validate_only = true;
+            continue;
         }
 
         if let Some(f) = file.filename() {
@@ -87,12 +94,17 @@ fn parse_args() -> Result<Options, String> {
         }
 
         return Err(format!(
-            "File '{}' does not end with '.wasm' nor '.wat'. See --help",
+            "File '{}' ends with neither '.wasm' nor '.wat'. See --help",
             arg
         ));
     }
 
-    Ok(Options { file, help, version })
+    Ok(Options {
+        file,
+        help,
+        version,
+        validate_only,
+    })
 }
 
 fn help() -> ! {
@@ -104,13 +116,15 @@ USAGE:
     wain [OPTIONS] [{{file}}]
 
 OPTIONS:
-    --help | -h    : Show this help
-    --version | -v : Show version
+    --validate-only : Only validate the Wasm module
+    --help | -h     : Show this help
+    --version | -v  : Show version
 
 ARGUMENTS:
-    Currently one '.wat' file or '.wasm' file can be specified. If no file is
-    specified, STDIN will be interpreted as binary or text. wain automatically
-    detect binary-format or text-format from the input.
+    Currently only a single '.wat' file or '.wasm' file can be specified.
+    If no file is given, STDIN will be interpreted as binary or text Wasm
+    module. wain automatically detects binary-format or text-format from the
+    input.
 
 REPOSITORY:
     https://github.com/rhysd/wain
@@ -129,9 +143,11 @@ fn unwrap<T, E: fmt::Display>(phase: &'static str, result: Result<T, E>) -> T {
     }
 }
 
-fn run<S: wain_ast::source::Source>(ast: wain_ast::Root<'_, S>) {
+fn interpret<S: wain_ast::source::Source>(ast: wain_ast::Root<'_, S>, validate_only: bool) {
     unwrap("validation", wain_validate::validate(&ast));
-    unwrap("executing wasm module", wain_exec::execute(&ast.module));
+    if !validate_only {
+        unwrap("executing wasm module", wain_exec::execute(&ast.module));
+    }
 }
 
 fn main() {
@@ -148,9 +164,15 @@ fn main() {
 
     match unwrap("reading input", opts.file.read()) {
         #[cfg(feature = "binary")]
-        Input::Binary(bin) => run(unwrap("parsing binary format", wain_syntax_binary::parse(&bin))),
+        Input::Binary(bin) => interpret(
+            unwrap("parsing binary format", wain_syntax_binary::parse(&bin)),
+            opts.validate_only,
+        ),
         #[cfg(feature = "text")]
-        Input::Text(text) => run(unwrap("parsing text format", wain_syntax_text::parse(&text))),
+        Input::Text(text) => interpret(
+            unwrap("parsing text format", wain_syntax_text::parse(&text)),
+            opts.validate_only,
+        ),
         #[cfg(not(all(feature = "binary", feature = "text")))]
         input => {
             let format = match input {
