@@ -21,9 +21,9 @@ no-dev-version = true
 name = "wain"
 
 [profile.release]
-debug = 1
 lto = true
 panic = "abort"
+codegen-units = 1
 
 [features]
 default = ["binary", "text"]
