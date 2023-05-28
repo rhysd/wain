@@ -83,6 +83,5 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - name: Run spec tests
-        run: |
-          cd spec-test
-          cargo run --release -- --allowed-failures 179
+        run: cargo run --release -- --allowed-failures 179
+        working-directory: ./spec-test
