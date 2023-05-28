@@ -1,16 +1,15 @@
-
 [package]
 name = "wain-fuzz"
 version = "0.0.0"
 authors = ["Automatically generated"]
 publish = false
-edition = "2018"
+edition = "2021"
 
 [package.metadata]
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.3"
+libfuzzer-sys = "0.4"
 wain-syntax-binary = { path = "../wain-syntax-binary" }
 wain-syntax-text = { path = "../wain-syntax-text" }
 wain-validate = { path = "../wain-validate" }
@@ -18,6 +17,9 @@ wain-validate = { path = "../wain-validate" }
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
+
+[profile.release]
+debug = 1
 
 [[bin]]
 name = "binary_parser"
