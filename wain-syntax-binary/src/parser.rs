@@ -837,6 +837,12 @@ impl<'s> Parse<'s> for Instruction {
             0xbd => I64ReinterpretF64,
             0xbe => F32ReinterpretI32,
             0xbf => F64ReinterpretI64,
+            // sign extension
+            0xc0 => I32Extend8S,
+            0xc1 => I32Extend16S,
+            0xc2 => I64Extend8S,
+            0xc3 => I64Extend16S,
+            0xc4 => I64Extend32S,
             // https://webassembly.github.io/spec/core/binary/instructions.html#numeric-instructions
             b => return Err(parser.unexpected_byte([], b, "instruction")),
         };

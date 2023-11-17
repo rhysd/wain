@@ -446,6 +446,12 @@ pub enum InsnKind<'s> {
     I64ReinterpretF64,
     F32ReinterpretI32,
     F64ReinterpretI64,
+    // Sign extension
+    I32Extend8S,
+    I32Extend16S,
+    I64Extend8S,
+    I64Extend16S,
+    I64Extend32S,
 }
 
 impl<'s> InsnKind<'s> {

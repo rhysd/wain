@@ -948,6 +948,12 @@ impl<'m, 's, I: Importer> Execute<'m, 's, I> for ast::Instruction {
             I64ReinterpretF64 => runtime.stack.write_top_type(i64::VAL_TYPE),
             F32ReinterpretI32 => runtime.stack.write_top_type(f32::VAL_TYPE),
             F64ReinterpretI64 => runtime.stack.write_top_type(f64::VAL_TYPE),
+            // https://webassembly.github.io/spec/core/exec/numerics.html#op-iextendn-s
+            I32Extend8S => runtime.cvtop(|v: i32| i32::from(v as i8)),
+            I32Extend16S => runtime.cvtop(|v: i32| i32::from(v as i16)),
+            I64Extend8S => runtime.cvtop(|v: i64| i64::from(v as i8)),
+            I64Extend16S => runtime.cvtop(|v: i64| i64::from(v as i16)),
+            I64Extend32S => runtime.cvtop(|v: i64| i64::from(v as i32)),
         }
         Ok(ExecState::Continue)
     }

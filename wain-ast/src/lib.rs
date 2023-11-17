@@ -394,6 +394,11 @@ pub enum InsnKind {
     I64ReinterpretF64,
     F32ReinterpretI32,
     F64ReinterpretI64,
+    I32Extend8S,
+    I32Extend16S,
+    I64Extend8S,
+    I64Extend16S,
+    I64Extend32S,
 }
 
 impl InsnKind {
@@ -576,6 +581,12 @@ impl InsnKind {
             I64ReinterpretF64 => "i64.reinterpret_f64",
             F32ReinterpretI32 => "f32.reinterpret_i32",
             F64ReinterpretI64 => "f64.reinterpret_i64",
+            // sign extension
+            I32Extend8S => "i32.extend8_s",
+            I32Extend16S => "i32.extend16_s",
+            I64Extend8S => "i64.extend8_s",
+            I64Extend16S => "i64.extend16_s",
+            I64Extend32S => "i64.extend32_s",
         }
     }
 }
