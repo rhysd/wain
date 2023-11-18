@@ -2,7 +2,7 @@
 name = "spec-test"
 version = "0.1.0"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
-edition = "2018"
+edition = "2021"
 publish = false
 default-run = "spec-test"
 
