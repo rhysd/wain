@@ -6,6 +6,9 @@ edition = "2018"
 publish = false
 default-run = "spec-test"
 
+[package.metadata.release]
+consolidate-commits = false
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
