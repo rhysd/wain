@@ -1,6 +1,6 @@
 [package]
 name = "wain"
-version = "0.1.6"
+version = "0.1.7"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2021"
 description = "WebAssembly interpreter written in Safe Rust with zero dependencies"
