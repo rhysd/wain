@@ -37,7 +37,7 @@ version = "0.2.2"
 
 [[package]]
 name = "wain-exec"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "wain-ast",
  "wain-syntax-text",
