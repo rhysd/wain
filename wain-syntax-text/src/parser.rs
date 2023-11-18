@@ -1916,6 +1916,11 @@ impl<'s, 'p> MaybeFoldedInsn<'s, 'p> {
             "i64.reinterpret_f64" => InsnKind::I64ReinterpretF64,
             "f32.reinterpret_i32" => InsnKind::F32ReinterpretI32,
             "f64.reinterpret_i64" => InsnKind::F64ReinterpretI64,
+            "i32.extend8_s" => InsnKind::I32Extend8S,
+            "i32.extend16_s" => InsnKind::I32Extend16S,
+            "i64.extend8_s" => InsnKind::I64Extend8S,
+            "i64.extend16_s" => InsnKind::I64Extend16S,
+            "i64.extend32_s" => InsnKind::I64Extend32S,
             _ => return self.parser.error(ParseErrorKind::UnexpectedKeyword(kw), start),
         };
         Ok(Instruction { start, kind })
@@ -4394,6 +4399,11 @@ mod tests {
         assert_insn!(r#"i64.reinterpret_f64"#, [I64ReinterpretF64]);
         assert_insn!(r#"f32.reinterpret_i32"#, [F32ReinterpretI32]);
         assert_insn!(r#"f64.reinterpret_i64"#, [F64ReinterpretI64]);
+        assert_insn!(r#"i32.extend8_s"#, [I32Extend8S]);
+        assert_insn!(r#"i32.extend16_s"#, [I32Extend16S]);
+        assert_insn!(r#"i64.extend8_s"#, [I64Extend8S]);
+        assert_insn!(r#"i64.extend16_s"#, [I64Extend16S]);
+        assert_insn!(r#"i64.extend32_s"#, [I64Extend32S]);
     }
 
     #[test]

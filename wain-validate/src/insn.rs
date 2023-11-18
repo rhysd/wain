@@ -494,6 +494,12 @@ impl<'outer, 'm, 's, S: Source> ValidateInsnSeq<'outer, 'm, 's, S> for Instructi
             F64Abs | F64Neg | F64Ceil | F64Floor | F64Trunc | F64Nearest | F64Sqrt => {
                 ctx.ensure_op_stack_top(ValType::F64)?;
             }
+            I32Extend8S | I32Extend16S => {
+                ctx.ensure_op_stack_top(ValType::I32)?;
+            }
+            I64Extend8S | I64Extend16S | I64Extend32S => {
+                ctx.ensure_op_stack_top(ValType::I64)?;
+            }
             // https://webassembly.github.io/spec/core/valid/instructions.html#valid-binop
             // [t t] -> [t]
             I32Add | I32Sub | I32Mul | I32DivS | I32DivU | I32RemS | I32RemU | I32And | I32Or | I32Xor | I32Shl

@@ -675,6 +675,12 @@ impl<'s> Transform<'s> for wat::Instruction<'s> {
             wat::InsnKind::I64ReinterpretF64 => wasm::InsnKind::I64ReinterpretF64,
             wat::InsnKind::F32ReinterpretI32 => wasm::InsnKind::F32ReinterpretI32,
             wat::InsnKind::F64ReinterpretI64 => wasm::InsnKind::F64ReinterpretI64,
+            // Sign extension
+            wat::InsnKind::I32Extend8S => wasm::InsnKind::I32Extend8S,
+            wat::InsnKind::I32Extend16S => wasm::InsnKind::I32Extend16S,
+            wat::InsnKind::I64Extend8S => wasm::InsnKind::I64Extend8S,
+            wat::InsnKind::I64Extend16S => wasm::InsnKind::I64Extend16S,
+            wat::InsnKind::I64Extend32S => wasm::InsnKind::I64Extend32S,
         };
         Ok(wasm::Instruction { start, kind })
     }
