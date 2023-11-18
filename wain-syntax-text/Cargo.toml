@@ -1,6 +1,6 @@
 [package]
 name = "wain-syntax-text"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["rhysd <lin90162@yahoo.co.jp>"]
 edition = "2021"
 description = "WebAssembly text format parser for wain project"
