@@ -436,10 +436,10 @@ impl<'s> Parser<'s> {
 
     fn parse_u32(&mut self, expected: &'static str) -> Result<'s, u32> {
         match self.next_token(expected)? {
-            (Token::Int(sign, base, s), offset) if sign == Sign::Minus => {
+            (Token::Int(Sign::Minus, base, s), offset) => {
                 self.error(ParseErrorKind::NumberMustBePositive(base, s), offset)
             }
-            (Token::Int(_, base, s), offset) => parse_u32_str(self, s, base, offset),
+            (Token::Int(Sign::Plus, base, s), offset) => parse_u32_str(self, s, base, offset),
             (tok, offset) => self.unexpected_token(tok.clone(), expected, offset),
         }
     }
@@ -1254,10 +1254,10 @@ impl<'s> Parse<'s> for Index<'s> {
     fn parse(parser: &mut Parser<'s>) -> Result<'s, Self> {
         let expected = "number or identifier for index";
         match parser.next_token(expected)? {
-            (Token::Int(sign, base, s), offset) if sign == Sign::Minus => {
+            (Token::Int(Sign::Minus, base, s), offset) => {
                 parser.error(ParseErrorKind::NumberMustBePositive(base, s), offset)
             }
-            (Token::Int(_, base, s), offset) => parse_u32_str(parser, s, base, offset).map(Index::Num),
+            (Token::Int(Sign::Plus, base, s), offset) => parse_u32_str(parser, s, base, offset).map(Index::Num),
             (Token::Ident(id), _) => Ok(Index::Ident(id)),
             (tok, offset) => parser.unexpected_token(tok.clone(), expected, offset),
         }
