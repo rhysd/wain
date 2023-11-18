@@ -12,9 +12,6 @@ include = ["src/**/*.rs", "Cargo.toml", "README.md"]
 keywords = ["wasm", "webassembly", "wat", "syntax-tree"]
 categories = ["wasm"]
 
-[package.metadata.release]
-no-dev-version = true
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
