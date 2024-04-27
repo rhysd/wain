@@ -13,7 +13,7 @@ impl Table {
     pub fn allocate(tables: &[ast::Table]) -> Result<Self> {
         // Note: Only one table exists thanks to validation
         assert!(tables.len() <= 1);
-        if let Some(table) = tables.get(0) {
+        if let Some(table) = tables.first() {
             if let Some(i) = &table.import {
                 Err(Trap::unknown_import(i, "table", table.start))
             } else {

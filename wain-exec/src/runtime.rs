@@ -99,7 +99,7 @@ impl<'m, 's, I: Importer> Runtime<'m, 's, I> {
 
                     let fty = &module.types[func.idx as usize];
                     let name = &i.name.0;
-                    match importer.validate(name, &fty.params, fty.results.get(0).copied()) {
+                    match importer.validate(name, &fty.params, fty.results.first().copied()) {
                         Some(ImportInvalidError::NotFound) => {
                             return Err(unknown_import(i, func.start));
                         }

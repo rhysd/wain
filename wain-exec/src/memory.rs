@@ -22,7 +22,7 @@ impl Memory {
     pub fn allocate(memories: &[ast::Memory]) -> Result<Self> {
         // Note: Only one memory exists thanks to validation
         assert!(memories.len() <= 1);
-        if let Some(memory) = memories.get(0) {
+        if let Some(memory) = memories.first() {
             if let Some(i) = &memory.import {
                 Err(Trap::unknown_import(i, "memory", memory.start))
             } else {

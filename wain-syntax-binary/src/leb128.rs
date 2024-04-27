@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn u32_value_ok() {
-        for (input, expected) in vec![
+        for (input, expected) in [
             (vec![0x00], 0),
             (vec![0x80, 0x01], 128),
             (vec![0xc0, 0xc4, 0x07], 123456),

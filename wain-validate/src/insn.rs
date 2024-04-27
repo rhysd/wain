@@ -252,7 +252,7 @@ pub(crate) fn validate_func_body<'outer, S: Source>(
 ) -> Result<(), S> {
     // Note: FuncType already validated func_ty has at most one result type
     // This assumes a function can have only one return value
-    let ret_ty = func_ty.results.get(0).copied();
+    let ret_ty = func_ty.results.first().copied();
     let mut ctx = FuncBodyContext {
         current_op: "",
         current_offset: start,

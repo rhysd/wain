@@ -2,7 +2,6 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::leb128::Leb128;
 use crate::source::BinarySource;
 use std::borrow::Cow;
-use std::convert::TryInto;
 use std::marker::PhantomData;
 use std::str;
 use wain_ast::*;

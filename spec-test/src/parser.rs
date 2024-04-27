@@ -634,7 +634,7 @@ impl<'s> Parse<'s> for Script<'s> {
         while !parser.is_done()? {
             commands.push(parser.parse()?);
         }
-        let start = commands.get(0).map(Command::start_pos).unwrap_or(0);
+        let start = commands.first().map(Command::start_pos).unwrap_or(0);
         Ok(Script { start, commands })
     }
 }
